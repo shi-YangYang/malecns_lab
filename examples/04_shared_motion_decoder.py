@@ -11,13 +11,11 @@ from pathlib import Path
 
 import numpy as np
 
-from cnsbridge.motor import (
+from cnsbridge.control import (
     DifferentialDriveAdapter,
     FlightCommandAdapter,
-    NeuralObservation,
-    NeuralSchema,
-    RidgeMotionDecoder,
 )
+from cnsbridge.learning import NeuralObservation, NeuralSchema, RidgeMotionDecoder
 
 
 def targets(rates: np.ndarray) -> np.ndarray:

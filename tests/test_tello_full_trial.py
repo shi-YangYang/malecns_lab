@@ -13,6 +13,8 @@ from unittest.mock import Mock, patch
 from test_tello_cruise_trial import CruiseWorker
 from test_tello_yaw_trial import FakeClock, FakeTello, trial
 
+from cnsbridge.experiments.tello import policy
+
 
 class FullWorker(CruiseWorker):
     """A slow model with four nonzero proposals and optional post-start stall."""
@@ -121,9 +123,9 @@ class FullTrialTests(unittest.TestCase):
         code, _ = self.run_full(drone, worker, "bad_duration", seconds=7)
         self.assertEqual(code, 1)
         self.assertNotIn("connect", [event[0] for event in drone.events])
-        trial.validate_duration(7, "cruise")
+        policy.validate_duration(7, "cruise")
         with self.assertRaises(ValueError):
-            trial.validate_duration(12, "cruise")
+            policy.validate_duration(12, "cruise")
 
         tello = Mock()
         with (patch.dict(sys.modules, {"djitellopy": SimpleNamespace(Tello=tello)}),
@@ -140,20 +142,20 @@ class FullTrialTests(unittest.TestCase):
     def test_all_axes_are_limited_and_invalid_or_landing_proposals_rejected(self):
         row = {"cmd_yaw": -2.0, "cmd_throttle": 2.0,
                "cmd_forward": 2.0, "cmd_lateral": -2.0, "escape": False}
-        self.assertEqual(trial.flight_rc(row, 80, "full"), (-10, 15, 10, -10))
-        self.assertEqual(trial.flight_rc(row, 120, "full"), (-10, 15, 0, -10))
-        self.assertEqual(trial.flight_rc(dict(row, cmd_throttle=-2.0), 50, "full"), (-10, 15, 0, -10))
-        self.assertEqual(trial.flight_rc(dict(row, cmd_forward=-2.0), 80, "full"), (-10, 0, 10, -10))
-        self.assertEqual(trial.flight_rc(dict(row, escape=True), 80, "full"), (-10, 0, 10, -10))
+        self.assertEqual(policy.flight_rc(row, 80, "full"), (-10, 15, 10, -10))
+        self.assertEqual(policy.flight_rc(row, 120, "full"), (-10, 15, 0, -10))
+        self.assertEqual(policy.flight_rc(dict(row, cmd_throttle=-2.0), 50, "full"), (-10, 15, 0, -10))
+        self.assertEqual(policy.flight_rc(dict(row, cmd_forward=-2.0), 80, "full"), (-10, 0, 10, -10))
+        self.assertEqual(policy.flight_rc(dict(row, escape=True), 80, "full"), (-10, 0, 10, -10))
         with self.assertRaises(RuntimeError):
-            trial.flight_rc(dict(row, land_requested=True), 80, "full")
+            policy.flight_rc(dict(row, land_requested=True), 80, "full")
         for axis in ("yaw", "throttle", "forward", "lateral"):
             for value in (float("nan"), float("inf"), -float("inf")):
                 with self.subTest(axis=axis, value=value), self.assertRaises(RuntimeError):
-                    trial.flight_rc(dict(row, **{f"cmd_{axis}": value}), 80, "full")
+                    policy.flight_rc(dict(row, **{f"cmd_{axis}": value}), 80, "full")
 
     def test_full_gate_requires_active_window_frame_and_latches_escape(self):
-        gate = trial.FullGate(10.0)
+        gate = policy.FullGate(10.0)
         axes = (-10, 15, 6, -6)
         self.assertEqual(gate.apply(axes, 11.8, 11.9), (0, 0, 0, 0))
         self.assertEqual(gate.apply(axes, 11.95, 12.05), (0, 0, 0, 0))
@@ -168,7 +170,7 @@ class FullTrialTests(unittest.TestCase):
         self.assertEqual(gate.apply(axes, 19.9, 20.0), (0, 0, 0, 0))
         self.assertEqual(gate.phase, "stopping")
         # An escape in the first active frame must latch before first actuation.
-        first_escape = trial.FullGate(10.0)
+        first_escape = policy.FullGate(10.0)
         first_escape.observe({"escape": True}, 12.0)
         self.assertEqual(first_escape.apply(axes, 12.0, 12.1), (-10, 0, 6, -6))
         first_escape.observe({"escape": False}, 12.2)

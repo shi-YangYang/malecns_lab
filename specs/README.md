@@ -25,3 +25,5 @@ Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写�
 ## 当前记录
 
 - [spec-001-agent-workflow](spec-001-agent-workflow/spec.md)：已有项目接入 Agent 开发流程。当前阶段以 [Plan](spec-001-agent-workflow/plan.md) 和[任务交接](../.ai/prompts/task-handoff.md)为准。
+
+- [spec-002-business-layout](spec-002-business-layout/spec.md)：按职责重构业务目录，当前状态见对应 Plan 与任务交接。

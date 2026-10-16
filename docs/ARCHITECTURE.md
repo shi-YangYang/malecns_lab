@@ -20,7 +20,7 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 
 适配器只转换数值，不发送硬件指令。新训练结果尚未接入 Tello 实飞。
 
-保留的 Tello 地面观察和飞行试验使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`tools/tello_shadow.py` 也观察这条旧链路，不能用于加载新候选模型。
+保留的 Tello 地面观察和飞行试验使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`experiments/tello/shadow.py` 也观察这条旧链路（原命令 `tools/tello_shadow.py` 保留），不能用于加载新候选模型。
 
 ## 模块职责
 
@@ -30,12 +30,22 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 | `brain/lif.py`、`brain/brain.py` | LIF 动力学、外部刺激、脉冲计数与发放率 |
 | `brain/synthetic.py` | MiniFly 合成网络，供离线检查 |
 | `senses/retina.py`、`senses/encoder.py` | 光流、亮度、膨胀特征及神经输入编码 |
-| `motor/neural.py` | 特征模式、观测、解码协议和岭回归基线 |
-| `motor/body.py`、`motor/body_adapters.py` | 统一运动目标、无人机与差速底盘转换 |
-| `motor/dataset.py` | 数据校验、合并与按场景评估 |
-| `motor/decoder.py`、`motor/command.py` | 既有人工读出和归一化飞行指令 |
-| `safety.py` | 独立的控制限制；`tools/tello_*.py` 直接调用 Tello SDK，试飞脚本另有监督逻辑 |
+| `learning/decoder.py` | 特征模式、观测、解码协议和岭回归基线 |
+| `control/body.py`、`control/adapters.py` | 统一运动目标、无人机与差速底盘转换 |
+| `learning/dataset.py` | 数据校验、合并与按场景评估 |
+| `control/legacy.py`、`control/command.py` | 既有人工读出和归一化飞行指令 |
+| `control/safety.py`、`control/calibration.py` | 独立控制限制与旧读出校准 |
+| `learning/prepare.py`、`learning/train.py` | 标注录像的神经特征提取、离线拟合与评估入口 |
+| `experiments/tello/check.py`、`hover.py`、`shadow.py`、`record.py` | SDK 检查、悬停、神经输出观察、地面录像 |
+| `experiments/tello/trial.py` | 试飞入口、实时监督和记录；只在主进程发送 RC |
+| `experiments/tello/policy.py` | 纯 RC 限幅、持续时间约束与巡航门控 |
+| `experiments/tello/worker.py` | 可由 spawn 导入的独立脑计算进程，不访问 SDK |
+| `experiments/tello/session.py` | 新鲜遥测、输入监督、起飞检查和降落清理 |
 | `drones/sim.py` | 离线仿真辅助，不用于宣称实飞效果 |
+
+依赖方向为 `learning → control`；控制契约不依赖学习流程。实验模块组合脑、感知与控制，七个 `tools/*.py` 仅调用真实模块的 `main`。旧 `motor.*`、`safety`、`calibrate` 显式导出相同对象，用于迁移兼容；包内实现和测试使用新路径。
+
+试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；从 `server/` 等目录用绝对工具路径启动不会改变资产位置。脑与视觉的四个来源哈希文件及数据格式均保持不变。
 
 这些模块位于 `src/cnsbridge/`。配置由 [defaults.yaml](../src/cnsbridge/defaults.yaml) 和 [configs](../configs/) 中的覆盖项组成；嵌套字典深度合并，`terms` 块整体替换。
 

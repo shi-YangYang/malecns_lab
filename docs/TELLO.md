@@ -1,5 +1,7 @@
 # Tello 实验
 
+实现位于 `cnsbridge.experiments.tello`，下列 `tools/` 命令保持兼容。试飞策略、脑计算子进程、会话清理分别在 `policy.py`、`worker.py`、`session.py`，不需要从其他脚本导入业务逻辑。
+
 当前实体平台是 Tello。电脑通过 Tello Wi-Fi 读取相机与遥测、发送 SDK 指令；飞机自身飞控负责姿态稳定。
 
 这里保留的是既有人工读出链路的地面检查与短时飞行工具。新训练流程输出的 `candidate.json` 尚未接入这些工具。

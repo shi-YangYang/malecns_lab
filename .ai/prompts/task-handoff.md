@@ -1,53 +1,45 @@
-# Task Handoff — spec-001-agent-workflow
+# Task Handoff — spec-002-business-layout
 
 ## Role
 
-Done。实施与独立验收已完成，AC1–AC6 均为 PASS，无未处理报告或返工任务。本文件随治理接入提交保存，不是待执行的验收指令。
+Done。业务重构与独立验收已完成，AC1–AC6 全部 PASS，无未处理报告或返工项。本文件随重构提交保存，不是待执行的实施或验收指令。
 
 ## Goal
 
-已有 CNSBridge 的 Agent 治理接入已完成。恢复上下文时读取本记录和验收报告，不重复实施或验收；后续新需求建立相应 Spec。
+业务代码已按现有职责迁入 control、learning、experiments/tello；原工具路径、Python 导入和实验行为保留。恢复时阅读结果，不重复实施；后续需求另建对应 Spec。
 
-## Context
+## Context / Project Mode
 
-用户要求依据其提供的通用 AGENTS.md 改造项目并 commit。既有业务结构、研究结论边界和实验资产已保留。基线提交为 `bf73319`；前序授权清理的 `Makefile`、`examples/01_poke_neurons.py`、`examples/03_replay_video.py` 已独立提交为 `658fd3c`。治理接入使用提交标题 `docs: 接入 CNSBridge 规格驱动开发流程`，具体哈希以 Git 历史为准。
-
-## Project Mode
-
-EXISTING；业务目录 `src/cnsbridge`；`multi_agent: AUTO`。
+EXISTING，基线 `8546f6c`。用户已明确“业务目录也要重构”；目录调整授权已落实。交付提交标题为 `refactor: 按控制学习与实验职责重组业务目录`，具体哈希以 Git 历史为准。
 
 ## Spec
 
-- [Spec](../../specs/spec-001-agent-workflow/spec.md)
-- [Plan](../../specs/spec-001-agent-workflow/plan.md)
-- [Implementation Report](../../specs/spec-001-agent-workflow/implementation.md)
-- [Acceptance Report](../../specs/spec-001-agent-workflow/acceptance.md)
-- [Decision 001](../decisions/001-adopt-agent-workflow.md)
+- [Spec](../../specs/spec-002-business-layout/spec.md)
+- [Plan](../../specs/spec-002-business-layout/plan.md)
+- [Decision 002](../decisions/002-business-layout.md)
+- [实施报告](../../specs/spec-002-business-layout/implementation.md)
+- [验收报告](../../specs/spec-002-business-layout/acceptance.md)
 
-## Relevant Files
+## Relevant Files / Scope
 
-[AGENTS.md](../../AGENTS.md)、[constitution](../../constitution/)、[Spec 模板](../../specs/_template/)、[项目规则](../rules/project.md)、[工作流](../workflows/)、[README](../../README.md)。事实依据为 [pyproject.toml](../../pyproject.toml)、[架构](../../docs/ARCHITECTURE.md)、[研究文档](../../docs/RESEARCH.md)。
-
-## Scope
-
-已完成根规范、constitution、Spec 模板、工作流、规则、决策与 README 导航；协调者已处理独立验收报告并更新完成状态。
+src/cnsbridge 的动作/学习/控制保护/校准实现，七个 tools、对应测试与直接文档。具体映射以 Spec 为准。一个实施 Agent 串行处理耦合迁移；主 Agent 管理本交接和 Spec 状态。
 
 ## Out of Scope
 
-业务代码、依赖、模型、数据契约、硬件操作、数据下载、训练、远程发布、额外清理与目录迁移。
+算法改进、飞行参数调整、模型训练、实机连接、实验资产、依赖更新和远程发布。
 
 ## Constraints
 
-本次为 S0，未运行 pytest、build、lint、typecheck 或飞行工具。`flydrones.*` 是持久化兼容标识，MiniFly 是合成网络，新岭回归读出尚未实飞，底盘尚无实体验证。
+遵循 AGENTS、constitution 和项目规则。四个神经/视觉哈希源保持字节不变；持久化格式和 SI/FLU 契约不变；旧脚本不承载重复实现。工作目录变化不能改变原项目配置/数据定位。
 
 ## Acceptance Criteria
 
-AC1–AC6 全部 PASS；证据、检查范围及未运行项目见验收报告。原规范完整保留、79 个链接目标和差异格式检查已经完成，无新改动或具体问题时不得重复验证。
+AC1–AC6：真实职责拆分、依赖与导入兼容、原断言回归、任意 cwd 下无硬件入口、数据与行为不变、文档及独立验收。
 
-## Commands
+## Commands / Validation
 
-无待执行验证命令。需要了解提交时可查看 `git log`，不将本任务恢复当作重新测试的理由。
+S3。`.venv/bin/python -m pytest -q` 已取得明确结果：144 passed、251 subtests passed；首次输出捕获不完整及按规则重跑的原因见实施报告。旧 schema 基准、四个哈希源字节和 trial/hover 函数 AST 已对照基线核验；独立审查及一次 git diff --check 通过。无待执行验证，不重复检查或连接硬件、下载、训练。
 
 ## Expected Output
 
-已产出独立 PASS 报告，无剩余问题。本次任务结束；收到新需求后按新任务范围推进。
+已产出独立 PASS 报告，协调者已处理全部结果并更新完成状态。任务闭环，无剩余问题；收到新需求后再推进新的工作。

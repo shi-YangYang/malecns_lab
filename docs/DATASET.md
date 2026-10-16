@@ -1,5 +1,7 @@
 # 地面录像、标注与离线训练
 
+地面采集实现位于 `cnsbridge.experiments.tello.record`；数据准备与训练位于 `cnsbridge.learning.prepare`、`cnsbridge.learning.train`。下列 `tools/` 命令保留为同一实现的启动入口。
+
 第一轮实验要回答：冻结连接组产生的神经活动，能否预测未见场景中的人工期望平面动作。这里评估标签预测，不评估飞行距离或避障。
 
 ```text

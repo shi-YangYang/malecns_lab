@@ -72,7 +72,7 @@ def cmd_inspect(args) -> int:
 
 
 def cmd_calibrate(args) -> int:
-    from .calibrate import calibrate
+    from .control.calibration import calibrate
 
     cfg = _cfg(args)
     brain = _brain(cfg)

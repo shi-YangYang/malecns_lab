@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from ..motor.command import FlightCommand
-from ..safety import Telemetry
+from ..control.command import FlightCommand
+from ..control.safety import Telemetry
 
 
 class Drone(ABC):

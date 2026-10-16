@@ -7,8 +7,8 @@ import unittest
 
 import numpy as np
 
-from cnsbridge.motor.dataset import MotionDataset, concatenate_datasets, evaluate_split
-from cnsbridge.motor.neural import NeuralSchema
+from cnsbridge.learning.dataset import MotionDataset, concatenate_datasets, evaluate_split
+from cnsbridge.learning.decoder import NeuralSchema
 
 
 class MotionDatasetTests(unittest.TestCase):

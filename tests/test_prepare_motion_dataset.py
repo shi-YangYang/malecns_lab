@@ -1,7 +1,6 @@
 """Offline video/label alignment and real MiniFly extraction; no Tello SDK."""
 
 import csv
-import importlib.util
 import io
 import json
 import unittest
@@ -14,22 +13,11 @@ import cv2
 import numpy as np
 
 from cnsbridge.config import default_config
-from cnsbridge.motor.dataset import MotionDataset
-from cnsbridge.motor.neural import RidgeMotionDecoder
+from cnsbridge.learning.dataset import MotionDataset
+from cnsbridge.learning.decoder import RidgeMotionDecoder
 
 
-ROOT = Path(__file__).parents[1]
-
-
-def load_tool(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "tools" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-prepare = load_tool("prepare_motion_dataset")
-train = load_tool("train_motion_decoder")
+from cnsbridge.learning import prepare, train
 
 
 class PreparationTests(unittest.TestCase):

@@ -11,7 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from test_tello_yaw_trial import FakeClock, FakeTello, FakeWorker, trial
-from cnsbridge.motor.decoder import MotorDecoder
+from cnsbridge.control.legacy import MotorDecoder
+
+from cnsbridge.experiments.tello import policy
 
 
 class CruiseWorker(FakeWorker):
@@ -138,12 +140,12 @@ class CruiseTrialTests(unittest.TestCase):
             with self.subTest(forward=forward, escape=escape, height=height):
                 row = {"cmd_yaw": -2.0, "cmd_throttle": throttle,
                        "cmd_forward": forward, "cmd_lateral": 1.0, "escape": escape}
-                self.assertEqual(trial.flight_rc(row, height, "cruise"),
+                self.assertEqual(policy.flight_rc(row, height, "cruise"),
                                  (0, expected_forward, expected_throttle, -10))
         for forward in (float("nan"), float("inf"), -float("inf")):
             for escape in (False, True):
                 with self.subTest(forward=forward, escape=escape), self.assertRaises(RuntimeError):
-                    trial.flight_rc({"cmd_yaw": 0, "cmd_throttle": 0,
+                    policy.flight_rc({"cmd_yaw": 0, "cmd_throttle": 0,
                                      "cmd_forward": forward, "escape": escape}, 80, "cruise")
 
     def test_actual_warmup_then_fixed_window_and_log_after_landing(self):
@@ -221,7 +223,7 @@ class CruiseTrialTests(unittest.TestCase):
         )
         for name, pattern, allowed in cases:
             with self.subTest(case=name):
-                gate = trial.CruiseGate(10.0)
+                gate = policy.CruiseGate(10.0)
                 for i in range(13):
                     yaw, throttle, escape = pattern(i)
                     gate.observe({"cmd_yaw": yaw, "cmd_throttle": throttle,
@@ -334,7 +336,7 @@ class CruiseTrialTests(unittest.TestCase):
         self.assertFalse(command.escape)
 
         def rc_forward(command):
-            return trial.flight_rc({"cmd_yaw": command.yaw, "cmd_throttle": command.throttle,
+            return policy.flight_rc({"cmd_yaw": command.yaw, "cmd_throttle": command.throttle,
                                     "cmd_forward": command.forward, "escape": command.escape},
                                    80, "cruise")[1]
 

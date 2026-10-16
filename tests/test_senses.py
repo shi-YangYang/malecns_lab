@@ -1,7 +1,7 @@
 import numpy as np
 
 from cnsbridge.drones import SimDrone
-from cnsbridge.motor import FlightCommand
+from cnsbridge.control import FlightCommand
 from cnsbridge.senses import Retina
 from cnsbridge.senses.retina import box_blur
 

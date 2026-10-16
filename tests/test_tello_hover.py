@@ -1,15 +1,11 @@
 """First-flight failure paths, using no SDK imports or aircraft connection."""
 
-import importlib.util
 import io
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location("tello_hover", Path(__file__).parents[1] / "tools" / "tello_hover.py")
-hover = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(hover)
+from cnsbridge.experiments.tello import hover as hover
 
 
 class FakeTello:

@@ -5,6 +5,8 @@
 ## 工程与资产
 
 - 业务包和 CLI 为 `cnsbridge`，源码位于 `src/cnsbridge/`；保留 `tools/`、`tests/`、`docs/`、`configs/`、`examples/` 的现有职责。
+- 用户已在 [Spec 002](../../specs/spec-002-business-layout/spec.md) 授权业务目录调整：规范实现归入 `control/`、`learning/`、`experiments/tello/`；`tools/` 与旧 `motor`、`safety`、`calibrate` 导入只保留兼容入口，不继续承载新业务逻辑。
+- 新业务代码直接依赖真实实现包，`learning` 可以使用 `control` 动作契约，`control` 不反向依赖 `learning`。已有 `brain/`、`senses/` 保留其模型职责；具体边界见 [Decision 002](../decisions/002-business-layout.md)。
 - `data/`、`logs/`、模型、录像和运行环境是本地资产，不因清理源码而删除，也不提交进 Git。需要删除或替换时依用户明确授权执行，既有授权不重复索要。
 - 保留 [LICENSE](../../LICENSE) 和 [THIRD_PARTY.md](../../THIRD_PARTY.md) 的上游版权、数据来源与许可说明。
 - `flydrones.*` 序列化标识是已有数据契约，不能作为旧品牌残留批量替换。变更模式、来源身份、特征顺序或格式版本须在对应 Spec 中明确兼容策略。

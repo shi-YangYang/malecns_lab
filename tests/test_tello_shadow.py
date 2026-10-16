@@ -1,7 +1,6 @@
 """Real MiniFly processing and ground-only session failures; no aircraft or SDK."""
 
 import csv
-import importlib.util
 import io
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -13,9 +12,7 @@ import numpy as np
 
 from cnsbridge.config import load_config
 
-spec = importlib.util.spec_from_file_location("tello_shadow", Path(__file__).parents[1] / "tools" / "tello_shadow.py")
-shadow = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(shadow)
+from cnsbridge.experiments.tello import shadow as shadow
 
 AXES = ("throttle", "yaw", "forward", "lateral")
 

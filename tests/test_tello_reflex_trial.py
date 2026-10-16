@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 from test_tello_yaw_trial import FakeClock, FakeTello, FakeWorker, trial
 
+from cnsbridge.experiments.tello import policy
+
 
 class ReflexWorker(FakeWorker):
     def __init__(self, drone, *, throttle=0.5, ground_throttle=0.0,
@@ -104,8 +106,8 @@ class ReflexTrialTests(unittest.TestCase):
             with self.subTest(throttle=throttle, height=height):
                 row = {"cmd_throttle": throttle, "cmd_yaw": -2.0,
                        "cmd_forward": 1.0, "cmd_lateral": 1.0}
-                self.assertEqual(trial.flight_rc(row, height, "reflex"), (0, 0, expected, -10))
-                self.assertEqual(trial.flight_rc(row, height, "yaw"), (0, 0, 0, -10))
+                self.assertEqual(policy.flight_rc(row, height, "reflex"), (0, 0, expected, -10))
+                self.assertEqual(policy.flight_rc(row, height, "yaw"), (0, 0, 0, -10))
 
     def test_reflex_reaches_sdk_but_priming_is_withheld_and_csv_follows_landing(self):
         for priming_only in (False, True):

@@ -12,9 +12,9 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from cnsbridge.motor.body import BODY_AXES, BodyVelocity
-from cnsbridge.motor.body_adapters import DifferentialDriveAdapter, FlightCommandAdapter
-from cnsbridge.motor.neural import NeuralObservation, NeuralSchema, RidgeMotionDecoder
+from cnsbridge.control.body import BODY_AXES, BodyVelocity
+from cnsbridge.control.adapters import DifferentialDriveAdapter, FlightCommandAdapter
+from cnsbridge.learning.decoder import NeuralObservation, NeuralSchema, RidgeMotionDecoder
 
 
 class NeuralDecoderTests(unittest.TestCase):

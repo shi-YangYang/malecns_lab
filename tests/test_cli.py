@@ -1,7 +1,7 @@
 import pytest
 
 from cnsbridge.brain import Brain, build_minifly
-from cnsbridge.calibrate import fit_readout, record_responses
+from cnsbridge.control.calibration import fit_readout, record_responses
 from cnsbridge.cli import build_parser, main
 from cnsbridge.config import load_config
 

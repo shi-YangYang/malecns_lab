@@ -1,7 +1,6 @@
 """Ground recording contract and failure checks using fake SDK/video objects."""
 
 import csv
-import importlib.util
 import io
 import json
 import unittest
@@ -11,9 +10,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-spec = importlib.util.spec_from_file_location("tello_record_dataset", Path(__file__).parents[1] / "tools" / "tello_record_dataset.py")
-recorder = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(recorder)
+from cnsbridge.experiments.tello import record as recorder
 
 
 class Clock:

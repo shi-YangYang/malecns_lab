@@ -13,10 +13,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-# Keep the script importable by the spawn child in the process-boundary test.
-TOOLS = Path(__file__).parents[1] / "tools"
-sys.path.insert(0, str(TOOLS))
-import tello_yaw_trial as trial
+from cnsbridge.experiments.tello import policy, trial
+from cnsbridge.experiments.tello.worker import BrainProcess
 
 
 class FakeClock:
@@ -168,10 +166,10 @@ class YawTrialTests(unittest.TestCase):
     def test_yaw_is_finite_and_clamped(self):
         for proposal, expected in ((-2, -10), (-0.1, -6), (0, 0), (0.1, 6), (2, 10)):
             with self.subTest(proposal=proposal):
-                self.assertEqual(trial.yaw_rc(proposal), expected)
+                self.assertEqual(policy.yaw_rc(proposal), expected)
         for proposal in (float("nan"), float("inf"), -float("inf")):
             with self.subTest(proposal=proposal), self.assertRaises(RuntimeError):
-                trial.yaw_rc(proposal)
+                policy.yaw_rc(proposal)
 
     def test_no_takeoff_flag_does_not_load_sdk_or_start_brain(self):
         with (patch.dict(sys.modules, {"djitellopy": None}),
@@ -282,7 +280,7 @@ class BrainProcessTests(unittest.TestCase):
     def test_real_spawn_returns_finite_result_and_stops(self):
         cfg = trial.load_config(trial.PROJECT / "configs" / "tello.yaml",
                                 overrides={"brain": {"source": "minifly"}})
-        worker = trial.BrainProcess(cfg)
+        worker = BrainProcess(cfg)
         try:
             frame = np.zeros((72, 96, 3), dtype=np.uint8)
             job = worker.submit(frame, {"bat": 80, "h": 0, "yaw": 0}, 0.0, reset=True)
