@@ -78,6 +78,10 @@ cnsbridge build-brain --out data/malecns_brain.npz
 - [Tello 实验](docs/TELLO.md)：地面检查、已有实飞工具及结果边界。
 - [研究与数据](docs/RESEARCH.md)：建模假设、连接组构建、对照实验与引用。
 
+## 开发流程
+
+开发工作遵循 [AGENTS.md](AGENTS.md)。项目目标与技术约束见 [constitution](constitution/)，任务规格与验收记录见 [specs](specs/README.md)，当前进展见[任务交接](.ai/prompts/task-handoff.md)。
+
 ## 来源与许可
 
 本项目基于 [SpikeCalls/FlyDrones](https://github.com/SpikeCalls/FlyDrones) 的代码发展，当前整理聚焦可训练解码器和可复现的实验流程。原代码采用 [MIT 许可](LICENSE)，原版权声明保留。MaleCNS 数据采用独立许可；来源和引用说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
