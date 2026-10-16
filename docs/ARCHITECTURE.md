@@ -1,0 +1,85 @@
+# 架构与接口
+
+CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段冻结连接组与神经元动力学，只训练输出读出。
+
+## 两条实验链路
+
+新训练链路：
+
+```text
+地面录像 → Retina → InputEncoder → Brain → 神经活动数据
+                                   人工期望动作 ─┘
+                                          ↓
+                                RidgeMotionDecoder
+                                          ↓
+                                   BodyVelocity
+                                  ↙            ↘
+                     FlightCommandAdapter   DifferentialDriveAdapter
+                         FlightCommand             WheelSpeeds
+```
+
+适配器只转换数值，不发送硬件指令。新训练结果尚未接入 Tello 实飞。
+
+保留的 Tello 地面观察和飞行试验使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`tools/tello_shadow.py` 也观察这条旧链路，不能用于加载新候选模型。
+
+## 模块职责
+
+| 模块 | 职责 |
+|---|---|
+| `brain/connectome.py` | 连接矩阵、细胞类型与侧别、群组选择、MaleCNS 构建与保存 |
+| `brain/lif.py`、`brain/brain.py` | LIF 动力学、外部刺激、脉冲计数与发放率 |
+| `brain/synthetic.py` | MiniFly 合成网络，供离线检查 |
+| `senses/retina.py`、`senses/encoder.py` | 光流、亮度、膨胀特征及神经输入编码 |
+| `motor/neural.py` | 特征模式、观测、解码协议和岭回归基线 |
+| `motor/body.py`、`motor/body_adapters.py` | 统一运动目标、无人机与差速底盘转换 |
+| `motor/dataset.py` | 数据校验、合并与按场景评估 |
+| `motor/decoder.py`、`motor/command.py` | 既有人工读出和归一化飞行指令 |
+| `safety.py` | 独立的控制限制；`tools/tello_*.py` 直接调用 Tello SDK，试飞脚本另有监督逻辑 |
+| `drones/sim.py` | 离线仿真辅助，不用于宣称实飞效果 |
+
+这些模块位于 `src/cnsbridge/`。配置由 [defaults.yaml](../src/cnsbridge/defaults.yaml) 和 [configs](../configs/) 中的覆盖项组成；嵌套字典深度合并，`terms` 块整体替换。
+
+## 统一运动表示
+
+`BodyVelocity` 的轴顺序固定为 `(vx, vy, vz, wx, wy, wz)`，采用右手机身坐标系 FLU：
+
+| 分量 | 正方向 | 单位 |
+|---|---|---|
+| `vx`、`vy`、`vz` | 前、左、上 | m/s |
+| `wx`、`wy`、`wz` | 绕对应轴的右手旋转；正 `wz` 为左转 | rad/s |
+
+这些是期望速度，不是实测速度。第一轮数据实验只学习 `vx` 和 `wz`，其余轴标为零。
+
+无人机适配器支持三个平移轴和偏航；差速底盘支持前进和偏航。不支持的非零分量会报错。适配结果包含限幅后的目标与饱和轴。差速底盘在轮速超限时等比例缩放双轮，保持目标曲率。
+
+既有 `FlightCommand` 的横移、偏航正方向是右，适配器负责转换符号。Tello 的归一化 RC 并非精确速度接口：速度比例需实测标定，并与实际发送 RC 的缩放比例一致。实体底盘仍需轮速闭环和设备监督。共同的数学接口本身不证明跨设备迁移。
+
+## 可训练解码器
+
+`NeuralSchema` 固定特征名称与顺序、来源标识、模拟发放率窗口。特征可以是群组均值或单神经元发放率。来源标识应包含真实图版本和特征定义；名字一致不能代替来源核验。
+
+`NeuralObservation` 校验缺失特征、非有限值和负发放率。`RidgeMotionDecoder` 拒绝不匹配的模式；模型文件还记录输出轴、坐标系和单位。
+
+```python
+model = RidgeMotionDecoder.fit(schema, rates_hz, targets)
+target = model.decode(observation)
+model.save("candidate.json")
+```
+
+`rates_hz` 为 N×D，`targets` 为 N×6。标准化只拟合训练数据。岭回归是可替换的线性基线，不改变连接组突触，也不保证解决现有转向响应问题；其他学习方法可实现 `MotionDecoder` 协议。
+
+先按场景或独立运行划分数据，再拟合。期望动作来自独立任务规则或教师；旧控制器 RC 不是正确性标签，实际运动速度也不自动等于期望动作。详见 [数据集流程](DATASET.md)。
+
+模型和数据保存拒绝覆盖。为保持既有文件兼容，序列化格式中的 `flydrones.*` 标识保留；Python 导入和命令行入口使用 `cnsbridge`。
+
+## 仿真时间与运行时间
+
+连接矩阵为 CSC 格式 `W[post, pre]`。仿真累加实际放电神经元的突触输入，以环形缓冲区处理延迟，并更新膜电位和不应期。高密度放电时可切换为稀疏矩阵乘法。
+
+模型推进时间与实际计算耗时不同。离线视频按每帧 50 ms 推进模型；全量网络的实际处理速度需要单独测量。不能从控制线程的发包频率推断模型更新频率。
+
+## 扩展与验证
+
+增加设备时实现运动目标转换及实际设备控制；增加学习方法时保留特征模式和动作单位契约。实体能力验证需在接口检查之后单独完成。
+
+检查范围与改动匹配：文档修改检查差异，局部逻辑运行对应测试，模块交互运行相关子系统检查。不要仅为覆盖实现而重复扩大验证，也不要让测试启动实机运动。
