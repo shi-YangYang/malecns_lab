@@ -20,7 +20,7 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 
 适配器只转换数值，不发送硬件指令。新训练结果尚未接入 Tello 实飞。
 
-保留的 Tello 地面观察和飞行试验使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`experiments/tello/shadow.py` 也观察这条旧链路（原命令 `tools/tello_shadow.py` 保留），不能用于加载新候选模型。
+保留的 Tello 地面观察和飞行试验使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`python -m cnsbridge.experiments.tello.shadow` 也观察这条旧链路，不能用于加载新候选模型。
 
 ## 模块职责
 
@@ -43,9 +43,9 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 | `experiments/tello/session.py` | 新鲜遥测、输入监督、起飞检查和降落清理 |
 | `drones/sim.py` | 离线仿真辅助，不用于宣称实飞效果 |
 
-依赖方向为 `learning → control`；控制契约不依赖学习流程。实验模块组合脑、感知与控制，七个 `tools/*.py` 仅调用真实模块的 `main`。旧 `motor.*`、`safety`、`calibrate` 显式导出相同对象，用于迁移兼容；包内实现和测试使用新路径。
+依赖方向为 `learning → control`；控制契约不依赖学习流程。实验模块组合脑、感知与控制；包内实现和测试直接导入上述模块，实验与学习命令通过 `python -m` 运行对应模块。
 
-试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；从 `server/` 等目录用绝对工具路径启动不会改变资产位置。脑与视觉的四个来源哈希文件及数据格式均保持不变。
+试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；使用 editable 安装环境从其他目录以 `python -m` 启动不会改变资产位置。脑与视觉的四个来源哈希文件及数据格式均保持不变。
 
 这些模块位于 `src/cnsbridge/`。配置由 [defaults.yaml](../src/cnsbridge/defaults.yaml) 和 [configs](../configs/) 中的覆盖项组成；嵌套字典深度合并，`terms` 块整体替换。
 

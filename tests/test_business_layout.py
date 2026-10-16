@@ -1,6 +1,5 @@
-"""Migration contracts for callers, source assets and hardware-free entry points."""
+"""Contracts for package entry points, source assets and offline imports."""
 
-import importlib
 import json
 import os
 from pathlib import Path
@@ -14,29 +13,15 @@ from cnsbridge.learning.prepare import RecordingBrain
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = (
-    "tello_check", "tello_hover", "tello_shadow", "tello_yaw_trial",
-    "tello_record_dataset", "prepare_motion_dataset", "train_motion_decoder",
+ENTRY_MODULES = (
+    "cnsbridge.experiments.tello.check",
+    "cnsbridge.experiments.tello.hover",
+    "cnsbridge.experiments.tello.shadow",
+    "cnsbridge.experiments.tello.trial",
+    "cnsbridge.experiments.tello.record",
+    "cnsbridge.learning.prepare",
+    "cnsbridge.learning.train",
 )
-
-
-@pytest.mark.parametrize(("old", "new", "names"), [
-    ("motor", "control", "BodyVelocity DifferentialDriveAdapter FlightCommand FlightCommandAdapter MotorDecoder"),
-    ("motor", "learning", "MotionDecoder NeuralObservation NeuralSchema RidgeMotionDecoder"),
-    ("motor.body", "control.body", "BODY_AXES BODY_FRAME BODY_UNITS BodyVelocity"),
-    ("motor.command", "control.command", "AXES FlightCommand"),
-    ("motor.body_adapters", "control.adapters", "Adaptation WheelSpeeds FlightCommandAdapter DifferentialDriveAdapter"),
-    ("motor.decoder", "control.legacy", "MotorDecoder"),
-    ("motor.neural", "learning.decoder", "MotionDecoder NeuralObservation NeuralSchema RidgeMotionDecoder"),
-    ("motor.dataset", "learning.dataset", "MotionDataset concatenate_datasets evaluate_split"),
-    ("safety", "control.safety", "Telemetry SafetyGovernor"),
-    ("calibrate", "control.calibration", "STIMULI record_responses fit_readout calibrate"),
-])
-def test_old_imports_are_the_same_implementation(old, new, names):
-    legacy = importlib.import_module(f"cnsbridge.{old}")
-    canonical = importlib.import_module(f"cnsbridge.{new}")
-    for name in names.split():
-        assert getattr(legacy, name) is getattr(canonical, name)
 
 
 @pytest.fixture
@@ -66,23 +51,25 @@ def run_offline(args, offline_environment):
     return result.stdout
 
 
-@pytest.mark.parametrize("tool", TOOLS)
-def test_old_tool_help_from_another_cwd(tool, offline_environment):
-    output = run_offline([str(ROOT / "tools" / f"{tool}.py"), "--help"], offline_environment)
+@pytest.mark.parametrize("module", ENTRY_MODULES)
+def test_module_help_from_another_cwd(module, offline_environment):
+    output = run_offline(["-m", module, "--help"], offline_environment)
     assert "usage:" in output
 
 
-@pytest.mark.parametrize("tool", ("tello_hover", "tello_yaw_trial"))
-def test_old_flight_entry_requires_takeoff_before_sdk_import(tool, offline_environment):
-    output = run_offline([str(ROOT / "tools" / f"{tool}.py")], offline_environment)
+@pytest.mark.parametrize("module", (
+    "cnsbridge.experiments.tello.hover", "cnsbridge.experiments.tello.trial",
+))
+def test_flight_entry_requires_takeoff_before_sdk_import(module, offline_environment):
+    output = run_offline(["-m", module], offline_environment)
     assert "No connection made. --takeoff is required to fly." in output
 
 
 def test_cli_and_low_level_imports_stay_offline(offline_environment):
     assert "build-brain" in run_offline(["-m", "cnsbridge", "--help"], offline_environment)
     run_offline(["-c", (
-        "import cnsbridge.control, cnsbridge.learning, cnsbridge.motor; "
-        "import cnsbridge.safety, cnsbridge.calibrate"
+        "import cnsbridge.control, cnsbridge.learning; "
+        "import cnsbridge.control.safety, cnsbridge.control.calibration"
     )], offline_environment)
 
 

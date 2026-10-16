@@ -1,6 +1,6 @@
 # 技术栈与工程约束
 
-项目模式为 `EXISTING`，业务代码目录为 `src/cnsbridge/`。沿用 Python src layout；按用户授权的 [Spec 002](../specs/spec-002-business-layout/spec.md) 将包内业务按控制、学习和 Tello 实验重组。
+项目模式为 `EXISTING`，业务代码目录为 `src/cnsbridge/`。沿用 Python src layout；按用户授权的 [Spec 002](../specs/spec-002-business-layout/spec.md) 将包内业务按控制、学习和 Tello 实验重组，并按 [Spec 003](../specs/spec-003-remove-compat/spec.md) 统一为新的模块入口。
 
 ## 已有技术
 
@@ -24,8 +24,8 @@
 - [control/](../src/cnsbridge/control/)：动作契约、设备数值适配、旧读出/校准、控制限制。
 - [learning/](../src/cnsbridge/learning/)：新解码器、数据准备、离线拟合与评估；依赖 control，反向依赖不允许。
 - [experiments/tello/](../src/cnsbridge/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
-- [drones/](../src/cnsbridge/drones/)：离线仿真；[motor/](../src/cnsbridge/motor/)、`safety.py`、`calibrate.py`：旧导入兼容。详细边界见[架构](../docs/ARCHITECTURE.md)。
-- [tools/](../tools/)：原七条命令的兼容启动入口，不放新业务实现。包内模块也可用 `python -m cnsbridge.experiments.tello.trial --help` 等方式调用。
+- [drones/](../src/cnsbridge/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
+- 实验与学习命令直接运行包内模块，例如 `python -m cnsbridge.experiments.tello.trial --help` 和 `python -m cnsbridge.learning.train --help`。
 - [configs/](../configs/) 与包内 [defaults.yaml](../src/cnsbridge/defaults.yaml)：实验参数。
 - [tests/](../tests/)、[docs/](../docs/)、[examples/](../examples/)：测试、使用与研究文档、离线示例。
 - `data/`、`logs/`、`readout*.json`、`.venv/`：本地实验资产及环境，按 [.gitignore](../.gitignore) 留在源码提交之外。

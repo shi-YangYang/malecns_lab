@@ -27,7 +27,7 @@ source .venv/bin/activate
 python -m pip install -e '.[tello,data,dev]'
 ```
 
-项目名称、Python 包和命令行入口为 `CNSBridge` / `cnsbridge`。本地文件夹仍可叫 `FlyDrones`；已有脚本文件名与数据路径保持可用。更新后需重新执行上面的安装命令。
+项目名称、Python 包和命令行入口为 `CNSBridge` / `cnsbridge`。本地文件夹仍可叫 `FlyDrones`，实验与学习工具通过 `python -m` 调用。更新后需重新执行上面的安装命令。
 
 先运行不连接设备的合成示例：
 
@@ -42,7 +42,7 @@ python examples/04_shared_motion_decoder.py
 将 Tello 固定在地面，关闭手机 App 和其他 Tello 程序，让电脑连接 Tello Wi-Fi：
 
 ```bash
-python tools/tello_record_dataset.py --scene-id room_a --seconds 30
+python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
 ```
 
 该工具读取遥测、保存视频与时间戳，不起飞、不发送运动指令。先检查一段录像，再按实际画面标注期望动作。完整步骤见 [数据集流程](docs/DATASET.md)。
@@ -66,15 +66,13 @@ cnsbridge build-brain --out data/malecns_brain.npz
 | `src/cnsbridge/learning/` | 可训练解码器、数据准备、训练与按场景评估 |
 | `src/cnsbridge/experiments/tello/` | 地面采集、观察、受限试飞及会话清理 |
 | `src/cnsbridge/drones/` | 离线仿真辅助 |
-| `src/cnsbridge/motor/`、`safety.py`、`calibrate.py` | 旧 Python 导入的兼容入口 |
-| `tools/` | 原七条命令的薄启动入口，业务实现位于包内 |
 | `configs/` | Tello 和 MaleCNS 配置 |
 | `tests/` | 对应模块的检查 |
 | `data/`、`logs/` | 本地数据、模型与实验记录，不作为源码提交 |
 
-新代码从 `cnsbridge.control`、`cnsbridge.learning` 和 `cnsbridge.experiments.tello` 导入。原 `tools/*.py` 命令与参数继续可用；例如 `python -m cnsbridge.learning.prepare --help` 可以直接访问同一实现。源码工作区的 `configs/`、`data/`、`logs/` 路径不随启动目录变化，设备实验仍使用当前 checkout 的 editable 安装。
+代码从 `cnsbridge.control`、`cnsbridge.learning` 和 `cnsbridge.experiments.tello` 导入。实验与学习入口直接运行包内模块，例如 `python -m cnsbridge.learning.prepare --help`。源码工作区的 `configs/`、`data/`、`logs/` 路径不随启动目录变化，设备实验仍使用当前 checkout 的 editable 安装。
 
-保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；新解码器使用 `tools/train_motion_decoder.py`。
+保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；新解码器使用 `python -m cnsbridge.learning.train`。
 
 ## 文档
 

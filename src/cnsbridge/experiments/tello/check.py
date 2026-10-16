@@ -1,7 +1,7 @@
 """Ground-only Tello SDK and video check. Never sends flight or motor commands.
 
 Close the phone app, join the Tello Wi-Fi from this computer, then run:
-    .venv/bin/python tools/tello_check.py
+    .venv/bin/python -m cnsbridge.experiments.tello.check
 
 Keep the aircraft on the ground. Press Q or Escape to end the video preview.
 """

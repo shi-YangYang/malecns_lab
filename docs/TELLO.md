@@ -1,6 +1,6 @@
 # Tello 实验
 
-实现位于 `cnsbridge.experiments.tello`，下列 `tools/` 命令保持兼容。试飞策略、脑计算子进程、会话清理分别在 `policy.py`、`worker.py`、`session.py`，不需要从其他脚本导入业务逻辑。
+实现位于 `cnsbridge.experiments.tello`，下列命令通过 `python -m` 直接运行包内模块。试飞策略、脑计算子进程、会话清理分别在 `policy.py`、`worker.py`、`session.py`，不需要从其他脚本导入业务逻辑。
 
 当前实体平台是 Tello。电脑通过 Tello Wi-Fi 读取相机与遥测、发送 SDK 指令；飞机自身飞控负责姿态稳定。
 
@@ -11,7 +11,7 @@
 关闭手机 App 和其他 Tello 程序，将飞机放在地面，电脑连接 Tello Wi-Fi。在项目目录激活 Python 环境后运行：
 
 ```bash
-python tools/tello_check.py --seconds 20
+python -m cnsbridge.experiments.tello.check --seconds 20
 ```
 
 该步骤检查 SDK、遥测与视频，不起飞、不发送 RC。只有 `SDK OK` 和可见的实时画面，才说明连接与解码正常；不能据此判断控制算法有效。
@@ -21,7 +21,7 @@ python tools/tello_check.py --seconds 20
 ## 地面观察旧读出
 
 ```bash
-python tools/tello_shadow.py \
+python -m cnsbridge.experiments.tello.shadow \
   --brain data/malecns_brain.npz \
   --config configs/malecns.yaml --seconds 30
 ```
@@ -30,17 +30,17 @@ python tools/tello_shadow.py \
 
 该工具使用 `MotorDecoder`，不加载新岭回归候选模型。左右移动小物体未引起明显偏航，可能涉及视觉特征、神经活动或读出映射，不能仅通过加大 RC 推断已解决。
 
-采集新解码器的数据使用 [地面数据流程](DATASET.md) 中的 `tello_record_dataset.py`，不要将 shadow 日志的旧指令直接当成动作标签。
+采集新解码器的数据使用 [地面数据流程](DATASET.md) 中的 `python -m cnsbridge.experiments.tello.record`，不要将 shadow 日志的旧指令直接当成动作标签。
 
 ## 既有短时飞行工具
 
-先查看本机脚本的参数和限制：
+先查看试飞入口的参数和限制：
 
 ```bash
-python tools/tello_yaw_trial.py --help
+python -m cnsbridge.experiments.tello.trial --help
 ```
 
-实飞需要显式 `--takeoff`。脚本名保留兼容，现已包含多种模式：
+实飞需要显式 `--takeoff`。试飞入口包含多种模式：
 
 | 模式 | 作用 | 实验边界 |
 |---|---|---|

@@ -1,6 +1,6 @@
 # 地面录像、标注与离线训练
 
-地面采集实现位于 `cnsbridge.experiments.tello.record`；数据准备与训练位于 `cnsbridge.learning.prepare`、`cnsbridge.learning.train`。下列 `tools/` 命令保留为同一实现的启动入口。
+地面采集实现位于 `cnsbridge.experiments.tello.record`；数据准备与训练位于 `cnsbridge.learning.prepare`、`cnsbridge.learning.train`。以下命令通过 `python -m` 直接运行这些模块。
 
 第一轮实验要回答：冻结连接组产生的神经活动，能否预测未见场景中的人工期望平面动作。这里评估标签预测，不评估飞行距离或避障。
 
@@ -15,7 +15,7 @@ Tello 地面录像与时间戳 → 人工期望动作
 在项目目录激活环境。关闭手机 App 和其他 Tello 程序，电脑连接 Tello Wi-Fi，飞机固定在地面：
 
 ```bash
-python tools/tello_record_dataset.py --scene-id room_a --seconds 30
+python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
 ```
 
 Q 或 Escape 结束预览。录制只连接 SDK、读取视频与遥测，不加载大脑、不发送运动指令。终端会输出 `data/ground_recordings/` 下的新会话目录：
@@ -61,7 +61,7 @@ start_s,end_s,vx_mps,wz_rad_s,reason
 标注后，无需连接 Tello：
 
 ```bash
-python tools/prepare_motion_dataset.py data/ground_recordings/SESSION \
+python -m cnsbridge.learning.prepare data/ground_recordings/SESSION \
   --out data/ground_recordings/SESSION/features.npz
 ```
 
@@ -78,7 +78,7 @@ python tools/prepare_motion_dataset.py data/ground_recordings/SESSION \
 以下目录代表已经录制、标注并提取特征的会话：
 
 ```bash
-python tools/train_motion_decoder.py \
+python -m cnsbridge.learning.train \
   data/ground_recordings/RUN_A/features.npz \
   data/ground_recordings/RUN_B/features.npz \
   data/ground_recordings/RUN_C/features.npz \
