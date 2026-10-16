@@ -2,7 +2,9 @@
 
 地面采集实现位于 `cnsbridge.experiments.tello.record`；数据准备与训练位于 `cnsbridge.learning.prepare`、`cnsbridge.learning.train`。以下命令通过 `python -m` 直接运行这些模块。
 
-第一轮实验要回答：冻结连接组产生的神经活动，能否预测未见场景中的人工期望平面动作。这里评估标签预测，不评估飞行距离或避障。
+当前先做 [神经活动诊断](NEURAL_ACTIVITY.md)：检查不同刺激下的编码输入和神经放电，不需要填写 `labels.csv`。其中的 `stimuli.csv` 只描述画面刺激，不能代替本文的期望动作标签。
+
+确认信号后，本文的训练实验要回答：冻结连接组产生的神经活动，能否预测未见场景中的人工期望平面动作。这里评估标签预测，不评估飞行距离或避障。
 
 ```text
 Tello 地面录像与时间戳 → 人工期望动作

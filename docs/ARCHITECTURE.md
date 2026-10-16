@@ -2,7 +2,17 @@
 
 CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段冻结连接组与神经元动力学，只训练输出读出。
 
-## 两条实验链路
+## 信号诊断与控制链路
+
+先用独立的离线诊断链路观察网络：
+
+```text
+地面录像 → Retina → InputEncoder → Brain → 输入驱动 / 群组活动 / 采样神经元活动
+                                             ↓
+                     刺激时间区间 → 描述性比较、曲线和热图
+```
+
+`python -m cnsbridge.diagnostics.activity` 复用地面会话读取与视觉、神经仿真，逐帧推进全部录像，不读取期望动作标签，不实例化 `MotorDecoder` 或连接硬件。输入编码驱动 Hz 与实际放电 Hz 分开保存；缺失群组不作为静默群组统计。详见 [神经活动诊断](NEURAL_ACTIVITY.md)。
 
 新训练链路：
 
@@ -30,6 +40,7 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 | `brain/lif.py`、`brain/brain.py` | LIF 动力学、外部刺激、脉冲计数与发放率 |
 | `brain/synthetic.py` | MiniFly 合成网络，供离线检查 |
 | `senses/retina.py`、`senses/encoder.py` | 光流、亮度、膨胀特征及神经输入编码 |
+| `diagnostics/` | 离线活动记录、刺激区间校验与比较、静态图表和本地报告 |
 | `learning/decoder.py` | 特征模式、观测、解码协议和岭回归基线 |
 | `control/body.py`、`control/adapters.py` | 统一运动目标、无人机与差速底盘转换 |
 | `learning/dataset.py` | 数据校验、合并与按场景评估 |
@@ -43,7 +54,7 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 | `experiments/tello/session.py` | 新鲜遥测、输入监督、起飞检查和降落清理 |
 | `drones/sim.py` | 离线仿真辅助，不用于宣称实飞效果 |
 
-依赖方向为 `learning → control`；控制契约不依赖学习流程。实验模块组合脑、感知与控制；包内实现和测试直接导入上述模块，实验与学习命令通过 `python -m` 运行对应模块。
+依赖方向为 `learning → control`；控制契约不依赖学习流程。诊断复用 `learning.prepare.read_recording` 读取会话以及 `brain`、`senses` 产生信号，不执行训练或动作解码。实验模块组合脑、感知与控制；包内实现和测试直接导入上述模块，实验、诊断与学习命令通过 `python -m` 运行对应模块。
 
 试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；使用 editable 安装环境从其他目录以 `python -m` 启动不会改变资产位置。脑与视觉的四个来源哈希文件及数据格式均保持不变。
 
@@ -81,6 +92,8 @@ model.save("candidate.json")
 先按场景或独立运行划分数据，再拟合。期望动作来自独立任务规则或教师；旧控制器 RC 不是正确性标签，实际运动速度也不自动等于期望动作。详见 [数据集流程](DATASET.md)。
 
 模型和数据保存拒绝覆盖。为保持既有文件兼容，序列化格式中的 `flydrones.*` 标识保留；Python 导入和命令行入口使用 `cnsbridge`。
+
+诊断输出使用独立的 `cnsbridge.neural_activity` version 1 格式，保存网络和源码来源、有效配置、群组与采样索引，以及三种时间轴；不是训练数据格式。`stimuli.csv` 与动作 `labels.csv` 的职责相互独立。
 
 ## 仿真时间与运行时间
 

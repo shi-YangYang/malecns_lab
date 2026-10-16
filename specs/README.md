@@ -28,3 +28,4 @@ Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写�
 
 - [spec-002-business-layout](spec-002-business-layout/spec.md)：按职责重构业务目录，当前状态见对应 Plan 与任务交接。
 - [spec-003-remove-compat](spec-003-remove-compat/spec.md)：删除旧兼容层，统一新模块入口与文档命令。
+- [spec-004-neural-activity](spec-004-neural-activity/spec.md)：离线神经活动记录、刺激比较与可视化。

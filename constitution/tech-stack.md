@@ -9,7 +9,7 @@
 | 语言与运行时 | Python >= 3.11；项目声明以 `pyproject.toml` 为准 |
 | 构建与安装 | setuptools >= 68、wheel，构建后端 `setuptools.build_meta`；pip 与 venv |
 | 核心依赖 | NumPy >= 1.24、SciPy >= 1.10、PyYAML >= 6.0 |
-| 可选依赖 | `vision`：OpenCV；`data`：pandas、pyarrow；`tello`：DJITelloPy、OpenCV；`dev`：pytest、Ruff |
+| 可选依赖 | `vision`：OpenCV；`analysis`：OpenCV、Matplotlib；`data`：pandas、pyarrow；`tello`：DJITelloPy、OpenCV；`dev`：pytest、Ruff |
 | CLI | `cnsbridge` → `cnsbridge.cli:main`；download、build-brain、inspect、calibrate、bench |
 | 测试与检查 | pytest，测试目录 `tests/`；Ruff 配置在 `pyproject.toml`，目标 Python 3.11，行长 130 |
 | 数据与持久化 | 本地连接组、NPZ、JSON、CSV 和视频；没有数据库服务 |
@@ -23,6 +23,7 @@
 - [src/cnsbridge/brain/](../src/cnsbridge/brain/) 与 [senses/](../src/cnsbridge/senses/)：连接组仿真与视觉编码，来源哈希文件保持原位。
 - [control/](../src/cnsbridge/control/)：动作契约、设备数值适配、旧读出/校准、控制限制。
 - [learning/](../src/cnsbridge/learning/)：新解码器、数据准备、离线拟合与评估；依赖 control，反向依赖不允许。
+- [diagnostics/](../src/cnsbridge/diagnostics/)：离线录像重放、模拟神经活动记录与刺激比较；不产生设备动作。见 [Decision 004](../.ai/decisions/004-neural-activity.md)。
 - [experiments/tello/](../src/cnsbridge/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
 - [drones/](../src/cnsbridge/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
 - 实验与学习命令直接运行包内模块，例如 `python -m cnsbridge.experiments.tello.trial --help` 和 `python -m cnsbridge.learning.train --help`。
