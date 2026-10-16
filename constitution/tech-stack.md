@@ -20,7 +20,7 @@
 
 ## 路径与职责
 
-- [src/cnsbridge/brain/](../src/cnsbridge/brain/) 与 [senses/](../src/cnsbridge/senses/)：连接组仿真与视觉编码，来源哈希文件保持原位。
+- [src/cnsbridge/brain/](../src/cnsbridge/brain/) 与 [senses/](../src/cnsbridge/senses/)：连接组仿真与视觉编码，仅加载真实连接组 NPZ。移除合成网络后的源码身份变化见 [Decision 005](../.ai/decisions/005-remove-minifly.md)，不伪装为旧特征来源。
 - [control/](../src/cnsbridge/control/)：动作契约、设备数值适配、旧读出/校准、控制限制。
 - [learning/](../src/cnsbridge/learning/)：新解码器、数据准备、离线拟合与评估；依赖 control，反向依赖不允许。
 - [diagnostics/](../src/cnsbridge/diagnostics/)：离线录像重放、模拟神经活动记录与刺激比较；不产生设备动作。见 [Decision 004](../.ai/decisions/004-neural-activity.md)。

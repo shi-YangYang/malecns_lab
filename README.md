@@ -16,7 +16,8 @@
 - 已有共享运动表示、岭回归解码器、设备适配器，以及地面录像、人工标注、离线特征提取和按场景评估的流程。
 - 已有离线神经活动诊断：重放同一段录像，查看编码输入、群组放电和采样神经元热图，按刺激区间比较；不需要期望动作标签。
 - 新解码器尚未完成真实数据上的有效性验证，也尚未接入实飞。差速底盘适配器只有离线数学转换，尚未连接实体底盘。
-- 尚未证明可靠避障、连接组优于直接视觉控制，或跨设备迁移。MiniFly 是合成测试网络，不能作为真实果蝇连接组的实验结果。
+- 所有脑处理入口使用真实 MaleCNS 数据构建的连接组模型；缺少模型时直接报错，不切换到替代网络。这里运行的是连接组驱动的神经仿真，不是活体果蝇大脑。
+- 尚未证明可靠避障、连接组优于直接视觉控制，或跨设备迁移。真实录像下的神经响应仍需实际采集和分析。
 
 ## 安装
 
@@ -30,15 +31,16 @@ python -m pip install -e '.[tello,data,analysis,dev]'
 
 项目名称、Python 包和命令行入口为 `CNSBridge` / `cnsbridge`。本地文件夹仍可叫 `FlyDrones`，实验与学习工具通过 `python -m` 调用。更新后需重新执行上面的安装命令。
 
-先运行不连接设备的合成示例：
+## 先观察神经信号
+
+先准备真实连接组，已有模型时跳过下载和构建：
 
 ```bash
-python examples/04_shared_motion_decoder.py
+cnsbridge download malecns
+cnsbridge build-brain --out data/malecns_brain.npz
 ```
 
-它训练一个读出，并将同一个运动目标转换为无人机指令与差速轮速。示例数据、速度标定和底盘尺寸都是演示值，结果只验证接口。
-
-## 先观察神经信号
+已有 `data/malecns_brain.npz` 时可以直接使用。所有脑入口默认从源码工程根解析该文件；配置中的真实模型缺失时会停止，不回退到其他网络。过滤条件和来源见 [研究与数据](docs/RESEARCH.md)。
 
 将 Tello 固定在地面，关闭手机 App 和其他 Tello 程序，让电脑连接 Tello Wi-Fi：
 
@@ -47,15 +49,6 @@ python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
 ```
 
 该工具读取遥测、保存视频与时间戳，不起飞、不发送运动指令。固定相机，按静止、横向移动、正前方靠近的顺序展示刺激。具体 30 秒安排见 [神经活动诊断](docs/NEURAL_ACTIVITY.md)。
-
-下载和构建真实连接组：
-
-```bash
-cnsbridge download malecns
-cnsbridge build-brain --out data/malecns_brain.npz
-```
-
-已有 `data/malecns_brain.npz` 时可以直接使用。过滤条件和来源见 [研究与数据](docs/RESEARCH.md)。
 
 录完后断开 Tello 也能分析。将 `SESSION` 换成采集命令输出的会话目录名，使用新的输出目录：
 
@@ -70,7 +63,7 @@ python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
 
 | 路径 | 用途 |
 |---|---|
-| `src/cnsbridge/brain/` | 连接组、LIF 仿真、MiniFly 测试网络 |
+| `src/cnsbridge/brain/` | 真实连接组加载、构建与 LIF 仿真 |
 | `src/cnsbridge/senses/` | 图像运动特征与神经输入编码 |
 | `src/cnsbridge/diagnostics/` | 离线神经活动记录、刺激比较与静态图表 |
 | `src/cnsbridge/control/` | 运动目标、设备数值适配、旧读出、校准与控制限制 |

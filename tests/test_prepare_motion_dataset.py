@@ -1,4 +1,4 @@
-"""Offline video/label alignment and real MiniFly extraction; no Tello SDK."""
+"""Video/label alignment with deterministic unit-only counts; no flight model."""
 
 import csv
 import io
@@ -14,16 +14,31 @@ import numpy as np
 
 from cnsbridge.config import default_config
 from cnsbridge.learning.dataset import MotionDataset
-from cnsbridge.learning.decoder import RidgeMotionDecoder
+from cnsbridge.learning.decoder import NeuralSchema, RidgeMotionDecoder
 
 
 from cnsbridge.learning import prepare, train
+
+
+class CountingReplay:
+    """Known numerical rows isolate video alignment from neural dynamics."""
+
+    def __init__(self, _cfg, _readout_level="neuron"):
+        self.schema = NeuralSchema(("count_a", "count_b"), "unit_alignment_counts", 50.0)
+        self.visual_names = tuple(f"pixel_feature_{index}" for index in range(2 * 7 * 6 * 8 + 3))
+        self.provenance = {"kind": "unit_test_counts_not_neural_model"}
+        self.frames = 0
+
+    def step(self, _frame):
+        self.frames += 1
+        return np.array([self.frames, self.frames % 3], dtype=float), np.full(len(self.visual_names), self.frames)
 
 
 class PreparationTests(unittest.TestCase):
     def setUp(self):
         self.directory = Path(self.enterContext(TemporaryDirectory()))
         self.enterContext(redirect_stdout(io.StringIO()))
+        self.enterContext(patch.object(prepare, "RecordingBrain", CountingReplay))
 
     def labels(self, directory, rows):
         path = directory / "labels.csv"
@@ -99,9 +114,9 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(dataset.visual_features.shape[1], 2 * 7 * 6 * 8 + 3)
         self.assertTrue(np.isfinite(dataset.rates_hz).all())
         self.assertAlmostEqual(dataset.metadata["cadence"]["host_gap_p95_ms"], 100)
-        cfg = default_config()
-        cfg["brain"]["bias"]["DNg02_L"] += 1
-        self.assertNotEqual(prepare.RecordingBrain(cfg).schema.source_id, dataset.schema.source_id)
+        # Rows retain their causal frame positions even when earlier frames are
+        # unlabelled; this is an alignment assertion, not a neural response.
+        np.testing.assert_array_equal(dataset.rates_hz[:, 0], [4, 5, 6, 9, 10, 11, 12])
 
     def test_missing_labels_fail_before_loading_brain_and_short_video_rejected(self):
         directory = self.recording()

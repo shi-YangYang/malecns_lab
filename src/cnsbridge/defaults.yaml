@@ -1,10 +1,10 @@
 # CNSBridge default configuration.
 # Every value can be overridden by a YAML file passed with --config.
 # Group "types" are regular expressions matched against the connectome cell type.
-# The same names work for MiniFly (synthetic) and MaleCNS v1.0 (real data).
+# Groups select neurons from the real MaleCNS v1.0 connectome.
 
 brain:
-  source: minifly          # "minifly" or path to a .npz built by `cnsbridge build-brain`
+  source: data/malecns_brain.npz  # Real connectome built by `cnsbridge build-brain`
   seed: 0
   lif:                     # Shiu et al. 2024 parameters; dt raised to 0.5 ms for real time
     v_rest: -52.0

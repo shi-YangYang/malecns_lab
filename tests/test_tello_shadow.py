@@ -1,4 +1,4 @@
-"""Real MiniFly processing and ground-only session failures; no aircraft or SDK."""
+"""Real graph shadow processing and mocked ground-session failure boundaries."""
 
 import csv
 import io
@@ -9,8 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import numpy as np
-
-from cnsbridge.config import load_config
+import pytest
 
 from cnsbridge.experiments.tello import shadow as shadow
 
@@ -90,33 +89,9 @@ def session_clock():
 
 class ShadowTests(unittest.TestCase):
     def make_engine(self):
-        cfg = load_config(
-            Path(__file__).parents[1] / "configs" / "tello.yaml",
-            overrides={"brain": {"source": "minifly"}, "decoder": {"settle_s": 0.1}},
-        )
-        return shadow.ShadowBrain(cfg), cfg
+        return KnownRowEngine(), None
 
-    def test_real_minifly_produces_finite_bounded_axes(self):
-        engine, cfg = self.make_engine()
-        rows = [engine.step(changing_frame(i), {"h": 0, "bat": 80, "yaw": i}, i * 0.2) for i in range(8)]
-
-        self.assertGreater(engine.brain.n_neurons, 0)
-        self.assertIn("settling", {row["phase"] for row in rows})
-        self.assertIn("ready", {row["phase"] for row in rows})
-        for row in rows:
-            for axis in AXES:
-                raw, cmd = row[f"raw_{axis}"], row[f"cmd_{axis}"]
-                self.assertTrue(np.isfinite(raw))
-                self.assertTrue(np.isfinite(cmd))
-                self.assertLessEqual(abs(raw), 1.0)
-                self.assertLessEqual(abs(cmd), cfg["safety"][f"max_{axis}"] + 1e-9)
-            self.assertTrue(np.isfinite(row["processing_ms"]))
-            self.assertGreaterEqual(row["processing_ms"], 0)
-            for group in cfg["outputs"]:
-                self.assertTrue(np.isfinite(row[f"rate_{group}"]))
-        self.assertAlmostEqual(rows[-1]["model_t_s"] - rows[0]["model_t_s"], (len(rows) - 1) / engine.hz)
-
-    def test_session_records_real_brain_without_motion(self):
+    def test_session_records_known_rows_without_motion(self):
         engine, _ = self.make_engine()
         drone = GroundTello()
         with TemporaryDirectory() as directory, session_clock():
@@ -169,6 +144,36 @@ class ShadowTests(unittest.TestCase):
             self.assertEqual(log_path.read_text(encoding="utf-8"), existing)
         self.assertNotEqual(result, 0)
         self.assertEqual(drone.forbidden, [])
+
+
+class KnownRowEngine:
+    """Session-only stub; it never represents a neural model."""
+
+    hz = 20
+    dt = .05
+
+    def step(self, _frame, _state, t):
+        return {"phase": "ready", "processing_ms": 0.0, "t_s": t,
+                **{f"cmd_{axis}": 0.0 for axis in AXES}}
+
+
+def test_real_malecns_shadow_produces_finite_bounded_axes(malecns_graph, malecns_config):
+    readout = Path(malecns_config["decoder"]["readout_file"])
+    if not readout.is_file():
+        pytest.skip("Real MaleCNS readout is absent")
+    with patch.object(shadow, "load_connectome", return_value=malecns_graph):
+        engine = shadow.ShadowBrain(malecns_config)
+    rows = [engine.step(changing_frame(i), {"h": 0, "bat": 80, "yaw": 0}, i * .05) for i in range(2)]
+    assert engine.brain.n_neurons == 166700
+    for row in rows:
+        for axis in AXES:
+            assert np.isfinite(row[f"raw_{axis}"])
+            assert abs(row[f"raw_{axis}"]) <= 1
+            assert np.isfinite(row[f"cmd_{axis}"])
+            assert abs(row[f"cmd_{axis}"]) <= malecns_config["safety"][f"max_{axis}"] + 1e-9
+        assert np.isfinite(row["processing_ms"])
+        assert all(np.isfinite(row[f"rate_{group}"]) for group in malecns_config["outputs"])
+    assert rows[-1]["model_t_s"] - rows[0]["model_t_s"] == 1 / engine.hz
 
 
 if __name__ == "__main__":

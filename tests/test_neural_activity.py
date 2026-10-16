@@ -7,7 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
-from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -23,7 +22,7 @@ def recording(directory, frames=6, movie_frames=None):
     directory.mkdir(parents=True)
     manifest = {
         "format": "flydrones.ground_recording", "version": 1,
-        "session_id": directory.name, "scene_id": "synthetic_checkerboard_software_test",
+        "session_id": directory.name, "scene_id": "unit_video_alignment_fixture",
         "ground_only": True, "video": "video.avi", "frames": "frames.csv", "labels": "labels.csv",
         "nominal_fps": 20, "timing": "host_dequeue", "label_timebase": "video_playback",
     }
@@ -147,7 +146,7 @@ def test_video_mismatch_removes_output(tmp_path, movie_frames):
     output = tmp_path / "report"
     with patch.object(collector, "load_connectome", side_effect=lambda _: tiny_graph()), pytest.warns(UserWarning):
         with patch.object(activity, "analyze", wraps=activity.analyze), pytest.raises(ValueError, match="Video"):
-            activity.analyze(session, output, brain="minifly", max_neurons=2)
+            activity.analyze(session, output, max_neurons=2)
     assert not output.exists()
 
 
@@ -192,35 +191,38 @@ runpy.run_module('cnsbridge.diagnostics.activity', run_name='__main__')
     assert not (tmp_path / "output").exists()
 
 
-def test_minifly_cli_exports_repeatable_ground_video_without_action_labels():
-    # Retain this single synthetic E2E artifact for coordinator image inspection.
-    project = Path(__file__).resolve().parents[1]
-    demo = project / "data" / "neural_activity_demo" / f"synthetic_{uuid4().hex[:10]}"
-    session = recording(demo / "synthetic_session", frames=60)
-    annotations = write_stimuli(session / "stimuli.csv", [(0, 1, "baseline"), (1, 2, "checkerboard_right"), (2, 3, "baseline")])
-    output = demo / "report"
-    assert activity.main([str(session), "--out-dir", str(output), "--brain", "minifly", "--stimuli", str(annotations),
-                          "--max-neurons", "16", "--warmup-s", ".2"]) == 0
+def test_real_malecns_cli_exports_unit_video_without_action_labels(tmp_path, malecns_graph):
+    # The entire real graph processes six artificial video frames solely to
+    # check the pipeline. These are not recorded stimuli or biological evidence.
+    # Pytest owns all artifacts; no demo remains in the project's data folder.
+    session = recording(tmp_path / "unit_session", frames=6)
+    annotations = write_stimuli(session / "stimuli.csv", [(0, .1, "baseline"), (.1, .2, "unit_interval"),
+                                                         (.2, .3, "baseline")])
+    output = tmp_path / "report"
+    with patch.object(collector, "load_connectome", return_value=malecns_graph):
+        assert activity.main([str(session), "--out-dir", str(output), "--stimuli", str(annotations),
+                              "--max-neurons", "16", "--warmup-s", ".05"]) == 0
     report = json.loads((output / "report.json").read_text())
-    assert report["frame_count"] == 60
-    assert report["session"]["scene_id"] == "synthetic_checkerboard_software_test"
+    assert report["frame_count"] == 6
+    assert report["session"]["scene_id"] == "unit_video_alignment_fixture"
+    assert report["neural_provenance"]["network"]["name"] == "malecns-v1.0"
+    assert report["neural_provenance"]["network"]["neurons"] == 166700
     assert report["neural_provenance"]["sampling"]["max_neurons"] == 16
     assert "motor" not in report["units"]
     assert len(report["sources"]["video.avi"]["sha256"]) == 64
     with np.load(output / "activity.npz", allow_pickle=False) as saved:
         assert all(saved[name].dtype.kind != "O" for name in saved.files)
-        assert saved["neuron_counts"].shape == (60, 16)
+        assert saved["neuron_counts"].shape == (6, 16)
         np.testing.assert_allclose(saved["neuron_rates_hz"], saved["neuron_counts"] * 20)
-        np.testing.assert_allclose(saved["video_start_s"], np.arange(60) / 20)
-        np.testing.assert_allclose(saved["host_dequeue_s"], np.arange(60) * .12)
-        np.testing.assert_allclose(saved["simulation_start_ms"], np.arange(60) * 50)
-        np.testing.assert_allclose(saved["simulation_end_ms"], np.arange(1, 61) * 50)
+        np.testing.assert_allclose(saved["video_start_s"], np.arange(6) / 20)
+        np.testing.assert_allclose(saved["host_dequeue_s"], np.arange(6) * .12)
+        np.testing.assert_allclose(saved["simulation_start_ms"], np.arange(6) * 50)
+        np.testing.assert_allclose(saved["simulation_end_ms"], np.arange(1, 7) * 50)
         assert json.loads(saved["metadata_json"].item())["format"] == "cnsbridge.neural_activity"
     expected = ("activity.npz", "report.json", "group_rates.csv", "stimulus_summary.csv", "input_drive.png", "group_rates.png",
                 "neuron_heatmap.png", "index.html")
     assert all((output / name).stat().st_size > 0 for name in expected)
     before = (output / "report.json").read_bytes()
     with pytest.raises(FileExistsError):
-        activity.analyze(session, output, brain="minifly")
+        activity.analyze(session, output)
     assert (output / "report.json").read_bytes() == before
-    print(f"SYNTHETIC VISUAL QA: {output}")

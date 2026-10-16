@@ -230,17 +230,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session", type=Path, help="New recorder's session directory")
     parser.add_argument("--config", type=Path, default=PROJECT / "configs" / "malecns.yaml")
-    parser.add_argument("--brain", help="Override brain source, e.g. minifly for a software smoke test")
+    parser.add_argument("--brain", help="Override the real connectome .npz path")
     parser.add_argument("--readout-level", choices=("neuron", "group"), default="neuron")
     parser.add_argument("--out", type=Path, required=True, help="New dataset .npz; never overwrites")
     args = parser.parse_args(argv)
     if args.out.exists():
         parser.error("--out already exists")
-    cfg = load_config(args.config)
-    source = args.brain or cfg["brain"]["source"]
-    if str(source).lower() not in ("minifly", "synthetic", "mini"):
-        source = str((PROJECT / source).resolve())
-    cfg["brain"]["source"] = source
+    overrides = {"brain": {"source": args.brain}} if args.brain else None
+    cfg = load_config(args.config, overrides=overrides)
     try:
         print("OFFLINE REPLAY | frozen brain; manual labels; no aircraft connection", flush=True)
         dataset = extract_session(args.session, cfg, readout_level=args.readout_level,

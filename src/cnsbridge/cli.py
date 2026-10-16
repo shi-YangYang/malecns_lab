@@ -12,11 +12,12 @@ from . import __version__
 
 def _cfg(args):
     from .config import load_config
+    from .paths import source_project_root
 
     over = {}
     if getattr(args, "brain", None):
         over.setdefault("brain", {})["source"] = args.brain
-    return load_config(getattr(args, "config", None), over)
+    return load_config(getattr(args, "config", None) or source_project_root() / "configs" / "malecns.yaml", over)
 
 
 def _brain(cfg):
@@ -29,8 +30,9 @@ def _brain(cfg):
 
 def cmd_download(args) -> int:
     from .data import download_malecns
+    from .paths import project_asset_path
 
-    download_malecns(args.dir)
+    download_malecns(project_asset_path(args.dir))
     print("next: cnsbridge build-brain")
     return 0
 
@@ -38,9 +40,10 @@ def cmd_download(args) -> int:
 def cmd_build(args) -> int:
     from .brain import Brain, build_malecns
     from .config import load_config
+    from .paths import project_asset_path
 
     cfg = load_config(args.config)
-    c = build_malecns(args.data_dir, min_synapses=args.min_synapses)
+    c = build_malecns(project_asset_path(args.data_dir), min_synapses=args.min_synapses)
     print(c.summary())
     b = Brain(c, cfg)  # resolves groups and warns about empty ones
     for name in list(b.input_specs) + list(b.output_specs):
@@ -48,7 +51,7 @@ def cmd_build(args) -> int:
     if args.core_hops:
         c = c.sensorimotor_core(args.core_hops, args.max_neurons)
         print("sensorimotor core:", c.summary())
-    out = c.save(args.out)
+    out = c.save(project_asset_path(args.out))
     print(f"saved -> {out}\ninspect it: cnsbridge inspect --brain {out}")
     return 0
 
@@ -73,10 +76,11 @@ def cmd_inspect(args) -> int:
 
 def cmd_calibrate(args) -> int:
     from .control.calibration import calibrate
+    from .paths import project_asset_path
 
     cfg = _cfg(args)
     brain = _brain(cfg)
-    calibrate(brain, cfg, args.out)
+    calibrate(brain, cfg, project_asset_path(args.out))
     return 0
 
 
@@ -105,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def common(sp):
         sp.add_argument("--config", help="YAML file overriding defaults")
-        sp.add_argument("--brain", help="minifly or path to a built .npz brain")
+        sp.add_argument("--brain", help="Path to a real connectome .npz; defaults to the MaleCNS asset")
 
     sp = sub.add_parser("download", help="download connectome data")
     sp.add_argument("dataset", choices=["malecns"])
@@ -128,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("calibrate", help="fit the descending-neuron read-out for this brain")
     common(sp)
-    sp.add_argument("--out", default="readout.json")
+    sp.add_argument("--out", default="readout_malecns.json")
     sp.set_defaults(func=cmd_calibrate)
 
     sp = sub.add_parser("bench", help="measure simulation speed")

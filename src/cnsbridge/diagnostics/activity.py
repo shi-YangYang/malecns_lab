@@ -27,11 +27,8 @@ def analyze(session, out_dir, *, config=None, brain=None, stimuli=None, max_neur
     from .reporting import write_report
 
     project = source_project_root()
-    cfg = load_config(config or project / "configs" / "malecns.yaml")
-    source = brain or cfg["brain"]["source"]
-    if str(source).lower() not in ("minifly", "synthetic", "mini"):
-        source = str((project / source).resolve()) if not Path(source).is_absolute() else str(source)
-    cfg["brain"]["source"] = source
+    overrides = {"brain": {"source": brain}} if brain else None
+    cfg = load_config(config or project / "configs" / "malecns.yaml", overrides=overrides)
     out_dir.mkdir(parents=True, exist_ok=False)
     try:
         arrays, metadata = collect(Path(session), cfg, stimuli_path=stimuli, max_neurons=max_neurons,
@@ -51,7 +48,7 @@ def main(argv=None):
     parser.add_argument("--out-dir", type=Path, required=True, help="New output directory; never overwrites")
     parser.add_argument("--stimuli", type=Path, help="Optional start_s,end_s,stimulus CSV in AVI playback seconds")
     parser.add_argument("--config", type=Path, help="Config YAML; defaults to configs/malecns.yaml in the source checkout")
-    parser.add_argument("--brain", help="Override network source; minifly is only a synthetic software check")
+    parser.add_argument("--brain", help="Override the real connectome .npz path")
     parser.add_argument("--max-neurons", type=int, default=128, help="Bounded neuron sample, 1–4096 (default: 128)")
     parser.add_argument("--warmup-s", type=float, default=2.0, help="Exclude initial playback seconds from comparisons only (default: 2)")
     args = parser.parse_args(argv)

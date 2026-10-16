@@ -3,6 +3,12 @@
 from pathlib import Path
 
 
+def project_asset_path(path: str | Path) -> Path:
+    """Resolve model and calibration assets against the source checkout."""
+    path = Path(path).expanduser()
+    return (path if path.is_absolute() else source_project_root() / path).resolve()
+
+
 def source_project_root() -> Path:
     """Require the repository's src layout; never guess a site-packages root.
 

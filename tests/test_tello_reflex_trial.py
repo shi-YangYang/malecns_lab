@@ -1,4 +1,4 @@
-"""Offline boundaries for MiniFly's added vertical reflex control."""
+"""Offline boundaries for vertical reflex control using fake device proposals."""
 
 import csv
 import io

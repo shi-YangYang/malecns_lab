@@ -80,12 +80,13 @@ class FullTrialTests(unittest.TestCase):
         self.assertEqual(cfg["control"]["hz"], 20)
         self.assertEqual(cfg["decoder"]["cruise"], 0.25)
         for mode in ("yaw", "reflex", "cruise", "forward-check"):
-            with self.subTest(mode=mode):
+            with self.subTest(mode=mode), patch.object(Path, "is_file", return_value=True):
                 old_cfg = trial.trial_config(mode)
-                self.assertEqual(old_cfg["brain"]["source"], "minifly")
+                self.assertEqual(Path(old_cfg["brain"]["source"]), trial.PROJECT / "data" / "malecns_brain.npz")
+                self.assertEqual(Path(old_cfg["decoder"]["readout_file"]), trial.PROJECT / "readout_malecns.json")
                 self.assertEqual(old_cfg["decoder"]["cruise"], 0.25 if mode == "cruise" else 0.0)
 
-    def test_missing_assets_do_not_fall_back_to_minifly(self):
+    def test_missing_assets_fail_before_worker_or_sdk(self):
         project = Path(self.directory)
         (project / "configs").mkdir()
         (project / "data").mkdir()
@@ -101,9 +102,12 @@ class FullTrialTests(unittest.TestCase):
                 brain.touch()
                 readout.write_text(readout_text, encoding="utf-8")
                 missing.unlink()
-                with patch.object(trial, "PROJECT", project), self.assertRaises((FileNotFoundError, ValueError)):
+                with (patch.object(trial, "PROJECT", project),
+                      patch("cnsbridge.paths.source_project_root", return_value=project),
+                      self.assertRaises((FileNotFoundError, ValueError))):
                     trial.trial_config("full")
                 with (patch.object(trial, "PROJECT", project),
+                      patch("cnsbridge.paths.source_project_root", return_value=project),
                       patch.dict(sys.modules, {"djitellopy": None}),
                       patch.object(trial, "BrainProcess", side_effect=AssertionError("Must not start")),
                       self.assertRaises(SystemExit) as raised):

@@ -21,12 +21,12 @@ python -m cnsbridge.experiments.tello.check --seconds 20
 ## 地面观察旧读出
 
 ```bash
-python -m cnsbridge.experiments.tello.shadow \
-  --brain data/malecns_brain.npz \
-  --config configs/malecns.yaml --seconds 30
+python -m cnsbridge.experiments.tello.shadow --seconds 30
 ```
 
-等待 `SETTLING` 完成后再改变画面。终端的 `NOT SENT` 表示只记录算法输出，没有发给飞机。未指定 `--brain` 时默认使用 MiniFly；记录结果时必须区分网络来源。
+默认使用 `configs/malecns.yaml` 中的真实 MaleCNS 模型和校准读出；相对模型及校准路径按源码工程根解析，缺少所需资产时直接停止。等待 `SETTLING` 完成后再改变画面。终端的 `NOT SENT` 表示只记录算法输出，没有发给飞机。
+
+已有 `readout_malecns.json` 时无需重新校准。缺少它时，在模型准备完成后运行 `cnsbridge calibrate --brain data/malecns_brain.npz --out readout_malecns.json`，为旧读出生成校准资产；该校准不训练新的通用解码器，也不证明实机效果。
 
 该工具使用 `MotorDecoder`，不加载新岭回归候选模型。左右移动小物体未引起明显偏航，可能涉及视觉特征、神经活动或读出映射，不能仅通过加大 RC 推断已解决。
 
@@ -44,11 +44,13 @@ python -m cnsbridge.experiments.tello.trial --help
 
 | 模式 | 作用 | 实验边界 |
 |---|---|---|
-| `yaw` | MiniFly 偏航 | 其他运动轴关闭 |
-| `reflex` | MiniFly 偏航与升降 | 不前进、不横移 |
+| `yaw` | MaleCNS 偏航 | 其他运动轴关闭 |
+| `reflex` | MaleCNS 偏航与升降 | 不前进、不横移 |
 | `forward-check` | 短时固定前进 RC | 检查设备响应，不验证神经控制或避障 |
-| `cruise` | MiniFly 受限巡航 | 有前进时间窗、静止段及监督限制 |
+| `cruise` | MaleCNS 受限巡航 | 有前进时间窗、静止段及监督限制 |
 | `full` | 全量 MaleCNS 旧读出 | “全量”指连接组来源，仍受限幅、门控和结束条件限制 |
+
+所有脑驱动模式加载 `configs/malecns.yaml` 的真实连接组与校准读出；模型或校准文件缺失时会报错，不切换到替代网络。`forward-check` 的固定指令仅用于设备探针。统一模型来源不扩大各模式的动作权限，也不代表这些模式已经用当前配置完成实机复测。
 
 `full` 当前总时长 12 秒：前 2 秒零 RC、中间最多 8 秒允许控制、末尾 2 秒零 RC；模型准备状态、数据时效或停止条件可能缩短实际动作时间。它不意味着每个轴都会有非零输出，也不意味着自主导航。
 

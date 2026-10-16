@@ -323,12 +323,16 @@ class CruiseTrialTests(unittest.TestCase):
                 landed_at = next(event[1] for event in drone.events if event[0] == "land")
                 self.assertLess(landed_at - drone.takeoff_at, 3.2)
 
-    def test_real_decoder_cruises_brakes_and_escapes_with_selected_config(self):
-        for mode in ("yaw", "reflex"):
-            self.assertEqual(trial.trial_config(mode)["decoder"]["cruise"], 0.0)
-        cfg = trial.trial_config("cruise")
-        self.assertEqual(cfg["brain"]["source"], "minifly")
+    def test_decoder_rules_from_known_rates_preserve_cruise_and_brake_caps(self):
+        with patch.object(Path, "is_file", return_value=True):
+            for mode in ("yaw", "reflex"):
+                self.assertEqual(trial.trial_config(mode)["decoder"]["cruise"], 0.0)
+            cfg = trial.trial_config("cruise")
+        self.assertEqual(Path(cfg["brain"]["source"]), trial.PROJECT / "data" / "malecns_brain.npz")
         self.assertEqual(cfg["decoder"]["cruise"], 0.25)
+        # Isolate arithmetic rules with a known zero baseline; this does not
+        # assert the real graph produces any chosen directional response.
+        cfg["decoder"]["readout_file"] = None
         decoder = MotorDecoder(cfg)
         for _ in range(80):
             command = decoder.update({}, 0.05)

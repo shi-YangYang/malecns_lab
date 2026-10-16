@@ -2,7 +2,7 @@
 
 先回答一个问题：同一段视频出现不同运动刺激时，视觉编码和模拟神经放电怎样变化。工具直接运行 `Retina → InputEncoder → Brain`，保存信号、曲线和热图，不经过旧动作读出，不控制无人机。
 
-这里记录的是连接组模型的模拟活动，不是活体果蝇的神经测量。第一版读取本项目地面录制工具生成的会话目录，暂不导入单独的 MP4 或手机视频。
+这里记录的是基于真实 MaleCNS 连接组的模拟活动，不是活体果蝇的神经测量。第一版读取本项目地面录制工具生成的会话目录，暂不导入单独的 MP4 或手机视频。
 
 ## 1. 准备环境和录像
 
@@ -43,7 +43,7 @@ python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
 
 ## 3. 先看未标注的信号
 
-默认使用 `configs/malecns.yaml`，需要已有的 `data/malecns_brain.npz`。下载与构建步骤见 [README](../README.md)。把 `SESSION` 替换为录制命令输出的实际会话目录名：
+默认使用 `configs/malecns.yaml`，需要已有的 `data/malecns_brain.npz`。相对模型路径按源码工程根解析；模型缺失时直接报错，不使用替代网络。诊断不执行动作读出，因此不需要旧读出的校准文件。下载与构建步骤见 [README](../README.md)。把 `SESSION` 替换为录制命令输出的实际会话目录名：
 
 ```bash
 python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
@@ -112,14 +112,7 @@ python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
 - `--config PATH`：加载另一份配置。有效配置包含人工 bias，比较时应核对来源和配置一致。
 - `--max-neurons 128`：热图与原始单神经元活动的采样上限，允许 1–4096，默认 128；群组平均仍使用该组全部神经元。
 - `--warmup-s 2`：用于刺激统计的暖机时间，默认 2 秒；不影响全部帧的因果重放。
-- `--brain minifly`：用合成网络检查读取、记录和出图流程；不代表真实 MaleCNS 的反应。
-
-例如，仅检查软件流程时：
-
-```bash
-python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
-  --brain minifly --out-dir data/neural_activity/minifly_check
-```
+- `--brain PATH`：明确指定另一份真实连接组 NPZ；需要记录其数据版本和过滤条件，不能将不同图的结果混为同一实验。
 
 每次运行初始化新的视觉与网络状态，按固定 50 ms 窗口重放 BGR 视频，偏航角速度输入为零。固定相机、近似视觉编码、人工 bias 和配置 seed 都会影响响应。默认 MaleCNS 配置包含对 DNg02 群组的人工持续驱动，不能把静止时的持续放电全部归因于视频；录像重放不能替代飞行中的视觉与身体反馈。
 

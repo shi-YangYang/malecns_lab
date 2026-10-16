@@ -3,7 +3,8 @@
 Never sends takeoff, landing, emergency or RC commands. Keep the aircraft on
 the ground. Close the phone app and other Tello scripts before running.
 Keep the scene still during SETTLING, then move an object in front of the
-camera. Q / Escape closes the preview. Default brain: synthetic MiniFly.
+camera. Q / Escape closes the preview. Uses the real MaleCNS connectome and
+its calibrated readout by default.
 """
 
 from __future__ import annotations
@@ -180,8 +181,8 @@ def run_shadow(drone, engine: ShadowBrain, seconds: float, log_path: Path, previ
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=int, default=30, help="ground test duration, 5-60 seconds")
-    parser.add_argument("--brain", default="minifly", help="minifly or path to a connectome .npz")
-    parser.add_argument("--config", default=str(PROJECT / "configs" / "tello.yaml"))
+    parser.add_argument("--brain", help="Override the real connectome .npz path")
+    parser.add_argument("--config", default=str(PROJECT / "configs" / "malecns.yaml"))
     parser.add_argument("--log", type=Path, help="new CSV file; default: project logs/tello_shadow_TIMESTAMP.csv")
     parser.add_argument("--no-window", action="store_true", help="print outputs and save CSV without a preview")
     args = parser.parse_args(argv)
@@ -190,9 +191,13 @@ def main(argv=None) -> int:
     stamp = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d_%H%M%S_%f")
     log_path = (args.log or PROJECT / "logs" / f"tello_shadow_{stamp}.csv").expanduser().resolve()
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg = load_config(args.config, overrides={"brain": {"source": args.brain}})
+    overrides = {"brain": {"source": args.brain}} if args.brain else None
+    cfg = load_config(args.config, overrides=overrides)
+    readout = cfg["decoder"].get("readout_file")
+    if not readout or not Path(readout).is_file():
+        parser.error(f"Ground shadow requires a calibrated decoder.readout_file: {readout}")
     engine = ShadowBrain(cfg)
-    print(f"GROUND ONLY | Brain: {args.brain} ({engine.brain.n_neurons} neurons) | target={engine.hz:g} Hz", flush=True)
+    print(f"GROUND ONLY | Brain: {cfg['brain']['source']} ({engine.brain.n_neurons} neurons) | target={engine.hz:g} Hz", flush=True)
     print("No flight or RC commands. Preview uses ground telemetry, not a simulated airborne position.", flush=True)
     print("Keep the scene still during SETTLING; then slowly move an object across/toward the camera.", flush=True)
 

@@ -1,5 +1,5 @@
 # DJI / Ryze Tello: its camera is the fly's eyes.
-# Used by tools/tello_shadow.py and the bounded tools/tello_yaw_trial.py modes.
+# Optional overrides for cnsbridge.experiments.tello modules.
 control:
   hz: 20
 vision:

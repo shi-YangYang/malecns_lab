@@ -5,11 +5,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import patch
+
+import numpy as np
 
 import pytest
 
-from cnsbridge.config import default_config
-from cnsbridge.learning.prepare import RecordingBrain
+from cnsbridge.learning import prepare
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,11 +84,12 @@ from cnsbridge.learning import prepare
 from cnsbridge.paths import source_project_root
 with patch.object(trial.Path, 'is_file', return_value=True):
     cfg = trial.trial_config('full')
+    cruise_cfg = trial.trial_config('cruise')
 print(json.dumps({
     'roots': [str(module.PROJECT) for module in (record, shadow, trial, prepare)],
     'located': str(source_project_root()),
     'brain': cfg['brain']['source'], 'readout': cfg['decoder']['readout_file'],
-    'cruise': trial.trial_config('cruise')['decoder']['cruise'],
+    'cruise': cruise_cfg['decoder']['cruise'],
 }))
 """], offline_environment)
     result = json.loads(output)
@@ -97,12 +100,16 @@ print(json.dumps({
     assert result["cruise"] == 0.25
 
 
-def test_recording_feature_identity_matches_pre_migration_baseline():
-    # Captured from the original tools/prepare_motion_dataset.py at 8546f6c,
-    # before moving implementation files. This is not two aliases of new code.
-    schema = RecordingBrain(default_config()).schema
-    assert schema.source_id == "ground-replay-sha256:17277d1fcd8e9f68ac683ff913a1a7f6f51534060fcf3da6e507d486bf513ef5"
-    assert schema.feature_names == tuple(
-        f"neuron_index_{index}" for index in (*range(407, 425), *range(832, 850))
-    )
-    assert schema.rate_window_ms == 50.0
+def test_recording_feature_identity_tracks_real_graph_and_configuration(malecns_graph, malecns_config):
+    with patch.object(prepare, "load_connectome", return_value=malecns_graph):
+        engine = prepare.RecordingBrain(malecns_config)
+        schema = engine.schema
+        expected = np.unique(np.concatenate([malecns_graph.group(name) for name in malecns_config["outputs"]]))
+        assert schema.feature_names == tuple(f"neuron_index_{index}" for index in expected)
+        assert schema.source_id.startswith("ground-replay-sha256:")
+        assert len(schema.source_id.split(":")[1]) == 64
+        assert schema.rate_window_ms == 50.0
+        assert engine.provenance["connectome_name"] == "malecns-v1.0"
+        assert engine.provenance["neurons"] == 166700
+        malecns_config["brain"]["bias"]["DNg02_L"] += 1
+        assert prepare.RecordingBrain(malecns_config).schema.source_id != schema.source_id

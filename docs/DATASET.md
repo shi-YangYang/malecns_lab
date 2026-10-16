@@ -67,9 +67,11 @@ python -m cnsbridge.learning.prepare data/ground_recordings/SESSION \
   --out data/ground_recordings/SESSION/features.npz
 ```
 
-将 `SESSION` 替换为实际目录。默认读取 `configs/malecns.yaml`，需要已构建的 `data/malecns_brain.npz`。每段录像重置视觉与神经状态，前两秒播放时间不作为带标签样本；旧运动读出不参与此流程。
+将 `SESSION` 替换为实际目录。默认读取 `configs/malecns.yaml`，需要已构建的 `data/malecns_brain.npz`，模型缺失时直接报错，不使用替代网络。每段录像重置视觉与神经状态，前两秒播放时间不作为带标签样本；旧运动读出不参与此流程。
 
-默认特征为配置中非空输出群组内的单神经元发放率。`--readout-level group` 可改用群组均值，作为另一个实验；特征模式不同的数据不能混合。只有检查软件流程时才使用 `--brain minifly`，并明确记录这是合成网络结果。
+默认特征为配置中非空输出群组内的单神经元发放率。`--readout-level group` 可改用群组均值，作为另一个实验；特征模式不同的数据不能混合。
+
+本次统一真实连接组入口修改了脑加载源码，特征的来源哈希会随之改变。更新前提取的特征需用当前代码从原录像重新提取到新文件，再重新训练读出；不能混合新旧来源标识，也不能手工改写哈希使其看似兼容。原录像、标签和旧数据格式保留不变。
 
 每帧按 50 ms 推进模型，不随计算速度变化；工具报告采集间隙与处理耗时。重放假定相机固定，并输入零偏航角速度，不能将该数据直接等同于飞行中的视觉分布。
 

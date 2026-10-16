@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from .paths import project_asset_path
+
 
 def _deep_merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
@@ -31,4 +33,8 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
             cfg = _deep_merge(cfg, yaml.safe_load(f) or {})
     if overrides:
         cfg = _deep_merge(cfg, overrides)
+    for section, key in (("brain", "source"), ("decoder", "readout_file")):
+        value = cfg.get(section, {}).get(key)
+        if value:
+            cfg[section][key] = str(project_asset_path(value))
     return cfg

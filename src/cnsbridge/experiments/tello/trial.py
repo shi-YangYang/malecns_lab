@@ -2,9 +2,10 @@
 
 Requires --takeoff. No connection is made without it. Default mode is yaw-only;
 --mode reflex also permits limited vertical motion. --mode cruise permits up to
-3 s of MiniFly cruise (forward RC 0-15) between 2 s settling and 2 s zero RC.
+3 s of MaleCNS cruise (forward RC 0-15) between 2 s settling and 2 s zero RC.
 Cruise uses a 7 s trial; full uses 12 s; the other modes remain limited to 5 s.
---mode full runs the complete local MaleCNS graph and its calibrated readout:
+All modes observe the complete local MaleCNS graph and its calibrated readout.
+--mode full permits:
 2 s zero RC, up to 8 s visual flight control, then 2 s zero RC. Forward cruise
 is capped at RC15; yaw, vertical and lateral at RC10. Neural braking and escape
 remain enabled. The current readout has no learned lateral output. Its yaw
@@ -49,26 +50,24 @@ PROJECT = source_project_root()
 def trial_config(mode):
     if mode not in MODES:
         raise ValueError("Unknown trial mode")
-    if mode == "full":
-        cfg = load_config(PROJECT / "configs" / "malecns.yaml", overrides={
-            "decoder": {"cruise": CRUISE_VALUE},
-        })
-        # Resolve both assets relative to the project, even when run in server/.
-        # Missing assets must fail before SDK construction; never use MiniFly
-        # or uncalibrated default weights as a fallback.
-        for section, key in (("brain", "source"), ("decoder", "readout_file")):
-            value = cfg[section].get(key)
-            if not value:
-                raise ValueError(f"Full trial requires {section}.{key}")
-            path = (PROJECT / Path(value).expanduser()).resolve()
-            if not path.is_file():
-                raise ValueError(f"Full trial asset not found: {path}")
-            cfg[section][key] = str(path)
-        return cfg
-    return load_config(PROJECT / "configs" / "tello.yaml", overrides={
-        "brain": {"source": "minifly"},
-        "decoder": {"cruise": CRUISE_VALUE if mode == "cruise" else 0.0},
+    cfg = load_config(PROJECT / "configs" / "malecns.yaml", overrides={
+        "decoder": {"cruise": CRUISE_VALUE if mode in ("cruise", "full") else 0.0},
     })
+    if mode != "full":
+        # Keep the existing bounded modes' camera/control/safety settings.
+        tello_cfg = load_config(PROJECT / "configs" / "tello.yaml")
+        for section in ("vision", "control", "safety"):
+            cfg[section] = tello_cfg[section]
+    # Missing model/calibration assets fail before SDK construction.
+    for section, key in (("brain", "source"), ("decoder", "readout_file")):
+        value = cfg[section].get(key)
+        if not value:
+            raise ValueError(f"Trial requires {section}.{key}")
+        path = (PROJECT / Path(value).expanduser()).resolve()
+        if not path.is_file():
+            raise ValueError(f"Trial asset not found: {path}")
+        cfg[section][key] = str(path)
+    return cfg
 
 
 def report_motion(rows):
@@ -224,7 +223,7 @@ def fly_trial(drone, worker, inputs, seconds, rows, acknowledged_at, mode="yaw")
                 "t_s": now - acknowledged_at,
                 "mode": mode,
                 "control_ready": active,
-                "control_source": "fixed_probe" if mode == "forward-check" else ("malecns" if mode == "full" else "minifly"),
+                "control_source": "fixed_probe" if mode == "forward-check" else "malecns",
                 "brain_source": latest.get("brain_source", "") if latest else "",
                 "brain_neurons": latest.get("brain_neurons") if latest else None,
                 "brain_job_id": latest_job,
@@ -288,8 +287,8 @@ def run_trial(drone, worker, seconds: float, log_path: Path, mode="yaw") -> int:
             time.sleep(0.01)
         motion = {
             "yaw": "yaw-only",
-            "reflex": "MiniFly yaw + vertical (each RC capped at 10; no forward/lateral)",
-            "cruise": "2 s zero RC, up to 3 s MiniFly cruise (forward RC 0-15; yaw/vertical capped at 10), 2 s zero RC",
+            "reflex": "MaleCNS yaw + vertical (each RC capped at 10; no forward/lateral)",
+            "cruise": "2 s zero RC, up to 3 s MaleCNS cruise (forward RC 0-15; yaw/vertical capped at 10), 2 s zero RC",
             "forward-check": "2 s zero RC, up to 1 s fixed forward RC15, 2 s zero RC (other axes zero; no obstacle avoidance)",
             "full": "2 s zero RC, up to 8 s MaleCNS visual flight (forward RC 0-15; other axes capped at 10; neural braking/escape), 2 s zero RC",
         }[mode]
@@ -374,7 +373,7 @@ def run_trial(drone, worker, seconds: float, log_path: Path, mode="yaw") -> int:
                 if result == 0:
                     result = 1
             else:
-                print("Fixed forward RC was sent; visually confirm forward motion and slowing. This does not verify MiniFly or obstacle avoidance.")
+                print("Fixed forward RC was sent; visually confirm forward motion and slowing. This does not verify neural control or obstacle avoidance.")
         print(f"CSV: {log_path}")
         if not nonzero and mode != "forward-check":
             print("No nonzero yaw was sent; directional response remains unverified.")
@@ -390,7 +389,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--takeoff", action="store_true", help="fly the real aircraft in the selected trial mode")
     parser.add_argument("--mode", choices=MODES, default="yaw",
-                        help="yaw: turn only; reflex: add climb/descent; cruise: low MiniFly forward RC; forward-check: fixed RC15 probe; full: MaleCNS visual flight with braking/escape")
+                        help="yaw: turn only; reflex: add climb/descent; cruise: low MaleCNS forward RC; forward-check: fixed RC15 probe; full: MaleCNS visual flight with braking/escape")
     parser.add_argument("--seconds", type=float,
                         help="total duration after takeoff ACK: full exactly 12 s; cruise exactly 7 s; forward-check exactly 5 s; yaw/reflex 1-5 s (default 5)")
     args = parser.parse_args(argv)
@@ -409,7 +408,7 @@ def main(argv=None) -> int:
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     stamp = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d_%H%M%S_%f")
-    log_prefix = {"yaw": "tello_yaw_trial", "reflex": "tello_minifly_trial",
+    log_prefix = {"yaw": "tello_yaw_trial", "reflex": "tello_reflex_trial",
                   "cruise": "tello_cruise_trial", "forward-check": "tello_forward_check",
                   "full": "tello_malecns_full_trial"}[args.mode]
     log_path = PROJECT / "logs" / f"{log_prefix}_{stamp}.csv"

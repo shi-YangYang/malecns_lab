@@ -12,8 +12,8 @@ class InputEncoder:
     """Maps each configured input group to a per-neuron rate array.
 
     Neurons of a group are spread over the eye grid in index order (neuron k of
-    n goes to cell floor(k * cells / n)). MiniFly is built that way; for MaleCNS
-    this is an approximation of retinotopy (see docs/SCIENCE.md).
+    n goes to cell floor(k * cells / n)). For MaleCNS this is an approximation
+    of retinotopy (see docs/RESEARCH.md).
     """
 
     def __init__(self, connectome: Connectome, cfg: dict):

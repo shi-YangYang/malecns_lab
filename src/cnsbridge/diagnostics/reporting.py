@@ -107,7 +107,7 @@ td,th{{text-align:left;padding:8px;border-bottom:1px solid #dde3eb}}.note{{backg
 <h1>Offline simulated neural activity</h1>
 <p>Session: <b>{escape(report['session']['session_id'])}</b> · Scene: {escape(report['session']['scene_id'])}<br>
 Network: {escape(p['network']['name'])} · {report['frame_count']} frames · {report['duration_s']:g} s video · {p['window_ms']:g} ms simulation/frame</p>
-<p class="note">{escape(report['claim_scope'])}. MiniFly is a synthetic test network. Configuration includes engineered input mapping
+<p class="note">{escape(report['claim_scope'])}. Configuration includes engineered input mapping
 and bias: <code>{escape(json.dumps(p['effective_config']['brain'].get('bias', {})))}</code>.
 Raw recordings include warmup; comparisons exclude the first {report['warmup_s']:g} s and windows crossing interval boundaries.</p>
 <p>Missing groups: {escape(', '.join(p['missing_groups']) or 'none')}. N/A denotes missing neurons or no eligible observations;

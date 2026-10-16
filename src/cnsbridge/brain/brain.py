@@ -8,21 +8,24 @@ from pathlib import Path
 
 import numpy as np
 
+from ..paths import project_asset_path
 from .connectome import Connectome, GroupSpec
 from .lif import LIFNetwork, LIFParams
-from .synthetic import build_minifly
 
 
 def load_connectome(source: str | Path) -> Connectome:
-    if str(source).lower() in ("minifly", "synthetic", "mini"):
-        return build_minifly()
-    path = Path(source)
-    if not path.exists():
+    path = project_asset_path(source)
+    if path.suffix.lower() != ".npz":
+        raise ValueError("brain.source must be a real connectome .npz file")
+    if not path.is_file():
         raise FileNotFoundError(
             f"brain file {path} not found. Run `cnsbridge download malecns` and "
-            "`cnsbridge build-brain` first, or use brain.source: minifly"
+            "`cnsbridge build-brain` first; no replacement network is available"
         )
-    return Connectome.load(path)
+    connectome = Connectome.load(path)
+    if connectome.meta.get("synthetic"):
+        raise ValueError(f"Synthetic connectome is not supported: {path}")
+    return connectome
 
 
 class Brain:

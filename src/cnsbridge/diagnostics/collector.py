@@ -30,7 +30,7 @@ def file_hash(path: Path) -> str:
 
 def source_hashes() -> dict:
     package = Path(__file__).resolve().parents[1]
-    paths = ["brain/brain.py", "brain/lif.py", "brain/connectome.py", "brain/synthetic.py", "config.py",
+    paths = ["brain/brain.py", "brain/lif.py", "brain/connectome.py", "config.py", "paths.py",
              "senses/retina.py", "senses/encoder.py"]
     paths += [str(path.relative_to(package)) for path in sorted((package / "diagnostics").glob("*.py"))]
     return {name: file_hash(package / name) for name in paths}

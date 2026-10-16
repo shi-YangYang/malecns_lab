@@ -1,25 +1,13 @@
 import pytest
 
-from cnsbridge.brain import Brain, build_minifly
-from cnsbridge.control.calibration import fit_readout, record_responses
 from cnsbridge.cli import build_parser, main
-from cnsbridge.config import load_config
 
 
-def test_calibration_recovers_signs():
-    cfg = load_config()
-    b = Brain(build_minifly(), cfg)
-    outs, X, Y = record_responses(b, cfg, settle_ms=200, measure_ms=600, repeats=1)
-    res = fit_readout(outs, X, Y)
-    yaw = res["axes"]["yaw"]["terms"]
-    thr = res["axes"]["throttle"]["terms"]
-    assert yaw["DNg02_R"] > 0 > yaw["DNg02_L"]
-    assert thr["DNg02_L"] + thr["DNg02_R"] > 0
-
-
-def test_cli_bench(capsys):
-    assert main(["bench", "--ms", "200"]) == 0
-    assert "brain time" in capsys.readouterr().out
+def test_cli_bench_uses_real_graph(capsys, malecns_path):
+    assert main(["bench", "--ms", "5"]) == 0
+    output = capsys.readouterr().out
+    assert "brain time" in output
+    assert "166,700" in output
 
 
 def test_cli_help_lists_offline_tools(capsys):

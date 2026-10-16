@@ -38,7 +38,6 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 |---|---|
 | `brain/connectome.py` | 连接矩阵、细胞类型与侧别、群组选择、MaleCNS 构建与保存 |
 | `brain/lif.py`、`brain/brain.py` | LIF 动力学、外部刺激、脉冲计数与发放率 |
-| `brain/synthetic.py` | MiniFly 合成网络，供离线检查 |
 | `senses/retina.py`、`senses/encoder.py` | 光流、亮度、膨胀特征及神经输入编码 |
 | `diagnostics/` | 离线活动记录、刺激区间校验与比较、静态图表和本地报告 |
 | `learning/decoder.py` | 特征模式、观测、解码协议和岭回归基线 |
@@ -56,7 +55,9 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。现阶段�
 
 依赖方向为 `learning → control`；控制契约不依赖学习流程。诊断复用 `learning.prepare.read_recording` 读取会话以及 `brain`、`senses` 产生信号，不执行训练或动作解码。实验模块组合脑、感知与控制；包内实现和测试直接导入上述模块，实验、诊断与学习命令通过 `python -m` 运行对应模块。
 
-试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；使用 editable 安装环境从其他目录以 `python -m` 启动不会改变资产位置。脑与视觉的四个来源哈希文件及数据格式均保持不变。
+试飞依旧先尝试降落，再关闭计算进程，最后写入缓冲日志。路径解析验证源码 `pyproject.toml` 和 `src/cnsbridge` 布局；使用 editable 安装环境从其他目录以 `python -m` 启动不会改变资产位置。所有脑入口默认加载真实 MaleCNS NPZ；模型或动作读出所需的校准资产缺失时停止，不生成替代网络。
+
+统一真实连接组入口改变了脑加载源码，因此来源哈希会更新。旧特征需从原录像重新提取，不能与新来源身份混用；既有序列化格式与旧实验数据不改写。
 
 这些模块位于 `src/cnsbridge/`。配置由 [defaults.yaml](../src/cnsbridge/defaults.yaml) 和 [configs](../configs/) 中的覆盖项组成；嵌套字典深度合并，`terms` 块整体替换。
 
@@ -104,5 +105,7 @@ model.save("candidate.json")
 ## 扩展与验证
 
 增加设备时实现运动目标转换及实际设备控制；增加学习方法时保留特征模式和动作单位契约。实体能力验证需在接口检查之后单独完成。
+
+[共享动作接口示例](../examples/04_shared_motion_decoder.py) 使用数学示例数据展示读出拟合与无人机、底盘指令转换，不运行连接组，也不连接设备。它仅说明接口用法，不作为神经响应或实体控制的实验依据。
 
 检查范围与改动匹配：文档修改检查差异，局部逻辑运行对应测试，模块交互运行相关子系统检查。不要仅为覆盖实现而重复扩大验证，也不要让测试启动实机运动。

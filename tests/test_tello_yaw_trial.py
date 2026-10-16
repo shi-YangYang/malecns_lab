@@ -278,8 +278,11 @@ class YawTrialTests(unittest.TestCase):
 
 class BrainProcessTests(unittest.TestCase):
     def test_real_spawn_returns_finite_result_and_stops(self):
-        cfg = trial.load_config(trial.PROJECT / "configs" / "tello.yaml",
-                                overrides={"brain": {"source": "minifly"}})
+        if not (trial.PROJECT / "data" / "malecns_brain.npz").is_file():
+            self.skipTest("Real MaleCNS asset is absent; no substitute graph is used")
+        if not (trial.PROJECT / "readout_malecns.json").is_file():
+            self.skipTest("Real MaleCNS readout is absent")
+        cfg = trial.trial_config("yaw")
         worker = BrainProcess(cfg)
         try:
             frame = np.zeros((72, 96, 3), dtype=np.uint8)
