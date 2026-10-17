@@ -1,7 +1,5 @@
 import numpy as np
 
-from cnsbridge.drones import SimDrone
-from cnsbridge.control import FlightCommand
 from cnsbridge.senses import Retina
 from cnsbridge.senses.retina import box_blur
 
@@ -34,23 +32,39 @@ def test_upward_motion_channels():
 
 
 def test_rotation_is_not_looming_but_approach_is():
-    d = SimDrone(start=(0, 0, 1.0), wind=0.0)
-    d.flying = True
-    d.send(FlightCommand(yaw=0.5))
-    r = Retina()
-    rot = []
-    for _ in range(30):
-        for _ in range(4):
-            d.step(0.0125)
-        rot.append(r.encode(d.frame()).eyes["L"].grids["loom"].max())
-    d = SimDrone(start=(0.2, 1.0, 1.5), yaw_deg=90, wind=0.0)
-    d.flying = True
-    d.send(FlightCommand(forward=0.8))
-    r = Retina()
-    app = []
-    for _ in range(45):
-        for _ in range(4):
-            d.step(0.0125)
-        app.append(r.encode(d.frame()).eyes["L"].grids["loom"].max())
+    # Numerical optical-flow stimuli, not a flight or room simulation. The
+    # following environment uses a screen-fixed background and a solid marker;
+    # it cannot provide the textured full-field flow needed by this regression.
+    # A fixed textured plane viewed with pure yaw should not look like approach.
+    tex = texture()
+    rotating, approaching = Retina(), Retina()
+    rot = [rotating.encode(planar_view(tex, yaw_rad=0.01 * step)).eyes["L"].grids["loom"].max()
+           for step in range(30)]
+    app = [approaching.encode(planar_view(tex, distance=1.0 - 0.015 * step)).eyes["L"].grids["loom"].max()
+           for step in range(45)]
     assert max(rot) < 0.2
     assert max(app[-15:]) > 0.5
+
+
+def planar_view(tex, *, yaw_rad=0.0, distance=1.0):
+    """Pinhole projection onto a fixed texture plane, with no motion dynamics.
+
+    Plane distance starts at one arbitrary length unit; decreasing it is forward
+    translation along the optical axis. Yaw rotates camera rays without moving
+    the camera. Both transformations therefore use the same stationary texture.
+    """
+    height, width = 72, 96
+    focal = width / (2 * np.tan(np.deg2rad(82) / 2))
+    yy, xx = np.mgrid[0:height, 0:width]
+    ray_x = (xx + 0.5 - width / 2) / focal
+    ray_y = (yy + 0.5 - height / 2) / focal
+    cosine, sine = np.cos(yaw_rad), np.sin(yaw_rad)
+    depth = cosine - sine * ray_x
+    sx = tex.shape[1] / 2 + focal * distance * (cosine * ray_x + sine) / depth
+    sy = tex.shape[0] / 2 + focal * distance * ray_y / depth
+    # All rays stay in front of the plane and inside the source texture. Avoid
+    # border clamping that could create false flow or expansion in the fixture.
+    assert np.all(depth > 0)
+    assert sx.min() >= 0 and sx.max() < tex.shape[1]
+    assert sy.min() >= 0 and sy.max() < tex.shape[0]
+    return (tex[sy.astype(int), sx.astype(int)] * 255).astype(np.uint8)

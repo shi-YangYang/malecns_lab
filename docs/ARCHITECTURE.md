@@ -40,7 +40,7 @@ Tello 地面观察和既有飞行试验仍使用旧链路：视觉输入 → `Br
 | `control/safety.py`、`calibration.py` | 独立控制限制与旧读出校准 |
 | `experiments/tello/check.py`、`hover.py`、`shadow.py`、`record.py` | SDK 检查、悬停、旧神经输出观察、地面录像 |
 | `experiments/tello/trial.py`、`policy.py`、`worker.py`、`session.py` | 既有试飞监督、纯 RC 策略、脑子进程、遥测及清理 |
-| `drones/sim.py` | 旧离线房间仿真辅助，不用于宣称实飞效果 |
+| `drones/follow_env.py` / `follow_scenes.py` | 三轴目标跟随环境与隔离场景；简化速度响应，不是 Tello 标定动力学 |
 
 依赖方向为 `learning → control`；控制契约不依赖学习流程。诊断复用自身 `sources_v2` 与 `brain`、`senses`，不执行动作解码。包内实现直接导入所属模块，实验、诊断与学习命令通过 `python -m` 运行。
 
