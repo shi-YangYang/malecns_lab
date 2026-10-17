@@ -228,9 +228,9 @@ SafetyGovernor 的所有机制也不能仅凭配置认定已生效：ShadowBrain
 
 ## 离线观察与通用解码器现状
 
-activity 直接记录输入驱动、实际组率和抽样神经元计数，不创建动作读出，也不产生设备动作。它是下一轮研究刺激响应的观察入口。[记录实现](../src/cnsbridge/diagnostics/collector.py#L72)
+审计时的 activity 直接记录输入驱动、实际组率和抽样神经元计数，不创建动作读出，也不产生设备动作。历史源码：`747a8aa:src/cnsbridge/diagnostics/collector.py:72`。该 V1 入口已在后续清理中移除；本段保留审计时事实，现行刺激响应观察入口见 [V2 完整脑诊断](MODEL_V2_USAGE.md)。
 
-新的学习路径默认读取所选输出群组的全部 33 个单神经元，也可使用组平均；不是默认读取全脑 166,700 维。RidgeMotionDecoder 输出六维 BodyVelocity，但现有标签解析仅填 vx/wz，其余四轴为零。数值设备适配器已经存在，该学习读出尚未接入当前 Tello 实飞入口。[特征与标签](../src/cnsbridge/learning/prepare.py#L90)、[学习读出](../src/cnsbridge/learning/decoder.py#L73)
+新的学习路径默认读取所选输出群组的全部 33 个单神经元，也可使用组平均；不是默认读取全脑 166,700 维。RidgeMotionDecoder 输出六维 BodyVelocity，但现有标签解析仅填 vx/wz，其余四轴为零。数值设备适配器已经存在，该学习读出尚未接入当前 Tello 实飞入口。历史源码：`747a8aa:src/cnsbridge/learning/prepare.py:90`、`747a8aa:src/cnsbridge/learning/decoder.py:73`。这两个 V1 模块已在后续清理中移除；本段保留审计时事实，当前对照入口见 [V2 学习工具](LEARNING_V2.md)
 
 ## 后续工作的优先顺序
 

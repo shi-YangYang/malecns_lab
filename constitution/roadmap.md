@@ -15,4 +15,4 @@
 
 用户确认的“先完成诊断与工具”阶段已完成。2026-10-17 的新目标把网络内部学习提升为主线；冻结脑读出保留为对照，采集真实录像不再是数值／训练可行性工作的唯一前置条件。受控重连、权重和通路干预工具见 [EXPERIMENT_V2](../docs/EXPERIMENT_V2.md)；完整 W 图已实际接通神经仿真，但没有动作对照效果证据。当前比较报告是描述性的，正式研究统计方案另需登记；研究图不作为设备可用的替代脑。
 
-本次工作流接入见 [spec-001-agent-workflow](../specs/spec-001-agent-workflow/spec.md)。研究判断依据见[研究与数据](../docs/RESEARCH.md)，操作流程复用[数据集文档](../docs/DATASET.md)和[Tello 实验文档](../docs/TELLO.md)。
+本次工作流接入见 [spec-001-agent-workflow](../specs/spec-001-agent-workflow/spec.md)。研究判断依据见[研究与数据](../docs/RESEARCH.md)，采集操作见[Tello 实验文档](../docs/TELLO.md)，冻结脑对照学习见[V2 学习工具](../docs/LEARNING_V2.md)。

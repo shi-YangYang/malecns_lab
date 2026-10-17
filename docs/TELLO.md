@@ -4,7 +4,7 @@
 
 当前实体平台是 Tello。电脑通过 Tello Wi-Fi 读取相机与遥测、发送 SDK 指令；飞机自身飞控负责姿态稳定。
 
-这里保留的是既有人工读出链路的地面检查与短时飞行工具。新训练流程输出的 `candidate.json` 尚未接入这些工具。
+这里保留的是既有人工读出链路的地面检查与短时飞行工具。V2 学习产物（如 `model_neural.json`）尚未接入这些工具；可训练 SNN 的部署按 Spec 008 单独验证。
 
 ## 地面连接与视频
 
@@ -30,7 +30,56 @@ python -m cnsbridge.experiments.tello.shadow --seconds 30
 
 该工具使用 `MotorDecoder`，不加载新岭回归候选模型。左右移动小物体未引起明显偏航，可能涉及视觉特征、神经活动或读出映射，不能仅通过加大 RC 推断已解决。
 
-采集新解码器的数据使用 [地面数据流程](DATASET.md) 中的 `python -m cnsbridge.experiments.tello.record`，不要将 shadow 日志的旧指令直接当成动作标签。
+## 地面录像与会话格式
+
+已有录像时可以直接离线分析；新录像在 Tello 固定于地面、手机 App 和其他 Tello 程序关闭、电脑已连接 Tello Wi-Fi 后录制：
+
+```bash
+python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
+```
+
+Q 或 Escape 结束预览。也可使用 `--no-window` 保存而不显示画面；`--out-dir` 必须指定不存在的新目录。录制仅连接 SDK、读取视频和遥测，不加载脑模型、不发送运动指令。`--seconds` 允许 5–60 秒；终端打印 `data/ground_recordings/` 下的实际会话位置。
+
+| 文件 | 保留内容 |
+|---|---|
+| `video.avi` | 名义 20 fps 的 MJPG 视频 |
+| `frames.csv` | `frame_index`、主机取帧时间 `t_s`、播放时间 `video_t_s` |
+| `session.json` | `flydrones.ground_recording` version 1、`scene_id/session_id`、文件名、名义帧率和地面采集标识 |
+| `labels.csv` | 仅有 `start_s,end_s,vx_mps,wz_rad_s,reason` 表头，不包含自动生成的正确动作 |
+
+`video_t_s = frame_index / 20` 是 AVI 播放秒数；`t_s` 是主机从解码队列取帧的相对时间，两者都不是相机曝光时间。采集有间隙时，30 秒墙钟录制可能不到 30 秒 AVI。标注必须以实际 AVI 播放时间为准，不能用墙钟或直接把 `t_s` 当标签时间。中断的部分文件保留，不自动覆盖。
+
+同一物理布置的重复录像复用 `scene_id`；离线重放还需为同素材及其裁剪、增强指定共同的 `family_id`，不能改名字制造独立训练/测试样本。
+
+### 30 秒信号观察拍摄参考
+
+固定 Tello、背景和照明，只移动边缘清楚的卡片或手机背面。左右按预览画面定义；避免物体一直挡满镜头。下面时间只用于操作安排，实际标记需看片确认。
+
+| 参考时间 | 操作 |
+|---|---|
+| 0–6 秒 | 物体在画面外，保持静止；前 2 秒供模型预热 |
+| 6–9 秒 | 保持大致距离，从画面左侧向右侧匀速移动一次 |
+| 9–12 秒 | 移出画面并准备下一次，记录为过渡 |
+| 12–15 秒 | 相近距离和速度，从右侧向左侧移动一次 |
+| 15–18 秒 | 移出、暂停，再准备正面靠近 |
+| 18–21 秒 | 物体对准画面中央平稳靠近，使图像逐渐扩大 |
+| 21–24 秒 | 移出后复位，记录为过渡 |
+| 24–27 秒 | 从相近位置重复正面靠近 |
+| 27–30 秒 | 移出物体，保持静止 |
+
+这份安排只用于检查信号响应，不规定应左转、右转或上升。各阶段可记录在会话旁的实验笔记中；V2 不读取旧 `stimuli.csv` 区间表。需要独立片段时，按 [V2 分段协议](MODEL_V2_USAGE.md#4-显式分段与失败) 在分析前登记，并注意每段都重新预热 2 秒。
+
+采集后可以断开 Tello，使用完整参考图反复重放：
+
+```bash
+python -m cnsbridge.diagnostics.replay_v2 \
+  --recording data/ground_recordings/SESSION --family-id room_a_session_01 \
+  --stimulus-kind object_motion --out data/neural_v2/recording_01
+```
+
+将 `SESSION` 换成实际会话目录，输出目录必须是新的。完整 [诊断与报告](MODEL_V2_USAGE.md) 不需要动作标签；若要运行冻结脑读出对照，按 [V2 标签与训练协议](LEARNING_V2.md) 独立标注。现有空白 `labels.csv` 只可经显式 `legacy_v1_intervals` 选项导入两轴标签；首选 V2 JSON 和支持掩码，不把未知轴写成已训练的零动作。不要将 shadow 的旧 RC、神经输出或实测速度自动当成期望动作。
+
+地面信号录像不能验证动作改变相机观察的闭环。当前三轴 SNN 目标跟随训练按 [Spec 008](../specs/spec-008-trainable-snn/spec.md) 独立推进，不以这些静态录像替代仿真和实机闭环。
 
 ## 既有短时飞行工具
 
@@ -71,4 +120,4 @@ python -m cnsbridge.experiments.tello.trial --help
 - 飞机实际做了什么；
 - 哪些结论仍无法从此次记录判断。
 
-日志位于 `logs/`。当前训练研究先从地面视频开展，后续在线候选模型观察与闭环实飞需要独立接入和验证。
+日志位于 `logs/`。地面视频供重复信号诊断与冻结脑对照；可训练 SNN 的目标跟随、在线观察与闭环实飞需独立接入和验证。

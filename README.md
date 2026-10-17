@@ -1,8 +1,10 @@
 # CNSBridge
 
-连接组神经活动到机器人运动目标的可训练解码框架。
+基于完整 MaleCNS 连接组的神经控制研究框架。
 
-项目以果蝇 MaleCNS 连接组的脉冲网络为神经活动来源，学习从活动到运动目标的映射，再由设备适配器转换为控制指令。当前以 Tello 为实验平台，为差速移动底盘保留统一接口。
+项目目标是在完整果蝇 MaleCNS 连接图约束下训练网络本身，学习无人机目标跟随。当前可用的 V2 冻结脑与读出工具保留为研究对照，网络内部训练按 [Spec 008](specs/spec-008-trainable-snn/spec.md) 实施，尚不代表已经学会控制。设备侧以 Tello 为实验平台，为差速移动底盘保留统一动作接口。
+
+当前冻结脑对照链路：
 
 ```text
 摄像头 → 视觉特征 → 冻结的连接组网络 → 可训练解码器 → 机身运动目标
@@ -62,7 +64,7 @@ python -m cnsbridge.diagnostics.replay_v2 \
 
 信号诊断无需填写动作标签。固定相机前的物体移动是视觉刺激，不能自动变成无人机动作目标。确认信号后，再独立标注期望动作；真实训练与评估需要采集数据，当前未据此证明动作效果。
 
-旧 `cnsbridge build-brain`、`diagnostics.activity` 和旧学习入口保留作 V1 历史流程，使用的过滤图与编码不属于 V2 完整参考实验。不要用它们重建或覆盖 V2 资产。
+V1 重复离线诊断和读出入口已移除；信号与读出对照统一使用 V2。`cnsbridge build-brain` 暂供旧设备实验构建过滤图，不属于完整参考实验，不用于重建或覆盖 V2 资产。地面采集、会话格式和时间说明见 [Tello 录像协议](docs/TELLO.md#地面录像与会话格式)。
 
 ## 项目结构
 
@@ -81,7 +83,7 @@ python -m cnsbridge.diagnostics.replay_v2 \
 
 代码从 `cnsbridge.control`、`cnsbridge.learning` 和 `cnsbridge.experiments.tello` 导入。实验与学习入口直接运行包内模块，例如 `python -m cnsbridge.learning.train_v2 --help`。源码工作区的 `configs/`、`data/`、`logs/` 路径不随启动目录变化，设备实验仍使用当前 checkout 的 editable 安装。
 
-保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；V2 掩码读出使用 `python -m cnsbridge.learning.train_v2`，旧 `learning.train` 仍属于 V1 流程。
+保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；V2 掩码读出使用 `python -m cnsbridge.learning.train_v2`，作为冻结脑对照。
 
 ## 文档
 
@@ -89,8 +91,7 @@ python -m cnsbridge.diagnostics.replay_v2 \
 - [V2 完整脑诊断](docs/MODEL_V2_USAGE.md)：完整图、真实录像和标准刺激重放、信号图与实测结果。
 - [V2 掩码学习](docs/LEARNING_V2.md)：独立动作标签、场景族分区、训练和严格配对评估。
 - [V2 研究对照](docs/EXPERIMENT_V2.md)：完整图派生 R/W/P、协议登记、独立拟合和失败记录。
-- [旧神经活动流程](docs/NEURAL_ACTIVITY.md)与[旧数据集流程](docs/DATASET.md)：V1 操作及可复用的采集背景，V2 以新版文档为准。
-- [Tello 实验](docs/TELLO.md)：地面检查、已有实飞工具及结果边界。
+- [Tello 实验](docs/TELLO.md)：地面检查、录像会话协议、已有实飞工具及结果边界。
 - [研究与数据](docs/RESEARCH.md)：建模假设、连接组构建、对照实验与引用。
 
 ## 开发流程
@@ -99,4 +100,4 @@ python -m cnsbridge.diagnostics.replay_v2 \
 
 ## 来源与许可
 
-本项目基于 [SpikeCalls/FlyDrones](https://github.com/SpikeCalls/FlyDrones) 的代码发展，当前整理聚焦可训练解码器和可复现的实验流程。原代码采用 [MIT 许可](LICENSE)，原版权声明保留。MaleCNS 数据采用独立许可；来源和引用说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+本项目基于 [SpikeCalls/FlyDrones](https://github.com/SpikeCalls/FlyDrones) 的代码发展，保留来源与历史实验，当前研究方向为完整连接组内部学习和可复现的控制验证。原代码采用 [MIT 许可](LICENSE)，原版权声明保留。MaleCNS 数据采用独立许可；来源和引用说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
