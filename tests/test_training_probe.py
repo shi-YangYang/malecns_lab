@@ -80,6 +80,62 @@ def test_invalid_checkpoint_never_mutates_parameters(tmp_path, change):
     torch.testing.assert_close(model.theta, before, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("mode", ["learnable", "fixed"])
+def test_tonic_checkpoint_save_and_restore_rejected_before_side_effects(tmp_path, mode):
+    from cnsbridge.brain.tonic import LaminaTonicLIF
+    model = LaminaTonicLIF.for_numerical_test(sparse.csc_matrix((1, 1), dtype=np.int64),
+                                             types=["L1"], tonic_types=("L1",), mode=mode)
+    directory = tmp_path / "new_parent" / "rejected"
+    before = {name: value.detach().clone() for name, value in model.state_dict().items()}
+    with pytest.raises(ValueError, match="dynamics schema"):
+        save_checkpoint(model, directory)
+    assert not directory.parent.exists()
+    # Even a missing file must not be read before rejecting the incompatible model.
+    with pytest.raises(ValueError, match="dynamics schema"):
+        restore_checkpoint(model, directory)
+    for name, value in model.state_dict().items():
+        assert torch.equal(value, before[name])
+
+
+@pytest.mark.parametrize("alias", [False, True])
+def test_checkpoint_rejects_extra_registered_parameters_before_writing_or_restore(tmp_path, alias):
+    model = fixture_model()
+    directory = tmp_path / "original"
+    save_checkpoint(model, directory)
+    model.extra = model.theta if alias else torch.nn.Parameter(torch.ones(1))
+    before = model.theta.detach().clone()
+    rejected = tmp_path / "new_parent" / "rejected"
+    with pytest.raises(ValueError, match="exact parameter set"):
+        save_checkpoint(model, rejected)
+    assert not rejected.parent.exists()
+    with pytest.raises(ValueError, match="exact parameter set"):
+        restore_checkpoint(model, directory)
+    assert torch.equal(model.theta, before)
+
+
+@pytest.mark.parametrize("change", ["extra", "missing", "new_schema"])
+def test_checkpoint_rejects_unrepresented_metadata_before_reading_graph_or_restore(tmp_path, change):
+    model = fixture_model()
+    directory = tmp_path / "checkpoint"
+    save_checkpoint(model, directory)
+    def mutate(metadata):
+        if change == "extra":
+            metadata["parameters"]["rho"] = {"shape": [5], "dtype": "<f4"}
+        elif change == "missing":
+            metadata["parameters"] = {}
+        else:
+            metadata["model"]["schema"] = "cnsbridge.lamina_tonic_lif.v1"
+    rewrite_metadata(directory, mutate)
+    before = model.theta.detach().clone()
+    with pytest.raises(ValueError, match="theta|dynamics schema"):
+        read_checkpoint(directory)
+    with pytest.raises(ValueError, match="theta|dynamics schema"):
+        restore_checkpoint(model, directory)
+    with pytest.raises(ValueError, match="theta|dynamics schema"):
+        load_checkpoint(directory, reference=tmp_path / "graph_must_not_be_read.npz")
+    assert torch.equal(model.theta, before)
+
+
 def test_resource_budget_reserves_system_memory():
     assert resource_budget(12 * GIB)["effective_rss_limit_bytes"] == 6 * GIB
     assert resource_budget(7 * GIB)["effective_rss_limit_bytes"] == 3 * GIB

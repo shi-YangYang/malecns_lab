@@ -198,6 +198,10 @@ class TrainableLIF(nn.Module):
                 or state.refractory_until.device.type != "cpu" or (state.refractory_until < 0).any()):
             raise ValueError("Invalid refractory clock")
 
+    def _equilibrium_offset_mv(self) -> Tensor | None:
+        """Optional intrinsic equilibrium shift; the original model has none."""
+        return None
+
     def step(self, voltage_increment: Tensor, state: LIFState) -> tuple[Tensor, LIFState]:
         """Advance dt; input is one explicit voltage increment per neuron in mV."""
         self._validate_state(state)
@@ -208,6 +212,7 @@ class TrainableLIF(nn.Module):
             raise ValueError("Voltage input must be a finite CPU vector matching model shape and dtype")
         if torch.count_nonzero(voltage_increment[~self.input_mask]):
             raise ValueError("Nonzero voltage input outside the registered external input cells")
+        equilibrium_offset = self._equilibrium_offset_mv()
         cfg = self.config
         active = (state.step >= state.refractory_until) | self.input_mask
         arrival_g = state.g + state.pending[0]
@@ -217,6 +222,8 @@ class TrainableLIF(nn.Module):
         else:
             coupling = cfg.tau_syn_ms / (cfg.tau_m_ms - cfg.tau_syn_ms) * (a - b)
         integrated_v = cfg.v_rest_mv + (state.v - cfg.v_rest_mv) * a + coupling * arrival_g
+        if equilibrium_offset is not None:
+            integrated_v = integrated_v + (1 - a) * equilibrium_offset
         v = torch.where(active, integrated_v, state.v) + voltage_increment * self.input_mask
         g = torch.where(active, arrival_g * b, arrival_g)
         spikes = surrogate_spike(v - cfg.v_threshold_mv, cfg.surrogate_scale_mv) * active

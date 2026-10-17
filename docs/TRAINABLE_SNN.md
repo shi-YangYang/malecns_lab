@@ -31,7 +31,7 @@ state = state.detach()  # 截断反传，保持电压、突触状态、队列和
 
 `from_reference` 必经既有 `load_reference` 的图、注释和来源校验。不会裁边、裁节点、忽略自环或用小图替代。`for_numerical_test` 是明确标记为 `numerical_test_only` 的独立测试入口，不是设备或任务模型。模型身份记录图来源、原始整数计数摘要、完整节点/边/突触计数、类型分组、外部驱动 body ID、计算精度、参数、语义和实现文件摘要。
 
-原始有符号 int64 计数保留在只读 `model.graph.counts`；计算权重另存 CPU CSR 浮点矩阵，不会覆盖原始资产。float32 可能舍入较大的整数或计算结果；身份记录精度。`state_dict()` 只包含训练参数 `theta`，不重复保存原始大图；后续 checkpoint 必须同时保存并校验 `model.identity`，不能把裸参数文件当作独立可复现模型。
+原始有符号 int64 计数保留在只读 `model.graph.counts`；计算权重另存 CPU CSR 浮点矩阵，不会覆盖原始资产。float32 可能舍入较大的整数或计算结果；身份记录精度。原始无背景模型的 `state_dict()` 只包含训练参数 `theta`，不重复保存原始大图；checkpoint 必须同时保存并校验 `model.identity`，不能把裸参数文件当作独立可复现模型。
 
 ## 数值契约与来源
 
@@ -77,6 +77,25 @@ theta 初始为 0。缺失、空串与全空白注释进入组 0，其余原始�
 前向脉冲严格二值，反向使用 `1 / (scale * (1 + abs((v-threshold)/scale))**2)`，默认 scale=1 mV。复位门、不应期门停止梯度，递归传播脉冲保留代理梯度。稀疏线性反向对所有细胞计算 `W_base.T @ gradient`，不只选取实际发放索引，因此静默细胞的潜在代理梯度不会被丢弃。固定矩阵没有梯度，不构造 N×N 密集图、不按步重建边权。
 
 `run(inputs, state)` 的输入是每步一个 N 维 mV 向量，可传迭代器。返回脉冲序列和完整状态；连续两段传递状态与一次运行一致。`reset()` 重置动态状态而不重置训练参数；`state.detach()` 截断全部状态（含延迟队列）的梯度。跨模型状态、非法精度/形状、非有限参数/输入/状态会明确报错。
+
+## 可选 L1–L5 背景工作状态
+
+`brain.tonic.LaminaTonicLIF` 是独立身份 `cnsbridge.lamina_tonic_lif.v1` 的数值研究变体。原 `TrainableLIF` 与 P1 继续严格无背景、只有 theta；不会默认启用此变体。背景候选针对完全静息时抑制性 R1–R6 输入无法产生第一批非输入脉冲这一[方程推论](../specs/spec-008-trainable-snn/signal-observability.md)，尚无完整图传播或任务收益实测。
+
+生产构造 `LaminaTonicLIF(graph, input_body_ids, mode="learnable")` 或 `from_reference(...)` 保留全部节点、边与原始符号，选择全部精确原始类型 L1、L2、L3、L4、L5。每组必须有注释成员；缺失、空类型和相似字符串不推断为这些类型，且不能与外部输入细胞重叠。仅显式 `for_numerical_test(..., tonic_types=("L1",))` 可选择保持 L1–L5 顺序的非空子集；这种小电路有 test-only 身份，不是替代脑。
+
+```text
+offset[type] = 16 * sigmoid(rho[type]) mV
+integrated_v += (1-exp(-dt/tau_m)) * offset
+```
+
+初始 rho=0，对应8mV；`nextafter` 保持有限 rho 的偏移严格在(0,16)内，非成员严格0。**8mV 是工程初始化假设，不是已测果蝇生理常数。** 此项只进入活动细胞的膜电位解析积分，不直接增加 g，不扩大 input_mask，也不取消 L1–L5 不应期。没有下降神经元动作偏置。`tonic_offsets_mv` 返回每类型偏移，`reset()` 仅清动态状态、保留学到的 rho。
+
+`mode="learnable"` 将 rho 注册为参数；`mode="fixed"` 将其注册为不参与优化器的 buffer。两者初始化前向相同，但身份不同、不能交换状态。严格零背景对照应使用原 `TrainableLIF`，不能用极负 rho 近似。变体身份包括模式、类型顺序、成员 body ID 摘要、数量、公式、初值、范围和源码摘要。整个图的统一 LIF 仍是建模近似。
+
+默认8mV下，无突触单细胞从−52mV到严格超过−45mV首次发放为约41.6ms。数值检查使用独立指数解核对电位、首次发放、复位、不应期和 rho 梯度；该结果不是完整图观察。未来可观测性实验须预先登记足够预热及观察窗，在同一协议比较空白与位置/尺度变化；背景自发发放本身不证明视觉传播。零背景、固定背景、可学习背景分别报告；比较冻结/可训练内部增益时保持背景条件一致。
+
+**本批不支持变体 checkpoint。** `learning.checkpoint` 只接受原 gain-only 动力学 schema 和精确的 theta 参数集合：保存、恢复和生产加载均拒绝 tonic，包括 fixed 模式，拒绝额外参数及 metadata 参数键。在创建目录或修改参数前报错，避免静默遗漏 rho。变体的完整持久化在后续策略批次实现；不要将裸 `state_dict()` 当作具备来源验证的 checkpoint。共享核心源码改变会改变模型身份，旧源码身份的 checkpoint 不自动兼容。
 
 ## P1：登记完整图内部更新探针
 
