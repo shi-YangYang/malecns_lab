@@ -5,9 +5,10 @@
 用户已授权完成全部路线、删除无用内容、每步 commit。活动 goal 不因 P0/P1 或文档通过而结束，参见 [Decision 009](../decisions/009-fullgraph-training-execution.md)。此前“本轮只规划/不训练/不提交”的记录仅指历史阶段。
 
 - 前置基线已复核并提交 `69f0711`：完整数据、V2 离线研究工具与规划。没有重复已通过的旧诊断。
-- [P0 核心](../../specs/spec-008-trainable-snn/p0-core.md) 已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p0.md)，19项定向检查；尚无全图更新。独立 `.venv-train` 已安装 torch 2.14.1、NumPy 2.5.4、SciPy 1.18.1、pytest 9.1.1、psutil 7.2.2 等。旧 `.venv` 保留。
-- [P2a 环境](../../specs/spec-008-trainable-snn/p2-environment.md) Ready / 实施中；与核心独立，仅依赖已有 BodyVelocity，不提前启动训练。
-- [V1 清理](../../specs/spec-008-trainable-snn/cleanup-v1.md) 代码及20项定向检查通过，但独立验收发现两处文档引用需S0返工，尚未提交。V2 已能替代该离线流程，旧设备链仍保留到新链完成。
+- [P0 核心](../../specs/spec-008-trainable-snn/p0-core.md) 已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p0.md)并提交 `44aa5ac`，19项定向检查；尚无全图更新。独立 `.venv-train` 已安装 torch 2.14.1、NumPy 2.5.4、SciPy 1.18.1、pytest 9.1.1、psutil 7.2.2 等。旧 `.venv` 保留。
+- [P2a 环境](../../specs/spec-008-trainable-snn/p2-environment.md) 已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2a.md)；三轴环境、像素检测、分区与日志齐全。已有训练场景视觉基线合格率75% / 零动作0%，二者任务成功均为false；不是 SNN 结果。
+- P1 探针工具正在实施；首次运行前系统 available 约3.4GiB，低于预留4GiB条件，已询问用户能否释放闲置应用内存。按协议保留登记和失败证据，不静默改预算或剪图。
+- [V1 清理](../../specs/spec-008-trainable-snn/cleanup-v1.md) 及20项定向检查通过；两处文档问题经新实施者返工、新验收者确认 PASS，已提交 `4e4a67f`。V2 已替代该离线流程，旧设备链仍保留到新链完成。
 - 三批实现文件互不重叠；分别由实施者返回后再独立验收，root 管理阶段提交。尚未完成全图内部更新、三轴学习、对照研究或实飞。
 
 后续依次完成 P1 有预算的完整图内部更新、训练集成与实际闭环学习、冻结/恢复/重连比较、部署时延及 Tello 实验。无实测不得把目标写成已完成；硬件动作需当前现场状态，自动化检查不触发飞行。
