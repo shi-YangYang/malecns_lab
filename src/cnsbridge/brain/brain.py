@@ -13,6 +13,14 @@ from .connectome import Connectome, GroupSpec
 from .lif import LIFNetwork, LIFParams
 
 
+def require_production_connectome(connectome: Connectome) -> None:
+    """Research perturbations must never enter production or device paths."""
+    if connectome.meta.get("synthetic"):
+        raise ValueError("Synthetic connectome is not supported")
+    if connectome.meta.get("asset_type") == "research_control" or connectome.meta.get("research_control"):
+        raise ValueError("research_control connectomes require an explicit offline research interface")
+
+
 def load_connectome(source: str | Path) -> Connectome:
     path = project_asset_path(source)
     if path.suffix.lower() != ".npz":
@@ -23,8 +31,11 @@ def load_connectome(source: str | Path) -> Connectome:
             "`cnsbridge build-brain` first; no replacement network is available"
         )
     connectome = Connectome.load(path)
-    if connectome.meta.get("synthetic"):
-        raise ValueError(f"Synthetic connectome is not supported: {path}")
+    require_production_connectome(connectome)
+    if connectome.meta.get("asset_type") == "full_reference":
+        from .reference import validate_reference
+
+        validate_reference(connectome)
     return connectome
 
 
@@ -32,6 +43,11 @@ class Brain:
     """A simulated fly brain with sensory entry points and motor read-outs."""
 
     def __init__(self, connectome: Connectome, cfg: dict, seed: int | None = None, _net: LIFNetwork | None = None):
+        require_production_connectome(connectome)
+        if connectome.meta.get("asset_type") == "full_reference":
+            from .reference import validate_reference
+
+            validate_reference(connectome)
         self.cfg = cfg
         self.connectome = connectome
         bcfg = cfg.get("brain", {})
@@ -42,7 +58,24 @@ class Brain:
         for s in self.output_specs.values():
             s.role = "output"
 
-        connectome.resolve_groups({**self.input_specs, **self.output_specs})  # always follow the current config
+        supplied = {**self.input_specs, **self.output_specs}
+        if connectome.meta.get("asset_type") == "full_reference":
+            recorded = connectome.meta["provenance"]["group_mapping"]
+            overlap = self.input_specs.keys() & self.output_specs.keys()
+            if overlap:
+                raise ValueError(f"Full-reference input/output groups overlap: {', '.join(sorted(overlap))}")
+            if set(supplied) != set(recorded["rules"]):
+                raise ValueError("Full-reference group mapping requires the V2 configuration; do not reuse V1 mapping")
+            if any(spec.role != recorded["rules"][name]["role"] for name, spec in supplied.items()):
+                raise ValueError("Full-reference group roles must match the recorded V2 input/output mapping")
+
+        connectome.resolve_groups(supplied)  # always follow the current config
+        if connectome.meta.get("asset_type") == "full_reference":
+            if any(
+                connectome.body_ids[connectome.group(name)].tolist() != ids
+                for name, ids in recorded["body_ids"].items()
+            ):
+                raise ValueError("Full-reference group mapping requires the V2 configuration; do not reuse V1 mapping")
         connectome.meta.setdefault("roles", {})
         connectome.meta["roles"].update({k: "input" for k in self.input_specs})
         connectome.meta["roles"].update({k: "output" for k in self.output_specs})

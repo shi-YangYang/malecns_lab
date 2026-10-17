@@ -27,6 +27,7 @@
 - [experiments/tello/](../src/cnsbridge/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
 - [drones/](../src/cnsbridge/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
 - 实验与学习命令直接运行包内模块，例如 `python -m cnsbridge.experiments.tello.trial --help` 和 `python -m cnsbridge.learning.train --help`。
+- V2 完整参考实验使用 `brain.reference`、`diagnostics.replay_v2` / `report_v2` 和 `learning.train_v2` 的独立入口与模式；`learning.train` 等 V1 入口及过滤资产只作历史流程，不能混用特征缓存。具体命令见 [V2 诊断](../docs/MODEL_V2_USAGE.md)和[学习工具](../docs/LEARNING_V2.md)。
 - [configs/](../configs/) 与包内 [defaults.yaml](../src/cnsbridge/defaults.yaml)：实验参数。
 - [tests/](../tests/)、[docs/](../docs/)、[examples/](../examples/)：测试、使用与研究文档、离线示例。
 - `data/`、`logs/`、`readout*.json`、`.venv/`：本地实验资产及环境，按 [.gitignore](../.gitignore) 留在源码提交之外。

@@ -19,7 +19,7 @@ from scipy import sparse
 # Neurotransmitter -> sign. Acetylcholine is the main excitatory transmitter in the
 # fly CNS; GABA and glutamate (via GluCl) are treated as inhibitory, as in
 # Shiu et al. 2024. Histamine is inhibitory (photoreceptor output).
-# Modulatory amines are treated as weakly excitatory by default.
+# Modulatory amines use an excitatory sign; no weaker amplitude is implied.
 NT_SIGN = {
     "acetylcholine": 1.0,
     "ach": 1.0,
@@ -46,13 +46,16 @@ class GroupSpec:
     side: str | None = None  # "L", "R" or None for both
     role: str = "hidden"  # "input", "output" or "hidden"
     note: str = ""
+    field: str = "type"
+    side_field: str | None = None
 
     @classmethod
     def from_dict(cls, name: str, d: dict) -> GroupSpec:
         types = d.get("types") or d.get("type") or []
         if isinstance(types, str):
             types = [types]
-        return cls(name=name, types=list(types), side=d.get("side"), role=d.get("role", "hidden"), note=d.get("note", ""))
+        return cls(name=name, types=list(types), side=d.get("side"), role=d.get("role", "hidden"),
+                   note=d.get("note", ""), field=d.get("field", "type"), side_field=d.get("side_field"))
 
 
 @dataclass
@@ -65,6 +68,8 @@ class Connectome:
     body_ids: np.ndarray | None = None
     groups: dict[str, np.ndarray] = field(default_factory=dict)
     meta: dict = field(default_factory=dict)
+    annotations: dict[str, np.ndarray] = field(default_factory=dict)
+    annotation_missing: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def n(self) -> int:
@@ -76,7 +81,9 @@ class Connectome:
 
     @property
     def n_synapses(self) -> int:
-        return int(np.abs(self.weights.data).sum())
+        # Float32 accumulation rounds large totals even when every edge is integer.
+        dtype = np.int64 if np.issubdtype(self.weights.data.dtype, np.integer) else np.float64
+        return int(np.abs(self.weights.data).sum(dtype=dtype))
 
     def summary(self) -> str:
         return (
@@ -85,36 +92,37 @@ class Connectome:
         )
 
     # ------------------------------------------------------------- selection
-    def select(self, type_patterns: list[str] | str, side: str | None = None) -> np.ndarray:
+    def select(self, type_patterns: list[str] | str, side: str | None = None, *,
+               field: str = "type", side_field: str | None = None) -> np.ndarray:
         if isinstance(type_patterns, str):
             type_patterns = [type_patterns]
         mask = np.zeros(self.n, dtype=bool)
-        types = self.types.astype(str)
+        types = (self.types if field == "type" else self.annotations[field]).astype(str)
         for pat in type_patterns:
             rx = re.compile(pat)
             mask |= np.fromiter((bool(rx.search(t)) for t in types), dtype=bool, count=self.n)
         if side:
-            mask &= self.sides.astype(str) == side
+            sides = self.sides if side_field is None else self.annotations[side_field]
+            mask &= sides.astype(str) == side
         return np.flatnonzero(mask)
 
     def resolve_groups(self, specs: dict[str, GroupSpec]) -> dict[str, np.ndarray]:
         for name, spec in specs.items():
-            self.groups[name] = self.select(spec.types, spec.side)
+            self.groups[name] = self.select(spec.types, spec.side, field=spec.field, side_field=spec.side_field)
         return self.groups
 
     def group(self, name: str) -> np.ndarray:
         return self.groups.get(name, np.zeros(0, dtype=np.int64))
 
     # ------------------------------------------------------------- io
-    def save(self, path: str | Path) -> Path:
+    def save(self, path: str | Path, *, overwrite: bool = True) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         W = self.weights.tocsc()
-        np.savez_compressed(
-            path,
+        arrays = dict(
             indptr=W.indptr,
             indices=W.indices,
-            data=W.data.astype(np.float32),
+            data=W.data if self.meta.get("format_version") == 2 else W.data.astype(np.float32),
             shape=np.array(W.shape),
             types=self.types.astype(str),
             sides=self.sides.astype(str),
@@ -123,26 +131,35 @@ class Connectome:
             groups=json.dumps({k: v.tolist() for k, v in self.groups.items()}),
             meta=json.dumps({"name": self.name, **self.meta}),
         )
+        for key, values in self.annotations.items():
+            arrays[f"annotation_{key}"] = values
+            arrays[f"missing_{key}"] = self.annotation_missing[key]
+        arrays["annotation_fields"] = np.asarray(sorted(self.annotations), dtype=str)
+        with path.open("wb" if overwrite else "xb") as stream:
+            np.savez_compressed(stream, **arrays)
         return path
 
     @classmethod
     def load(cls, path: str | Path) -> Connectome:
-        z = np.load(path, allow_pickle=False)
-        W = sparse.csc_matrix((z["data"], z["indices"], z["indptr"]), shape=tuple(z["shape"]))
-        meta = json.loads(str(z["meta"]))
-        groups = {k: np.asarray(v, dtype=np.int64) for k, v in json.loads(str(z["groups"])).items()}
-        sc = z["superclass"]
-        bid = z["body_ids"]
-        return cls(
-            name=meta.pop("name", Path(path).stem),
-            weights=W,
-            types=z["types"],
-            sides=z["sides"],
-            superclass=sc if sc.size else None,
-            body_ids=bid if bid.size else None,
-            groups=groups,
-            meta=meta,
-        )
+        with np.load(path, allow_pickle=False) as z:
+            W = sparse.csc_matrix((z["data"], z["indices"], z["indptr"]), shape=tuple(z["shape"]))
+            meta = json.loads(str(z["meta"]))
+            groups = {k: np.asarray(v, dtype=np.int64) for k, v in json.loads(str(z["groups"])).items()}
+            sc = z["superclass"]
+            bid = z["body_ids"]
+            fields = z["annotation_fields"].tolist() if "annotation_fields" in z else []
+            return cls(
+                name=meta.pop("name", Path(path).stem),
+                weights=W,
+                types=z["types"],
+                sides=z["sides"],
+                superclass=sc if sc.size else None,
+                body_ids=bid if bid.size else None,
+                groups=groups,
+                meta=meta,
+                annotations={key: z[f"annotation_{key}"] for key in fields},
+                annotation_missing={key: z[f"missing_{key}"] for key in fields},
+            )
 
     # ------------------------------------------------------------- subgraph
     def subgraph(self, keep: np.ndarray, name: str | None = None) -> Connectome:
@@ -163,6 +180,8 @@ class Connectome:
             body_ids=None if self.body_ids is None else self.body_ids[keep],
             groups=groups,
             meta={**self.meta, "parent": self.name, "subgraph_neurons": int(keep.size)},
+            annotations={key: values[keep] for key, values in self.annotations.items()},
+            annotation_missing={key: values[keep] for key, values in self.annotation_missing.items()},
         )
 
     def sensorimotor_core(self, hops: int = 3, max_neurons: int | None = None) -> Connectome:

@@ -163,12 +163,20 @@ class LIFNetwork:
         offs = np.repeat(starts - (csum - lens), lens) + np.arange(total, dtype=np.int64)
         return np.bincount(self._indices[offs], weights=self._data[offs], minlength=self.n).astype(np.float32)
 
-    def step(self) -> np.ndarray:
+    def step(self, external_events: np.ndarray | None = None) -> np.ndarray:
         """Advance one dt. Returns indices of neurons that spiked.
 
         Written with in-place numpy ops: at 166k neurons the per-step array
         work, not the synapses, is the main cost.
         """
+        # Explicit events replace (rather than add to) the legacy rate/RNG path.
+        # Validate before changing any neural state.
+        if external_events is not None:
+            external_events = np.asarray(external_events)
+            if (external_events.ndim != 1 or not np.issubdtype(external_events.dtype, np.integer)
+                    or np.any(external_events < 0) or np.any(external_events >= self.n)
+                    or len(np.unique(external_events)) != len(external_events)):
+                raise ValueError("external_events must contain unique valid integer neuron indices")
         p = self.p
         slot = self._t % self.delay_steps
         arriving = self._buf[slot]
@@ -179,7 +187,9 @@ class LIFNetwork:
         arriving.fill(0.0)
 
         # external Poisson drive
-        if self._input_idx.size:
+        if external_events is not None:
+            self.g[external_events] += np.float32(p.w_syn * p.poisson_factor)
+        elif self._input_idx.size:
             hit = self.rng.random(self._input_idx.size, dtype=np.float32) < self._input_rate * np.float32(p.dt / 1000.0)
             if hit.any():
                 np.add.at(self.g, self._input_idx[hit], np.float32(p.w_syn * p.poisson_factor))

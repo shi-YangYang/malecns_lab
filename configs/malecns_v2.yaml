@@ -1,0 +1,37 @@
+# Offline V2 full reference. Build with python -m cnsbridge.brain.reference.
+# Group selection is explicit; HAL is disabled in the V2 main input encoder.
+# This file does not authorize device operation or use the legacy MotorDecoder.
+brain:
+  source: data/malecns_v2/full_reference.npz
+  seed: 0
+  lif:
+    dt: 0.5
+    noise_mv: 0.0
+  bias:
+    DNg02_L: 8.0
+    DNg02_R: 8.0
+  record_neurons: 33
+inputs:
+  R16_L: {types: ['^R1-R6$'], side: L, side_field: rootSide}
+  R16_R: {types: ['^R1-R6$'], side: R, side_field: rootSide}
+  T4a_L: {types: ['^T4a$', '^T5a$'], side: L, side_field: somaSide}
+  T4a_R: {types: ['^T4a$', '^T5a$'], side: R, side_field: somaSide}
+  T4b_L: {types: ['^T4b$', '^T5b$'], side: L, side_field: somaSide}
+  T4b_R: {types: ['^T4b$', '^T5b$'], side: R, side_field: somaSide}
+  T4c_L: {types: ['^T4c$', '^T5c$'], side: L, side_field: somaSide}
+  T4c_R: {types: ['^T4c$', '^T5c$'], side: R, side_field: somaSide}
+  T4d_L: {types: ['^T4d$', '^T5d$'], side: L, side_field: somaSide}
+  T4d_R: {types: ['^T4d$', '^T5d$'], side: R, side_field: somaSide}
+  LPLC2_L: {types: ['^LPLC2$'], side: L, side_field: somaSide}
+  LPLC2_R: {types: ['^LPLC2$'], side: R, side_field: somaSide}
+  LC4_L: {types: ['^LC4$'], side: L, side_field: somaSide}
+  LC4_R: {types: ['^LC4$'], side: R, side_field: somaSide}
+  HAL_L: {types: ['^haltere$'], field: subclass, side: L, side_field: rootSide, enabled: false}
+  HAL_R: {types: ['^haltere$'], field: subclass, side: R, side_field: rootSide, enabled: false}
+outputs:
+  DNg02_L: {types: ['^DNg02'], side: L, side_field: somaSide}
+  DNg02_R: {types: ['^DNg02'], side: R, side_field: somaSide}
+  DNp03_L: {types: ['^DNp03$'], side: L, side_field: somaSide}
+  DNp03_R: {types: ['^DNp03$'], side: R, side_field: somaSide}
+  DNp01_L: {types: ['^DNp01$', '^GF$'], side: L, side_field: somaSide}
+  DNp01_R: {types: ['^DNp01$', '^GF$'], side: R, side_field: somaSide}

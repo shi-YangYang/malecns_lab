@@ -13,8 +13,9 @@
 ## 当前状态
 
 - 已有 Tello 地面连接、视频、神经输出观察与分阶段短时实飞工具。既有实飞使用人工设计的读出与监督逻辑。
-- 已有共享运动表示、岭回归解码器、设备适配器，以及地面录像、人工标注、离线特征提取和按场景评估的流程。
-- 已有离线神经活动诊断：重放同一段录像，查看编码输入、群组放电和采样神经元热图，按刺激区间比较；不需要期望动作标签。
+- 第二版使用已核实的完整官方神经元参考图：166,700 个节点、25,582,938 条内部有向连接、124,177,617 个突触计数，保留原始自连接和孤立节点，不采用旧阈值 3。数据边界和构建证据见 [V2 设计](docs/MODEL_V2.md)及 [P0 实施报告](specs/spec-007-model-v2/implementation-p0.md)。
+- 已有共享运动表示、岭回归解码器、设备适配器，以及地面录像、人工标注、离线特征提取和按场景评估的流程。V2 的诊断与学习接口独立版本化，不能混用旧特征缓存。
+- 已完成完整参考图的六类标准视觉刺激诊断：编码输入和输出神经活动随刺激变化；有静默及左右不对称，不能自动解释为正确动作。[实测记录与信号图](docs/MODEL_V2_USAGE.md#7-已完成的完整图诊断)同时给出覆盖、耗时和限制。
 - 新解码器尚未完成真实数据上的有效性验证，也尚未接入实飞。差速底盘适配器只有离线数学转换，尚未连接实体底盘。
 - 所有脑处理入口使用真实 MaleCNS 数据构建的连接组模型；缺少模型时直接报错，不切换到替代网络。这里运行的是连接组驱动的神经仿真，不是活体果蝇大脑。
 - 尚未证明可靠避障、连接组优于直接视觉控制，或跨设备迁移。真实录像下的神经响应仍需实际采集和分析。
@@ -33,31 +34,35 @@ python -m pip install -e '.[tello,data,analysis,dev]'
 
 ## 先观察神经信号
 
-先准备真实连接组，已有模型时跳过下载和构建：
+第二版入口使用 `data/malecns_v2/full_reference.npz`。当前工作区已经从完整官方 v1.0 数据构建并核对该资产，直接使用即可。完整指已发布 minconf 0.5 数据下、作者定义的神经元全集之间全部非零连接；片段、胶质记录及发布边界另有账本，不冒充额外完整神经元。
+
+还没有录像时，可以先用明确标为人工生成的标准视觉刺激驱动完整真实网络，观察信号：
 
 ```bash
-cnsbridge download malecns
-cnsbridge build-brain --out data/malecns_brain.npz
+python -m cnsbridge.diagnostics.replay_v2 \
+  --stimulus static --observation-seconds 0.2 --repeat 2 \
+  --budget-seconds 300 --out data/neural_v2/static_01
 ```
 
-已有 `data/malecns_brain.npz` 时可以直接使用。所有脑入口默认从源码工程根解析该文件；配置中的真实模型缺失时会停止，不回退到其他网络。过滤条件和来源见 [研究与数据](docs/RESEARCH.md)。
+每段额外包含固定 2 秒预热。输出使用新的目录，已有目录会被拒绝；命令不连接设备、不训练动作，也不将标准刺激当成真实飞行录像。详细入口和产物见 [V2 使用说明](docs/MODEL_V2_USAGE.md)。
 
-将 Tello 固定在地面，关闭手机 App 和其他 Tello 程序，让电脑连接 Tello Wi-Fi：
+后续把 Tello 固定在地面、连接其 Wi-Fi 后录制：
 
 ```bash
 python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
 ```
 
-该工具读取遥测、保存视频与时间戳，不起飞、不发送运动指令。固定相机，按静止、横向移动、正前方靠近的顺序展示刺激。具体 30 秒安排见 [神经活动诊断](docs/NEURAL_ACTIVITY.md)。
-
-录完后断开 Tello 也能分析。将 `SESSION` 换成采集命令输出的会话目录名，使用新的输出目录：
+录制工具不起飞、不发送运动指令。采集完成后可断开 Tello，再重放；将 `SESSION` 替换为实际会话目录，同源素材使用同一 `family-id`：
 
 ```bash
-python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
-  --out-dir data/neural_activity/run_01
+python -m cnsbridge.diagnostics.replay_v2 \
+  --recording data/ground_recordings/SESSION --family-id room_a_session_01 \
+  --out data/neural_v2/recording_01
 ```
 
-打开输出的 `index.html` 查看曲线与热图。此时 `labels.csv` 无需填写；按实际视频时间另写 `stimuli.csv`，再使用 `--stimuli` 可比较不同刺激下的活动。图中的响应是网络仿真结果，尚不代表正确动作或避障能力。确认信号后，再按 [数据集流程](docs/DATASET.md) 标注期望动作、训练解码器。
+信号诊断无需填写动作标签。固定相机前的物体移动是视觉刺激，不能自动变成无人机动作目标。确认信号后，再独立标注期望动作；真实训练与评估需要采集数据，当前未据此证明动作效果。
+
+旧 `cnsbridge build-brain`、`diagnostics.activity` 和旧学习入口保留作 V1 历史流程，使用的过滤图与编码不属于 V2 完整参考实验。不要用它们重建或覆盖 V2 资产。
 
 ## 项目结构
 
@@ -74,15 +79,17 @@ python -m cnsbridge.diagnostics.activity data/ground_recordings/SESSION \
 | `tests/` | 对应模块的检查 |
 | `data/`、`logs/` | 本地数据、模型与实验记录，不作为源码提交 |
 
-代码从 `cnsbridge.control`、`cnsbridge.learning` 和 `cnsbridge.experiments.tello` 导入。实验与学习入口直接运行包内模块，例如 `python -m cnsbridge.learning.prepare --help`。源码工作区的 `configs/`、`data/`、`logs/` 路径不随启动目录变化，设备实验仍使用当前 checkout 的 editable 安装。
+代码从 `cnsbridge.control`、`cnsbridge.learning` 和 `cnsbridge.experiments.tello` 导入。实验与学习入口直接运行包内模块，例如 `python -m cnsbridge.learning.train_v2 --help`。源码工作区的 `configs/`、`data/`、`logs/` 路径不随启动目录变化，设备实验仍使用当前 checkout 的 editable 安装。
 
-保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；新解码器使用 `python -m cnsbridge.learning.train`。
+保留的命令行工具为 `download`、`build-brain`、`inspect`、`calibrate`、`bench`。`calibrate` 服务于旧读出基线；V2 掩码读出使用 `python -m cnsbridge.learning.train_v2`，旧 `learning.train` 仍属于 V1 流程。
 
 ## 文档
 
 - [架构与接口](docs/ARCHITECTURE.md)：模块、动作坐标和扩展方式。
-- [神经活动诊断](docs/NEURAL_ACTIVITY.md)：刺激拍摄、独立标注、离线重放与读图。
-- [数据集流程](docs/DATASET.md)：地面采集、标注、离线训练与评估。
+- [V2 完整脑诊断](docs/MODEL_V2_USAGE.md)：完整图、真实录像和标准刺激重放、信号图与实测结果。
+- [V2 掩码学习](docs/LEARNING_V2.md)：独立动作标签、场景族分区、训练和严格配对评估。
+- [V2 研究对照](docs/EXPERIMENT_V2.md)：完整图派生 R/W/P、协议登记、独立拟合和失败记录。
+- [旧神经活动流程](docs/NEURAL_ACTIVITY.md)与[旧数据集流程](docs/DATASET.md)：V1 操作及可复用的采集背景，V2 以新版文档为准。
 - [Tello 实验](docs/TELLO.md)：地面检查、已有实飞工具及结果边界。
 - [研究与数据](docs/RESEARCH.md)：建模假设、连接组构建、对照实验与引用。
 
