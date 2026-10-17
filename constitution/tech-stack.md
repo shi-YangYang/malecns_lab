@@ -10,6 +10,7 @@
 | 构建与安装 | setuptools >= 68、wheel，构建后端 `setuptools.build_meta`；pip 与 venv |
 | 核心依赖 | NumPy >= 1.24、SciPy >= 1.10、PyYAML >= 6.0 |
 | 可选依赖 | `vision`：OpenCV；`analysis`：OpenCV、Matplotlib；`data`：pandas、pyarrow；`tello`：DJITelloPy、OpenCV；`dev`：pytest、Ruff |
+| 独立训练环境 | `.venv-train`；`train` 可选依赖为 PyTorch 2.14.1、psutil；P0 核心仅支持 CPU 稀疏计算，尚不承诺 MPS 或实时性 |
 | CLI | `cnsbridge` → `cnsbridge.cli:main`；download、build-brain、inspect、calibrate、bench |
 | 测试与检查 | pytest，测试目录 `tests/`；Ruff 配置在 `pyproject.toml`，目标 Python 3.11，行长 130 |
 | 数据与持久化 | 本地连接组、NPZ、JSON、CSV 和视频；没有数据库服务 |
@@ -26,11 +27,12 @@
 - [diagnostics/](../src/cnsbridge/diagnostics/)：离线录像重放、模拟神经活动记录与刺激比较；不产生设备动作。见 [Decision 004](../.ai/decisions/004-neural-activity.md)。
 - [experiments/tello/](../src/cnsbridge/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
 - [drones/](../src/cnsbridge/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
-- 实验与学习命令直接运行包内模块，例如 `python -m cnsbridge.experiments.tello.trial --help` 和 `python -m cnsbridge.learning.train --help`。
-- V2 完整参考实验使用 `brain.reference`、`diagnostics.replay_v2` / `report_v2` 和 `learning.train_v2` 的独立入口与模式；`learning.train` 等 V1 入口及过滤资产只作历史流程，不能混用特征缓存。具体命令见 [V2 诊断](../docs/MODEL_V2_USAGE.md)和[学习工具](../docs/LEARNING_V2.md)。
+- 实验与学习命令直接运行包内模块，例如 `python -m cnsbridge.experiments.tello.trial --help` 和 `python -m cnsbridge.learning.train_v2 --help`。
+- V2 完整参考实验使用 `brain.reference`、`diagnostics.replay_v2` / `report_v2` 和 `learning.train_v2` 的独立入口与模式；V1 重复离线流程按 [清理子批](../specs/spec-008-trainable-snn/cleanup-v1.md)移除，过滤资产仅作历史证据，不混用特征缓存。具体命令见 [V2 诊断](../docs/MODEL_V2_USAGE.md)和[学习工具](../docs/LEARNING_V2.md)。
+- `brain.trainable` / `trainable_graph` 提供独立可训练核心及完整图身份，数值契约见 [TRAINABLE_SNN](../docs/TRAINABLE_SNN.md)。核心实现与数值检查不代表完整图训练或任务学习成功；阶段证据见 Spec 008。
 - [configs/](../configs/) 与包内 [defaults.yaml](../src/cnsbridge/defaults.yaml)：实验参数。
 - [tests/](../tests/)、[docs/](../docs/)、[examples/](../examples/)：测试、使用与研究文档、离线示例。
-- `data/`、`logs/`、`readout*.json`、`.venv/`：本地实验资产及环境，按 [.gitignore](../.gitignore) 留在源码提交之外。
+- `data/`、`logs/`、`readout*.json`、`.venv/`、`.venv-train/`：本地实验资产及环境，按 [.gitignore](../.gitignore) 留在源码提交之外。
 - `AGENTS.md`、`constitution/`、`specs/`、`.ai/`：Agent 治理；不替代业务目录。
 
 ## 命令参考与使用条件
@@ -42,7 +44,7 @@
 | 建立环境 | `python3 -m venv .venv` | 仅在尚无所需环境时 |
 | 安装开发与实验依赖 | `.venv/bin/python -m pip install -e '.[tello,data,dev]'` | 安装或依赖确需更新时 |
 | 查看 CLI | `.venv/bin/cnsbridge --help` | 需要核对命令入口时 |
-| 离线示例 | `.venv/bin/python examples/04_shared_motion_decoder.py` | 合成输入，仅演示接口，不连接设备 |
+| 完整图诊断 | `.venv/bin/python -m cnsbridge.diagnostics.replay_v2 --help` | 查看现行入口；实际重放按已登记协议执行 |
 | 定向测试 | `.venv/bin/python -m pytest tests/test_universal_decoder.py` | 共享动作或新读出发生相关改动时，按风险调整范围 |
 | 全部测试 | `.venv/bin/python -m pytest` | 只有明确的跨模块风险或任务要求才使用 |
 | 定向静态检查 | `.venv/bin/python -m ruff check <本次相关路径>` | 存在相关需要时；尖括号内容须替换 |

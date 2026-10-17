@@ -32,4 +32,4 @@ Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写�
 - [spec-005-remove-minifly](spec-005-remove-minifly/spec.md)：移除合成飞行网络，所有脑入口统一真实连接组。
 - [spec-006-malecns-audit](spec-006-malecns-audit/spec.md)：原始数据过滤、输入输出通路与群组覆盖审计；用户报告见 [MaleCNS 审计](../docs/MALECNS_AUDIT.md)。
 - [spec-007-model-v2](spec-007-model-v2/spec.md)：第二版 MaleCNS 模型设计及完整图诊断、学习与对照工具；[P0–P3 离线实施](spec-007-model-v2/execution-plan.md)已独立验收完成，M4 真实动作研究待数据。设计见 [MODEL_V2](../docs/MODEL_V2.md)。
-- [spec-008-trainable-snn](spec-008-trainable-snn/spec.md)：用户新目标为训练 MaleCNS 网络内部参数，实现指定目标跟随的前进、升降和转向；当前仅 Mac，状态 Draft / Planning，尚未实现训练后端或闭环任务。冻结脑读出转为实验对照。
+- [spec-008-trainable-snn](spec-008-trainable-snn/spec.md)：训练完整 MaleCNS 网络内部参数，实现指定目标跟随的前进、升降和转向；当前仅 Mac，已授权分阶段实施、清理与逐步提交。P0 核心、P2a 独立环境及 V1 清理子批 Ready，整体训练/研究/实飞结果尚未完成。冻结脑读出保留为实验对照。
