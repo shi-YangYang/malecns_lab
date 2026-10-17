@@ -77,3 +77,23 @@ theta 初始为 0。缺失、空串与全空白注释进入组 0，其余原始�
 前向脉冲严格二值，反向使用 `1 / (scale * (1 + abs((v-threshold)/scale))**2)`，默认 scale=1 mV。复位门、不应期门停止梯度，递归传播脉冲保留代理梯度。稀疏线性反向对所有细胞计算 `W_base.T @ gradient`，不只选取实际发放索引，因此静默细胞的潜在代理梯度不会被丢弃。固定矩阵没有梯度，不构造 N×N 密集图、不按步重建边权。
 
 `run(inputs, state)` 的输入是每步一个 N 维 mV 向量，可传迭代器。返回脉冲序列和完整状态；连续两段传递状态与一次运行一致。`reset()` 重置动态状态而不重置训练参数；`state.detach()` 截断全部状态（含延迟队列）的梯度。跨模型状态、非法精度/形状、非有限参数/输入/状态会明确报错。
+
+## P1：登记完整图内部更新探针
+
+工具仅做数值可行性验证，不连接设备、不解释飞行动作。固定协议来自 [P1 子规格](../specs/spec-008-trainable-snn/p1-fullgraph-probe.md)：全部原始 `R1-R6` 每 67 步接受 68.75 mV 增量，dt=0.1 ms，共 200 步；固定 `L1` 最终膜电位对 -50 mV 求 MSE，Adam lr=0.01 仅更新一次内部类型 theta。没有可学习输入或动作读出。相同初态输入分别重放更新前、更新后、恢复零 theta 和重新加载 checkpoint；同时复核原始完整图整数计数摘要。
+
+```sh
+PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.probe \
+  --graph data/malecns_v2/full_reference.npz \
+  --out data/trainable_probe_NEW_RUN
+```
+
+输出必须是新目录。父进程先写 `registration.json`，再启动 CPU float32 / 4 线程子进程。首次墙钟预算 600 s，RSS 上限 6 GiB；启动前按可用内存减去系统预留 4 GiB 收紧上限，若无剩余预算则拒绝启动。运行中采样进程树 RSS、系统可用内存和墙钟；超过预算会终止子进程，写明失败原因。采样监督不是操作系统级硬内存隔离。
+
+`result.json` 是父进程最终状态；`worker_result.json` 保存完成数值流程的阶段时间、梯度、参数和响应变化、恢复比较及图身份。正常完成还会有 `resources.csv`、`worker.log`、`model_identity.json`、`baseline.npz`、`update.npz`、`responses.npz` 和 `checkpoint/`。仅有日志、checkpoint 或子进程退出码 0 都不能判为完成。损失上升会如实记录，不通过换目标制造下降；非零内部参数和下游响应变化也只证明一次数值更新，不能证明学会目标跟随。
+
+新登记与数值结果使用 v2 证据模式。登记摘要绑定固定协议、资源配置和实现摘要；worker、三个 NPZ 和 checkpoint 都关联同一登记/协议身份，结果还记录全部数值产物的 SHA256。通用资源监督的 `completed` 仅表示进程正常退出。随后 `probe_evidence` 只读小型 JSON/NPZ，核对身份、摘要、维度、有限值、单次 Adam 与增益关系，并从保存数组复算参数/响应变化、损失和两次恢复判据；通过后才把 P1 最终状态设为 `passed`。它不导入 Torch、不重载完整图或重新仿真。缺失、损坏、自相矛盾或来自其他登记的证据写为 `invalid_probe_evidence`；软件夹具校验通过不构成完整图运行证据。
+
+checkpoint 由 `parameters.npz` 与 `checkpoint.json` 组成，禁止 pickle。保存原始精度 theta、完整模型/图/类型分组/输入集合身份和数组摘要。`learning.checkpoint.load_checkpoint(directory, reference=...)` 必须匹配另行验证的完整参考图，拒绝身份、精度、形状或有限性不符。数值夹具只可用 `restore_checkpoint` 恢复到身份相同的夹具，不可进入生产加载。
+
+2026-10-17 首次实际登记 `data/trainable_probe_20261017_p1/`：可用内存 **3,674,931,200 bytes**，低于 4 GiB 预留，结果 `resource_preflight_failed` / `not_launched`。没有加载全图、计算梯度或生成模型，**P1 的完整图学习验收仍未通过**。首轮 v1 原始文件保持不变；原工具的 16 项检查未覆盖完整证据验证，独立审查的缺口及本次修复见 P1a 返工记录。后续只有资源条件变化且工具验收完成后，才能在新目录登记真正的全图计算，不能重复该失败作为进展。

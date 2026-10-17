@@ -1,0 +1,137 @@
+"""Persistence/parent failure semantics only; these fixtures are not full brains."""
+
+import json
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+from scipy import sparse
+
+torch = pytest.importorskip("torch")
+
+from cnsbridge.brain.metadata import canonical_hash, file_hashes  # noqa: E402
+from cnsbridge.brain.trainable import TrainableLIF  # noqa: E402
+from cnsbridge.learning.checkpoint import load_checkpoint, read_checkpoint, restore_checkpoint, save_checkpoint  # noqa: E402
+from cnsbridge.learning.probe import run_registered  # noqa: E402
+from cnsbridge.learning.resource_guard import GIB, resource_budget, supervise  # noqa: E402
+
+
+def fixture_model(dtype=torch.float32):
+    return TrainableLIF.for_numerical_test(sparse.csc_matrix(np.array([[0, 0], [3, 0]], dtype=np.int64)),
+                                         [0], types=np.array(["input", "readout"]), dtype=dtype)
+
+
+def rewrite_metadata(directory, mutate):
+    path = directory / "checkpoint.json"
+    metadata = json.loads(path.read_text())
+    mutate(metadata)
+    metadata.pop("checkpoint_id")
+    metadata["checkpoint_id"] = canonical_hash(metadata)
+    path.write_text(json.dumps(metadata))
+
+
+def test_checkpoint_exact_roundtrip_and_explicit_test_role(tmp_path):
+    model = fixture_model()
+    with torch.no_grad():
+        model.theta.copy_(torch.tensor([0.01, -0.23, 0.4]))
+    expected = model.theta.detach().clone()
+    metadata = save_checkpoint(model, tmp_path / "checkpoint")
+    assert metadata["model"]["graph"]["role"] == "numerical_test_only"
+    with torch.no_grad():
+        model.theta.zero_()
+    restore_checkpoint(model, tmp_path / "checkpoint")
+    torch.testing.assert_close(model.theta, expected, rtol=0, atol=0)
+    with pytest.raises(ValueError, match="full_reference"):
+        load_checkpoint(tmp_path / "checkpoint", reference=model.graph)
+    with pytest.raises(FileExistsError):
+        save_checkpoint(model, tmp_path / "checkpoint")
+
+
+@pytest.mark.parametrize("change", ["bytes", "metadata", "dtype", "input", "grouping", "shape", "nonfinite"])
+def test_invalid_checkpoint_never_mutates_parameters(tmp_path, change):
+    model = fixture_model()
+    directory = tmp_path / "checkpoint"
+    save_checkpoint(model, directory)
+    if change == "bytes":
+        with (directory / "parameters.npz").open("ab") as stream:
+            stream.write(b"changed")
+    elif change == "metadata":
+        path = directory / "checkpoint.json"
+        value = json.loads(path.read_text())
+        value["schema"] = "other"
+        path.write_text(json.dumps(value))
+    elif change == "dtype":
+        model = fixture_model(torch.float64)
+    elif change == "input":
+        rewrite_metadata(directory, lambda item: item["model"].update(input_body_ids=[]))
+    elif change == "grouping":
+        rewrite_metadata(directory, lambda item: item["model"]["graph"]["grouping"].update(mapping_sha256="wrong"))
+    else:
+        theta = np.zeros(4 if change == "shape" else 3, dtype=np.float32)
+        if change == "nonfinite":
+            theta[0] = np.nan
+        np.savez(directory / "parameters.npz", theta=theta)
+        rewrite_metadata(directory, lambda item: item.update(arrays_sha256=file_hashes(directory / "parameters.npz")["sha256"]))
+    before = model.theta.detach().clone()
+    with pytest.raises(ValueError):
+        restore_checkpoint(model, directory)
+    torch.testing.assert_close(model.theta, before, rtol=0, atol=0)
+
+
+def test_resource_budget_reserves_system_memory():
+    assert resource_budget(12 * GIB)["effective_rss_limit_bytes"] == 6 * GIB
+    assert resource_budget(7 * GIB)["effective_rss_limit_bytes"] == 3 * GIB
+    assert not resource_budget(4 * GIB)["can_launch"]
+    assert not resource_budget(3 * GIB)["can_launch"]
+
+
+def test_preflight_failure_is_registered_and_does_not_launch(tmp_path, monkeypatch):
+    import cnsbridge.learning.probe as probe
+    monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=3 * GIB))
+    monkeypatch.setattr(probe, "supervise", lambda *args, **kwargs: pytest.fail("Child must not launch"))
+    directory = tmp_path / "failed"
+    result = run_registered(Path("not-even-loaded.npz"), directory)
+    assert result["reason"] == "resource_preflight_failed"
+    assert json.loads((directory / "registration.json").read_text())["protocol"]["steps"] == 200
+    assert json.loads((directory / "result.json").read_text())["worker_status"] == "not_launched"
+    with pytest.raises(FileExistsError):
+        run_registered(Path("not-even-loaded.npz"), directory)
+
+
+@pytest.mark.parametrize("mode,expected", [("status_only", "completed"), ("checkpoint_only", "completed"),
+                                          ("nonzero_exit", "failed"), ("malformed", "completed")])
+def test_supervisor_completion_never_claims_numeric_success(tmp_path, mode, expected):
+    directory = tmp_path / mode
+    directory.mkdir()
+    report = directory / "worker_result.json"
+    code = "from pathlib import Path; import sys; "
+    if mode in ("status_only", "nonzero_exit"):
+        code += f"Path({str(report)!r}).write_text('{{\"status\": \"passed\"}}'); "
+    elif mode == "malformed":
+        code += f"Path({str(report)!r}).write_text('broken JSON'); "
+    else:
+        code += f"Path({str(directory / 'checkpoint')!r}).mkdir(); "
+    code += "sys.exit(7)" if mode == "nonzero_exit" else "sys.exit(0)"
+    result = supervise([sys.executable, "-c", code], directory, rss_limit_bytes=GIB,
+                       reserve_bytes=0, wall_seconds=10, poll_seconds=0.02)
+    assert result["status"] == expected
+    assert result["status"] != "passed"
+    assert result["returncode"] == (7 if mode == "nonzero_exit" else 0)
+    assert json.loads((directory / "result.json").read_text()) == result
+
+
+def test_timeout_terminates_child_and_retains_failure(tmp_path):
+    result = supervise([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path,
+                       rss_limit_bytes=GIB, reserve_bytes=0, wall_seconds=0.1, poll_seconds=0.02)
+    assert result["status"] == "failed" and result["reason"] == "wall_limit"
+    assert result["returncode"] != 0
+    assert result["wall_seconds"] < 5
+
+
+def test_rss_stop_is_distinct_from_success(tmp_path):
+    result = supervise([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path,
+                       rss_limit_bytes=1, reserve_bytes=0, wall_seconds=10, poll_seconds=0.02)
+    assert result["status"] == "failed" and result["reason"] == "rss_limit"
+    assert result["peak_observed_rss_bytes"] > 1
