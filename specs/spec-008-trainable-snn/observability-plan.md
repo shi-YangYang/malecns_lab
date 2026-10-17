@@ -1,6 +1,6 @@
 # 完整图配对可观测性诊断 — 候选协议
 
-状态：Draft，尚未实施或运行。P1尚无完整图成本测量，实际窗口与墙钟预算在运行前冻结；本文件不授权绕过资源门槛。独立只读设计审查由 `observability_plan_review` 完成。
+状态：Draft（实际实验协议），尚未运行。[P2d工具](p2d-observability-tools.md)的软件实现与本实验分开验收。P1尚无完整图成本测量，实际窗口与墙钟预算在运行前冻结；本文件不授权绕过资源门槛。独立只读设计审查由 `observability_plan_review` 完成。
 
 ## 问题与比较
 
@@ -26,6 +26,6 @@
 
 即便DN出现刺激依赖活动，也未证明正确空间语义、动作可控性、真实视网膜位置、连接组优势或飞行能力。先有可重复神经响应，再登记读出与任务训练。
 
-## 拟议工具边界
+## 工具边界
 
-未来入口 `diagnostics/observability.py --graph ... --protocol ... --out ...`，父进程在Torch导入/载图前登记与监督；子进程仅无梯度推进与记录。可复用resource_guard的资源机制，但需单独的证据schema与完成校验。此入口尚未实现，不能把本文件中的名称当作当前可运行命令。
+工具入口 `python -m cnsbridge.diagnostics.observability --graph ... --protocol ... --out ...`，父进程在Torch导入/载图前登记与监督；子进程仅无梯度推进与记录。复用resource_guard的资源机制，使用单独的证据schema与完成校验。软件状态见P2d，接口和产物见[使用文档](../../docs/OBSERVABILITY.md)；入口存在不代表本候选协议已经实际运行。

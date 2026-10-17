@@ -12,8 +12,10 @@
 - [旧仿真器清理](../../specs/spec-008-trainable-snn/cleanup-sim.md)已独立PASS并提交 `31b9761`；6项相关检查，感知回归改用明确的测试内针孔纹理刺激，未改Retina或新环境。
 - [P2b 映射](../../specs/spec-008-trainable-snn/p2b-mapping.md)已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2b.md)并提交 `4eada75`，29项定向检查。完整R1–R6输入、全部descending_neuron输出、元数据身份校验及工程空间事件编码已实现；未加载完整图或训练动作，见 NEURAL_INTERFACE 文档。
 - 新发现：3,377个R1–R6全部histamine，当前P0只驱动它们、其余细胞静息无背景时无法产生第一批非输入脉冲。此为方程与注释的静态推论，不是全图实测。P1对L1膜电位的优化仍有效，但不能据此推断多跳输出已接通。细节与文献边界见[可观测性记录](../../specs/spec-008-trainable-snn/signal-observability.md)。[Decision 010](../decisions/010-lamina-tonic-variant.md)已单列可选L1–L5背景假设，不改变原P0/P1无背景协议。
-- [P2c 数值变体](../../specs/spec-008-trainable-snn/p2c-tonic.md)已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2c.md)，53项定向检查通过。仅精确L1–L5的有界平衡点偏移，fixed/learnable模式独立身份，旧checkpoint明确拒绝变体以免遗漏rho；没有完整图传播或任务收益证据。独立设计审查与实施/验收报告均已读取处理；后续[配对可观测性候选协议](../../specs/spec-008-trainable-snn/observability-plan.md)为Draft、未实现，运行预算等待P1成本实测。本轮开始时可用内存约3.0GiB，未收到用户释放完成通知，没有重试P1；数值子批完成不代表整体目标完成。
-- 各实施/验收报告已读取处理，root按阶段提交。尚未完成全图内部更新、三轴学习、对照研究或实飞；整体goal保持active。
+- [P2c 数值变体](../../specs/spec-008-trainable-snn/p2c-tonic.md)已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2c.md)并提交 `d9d79a5`，53项定向检查通过。仅精确L1–L5的有界平衡点偏移，fixed/learnable模式独立身份，旧checkpoint明确拒绝变体以免遗漏rho；没有完整图传播或任务收益证据。独立设计审查与实施/验收报告均已读取处理。该轮开始时可用内存约3.0GiB，未收到用户释放完成通知，没有重试P1；数值子批完成不代表整体目标完成。
+- 2026-10-18的[P2d配对可观测性工具](../../specs/spec-008-trainable-snn/p2d-observability-tools.md)已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2d.md)，47项不同定向检查有通过记录。实现预登记、完整状态/相位分支、全部DN与完整节点计数、增量身份/hash保存及独立证据校验；实际[候选实验协议](../../specs/spec-008-trainable-snn/observability-plan.md)仍为Draft，窗口/预算将在P1实测后冻结。没有加载完整图或运行诊断，没有收到内存释放完成通知；实施与新验收报告均已读取处理。
+- 本轮再次只读复核：available=2.8643035888671875GiB、swap_used=7.70867919921875GiB，没有运行中的P1/配对诊断进程。仍低于4GiB系统预留，实际运行连续受相同条件阻塞；软件准备不能代替完整图证据。后续窗口/工作点/训练方案依赖P1成本和配对响应实测，不继续凭假设扩展训练实现。保留旧失败登记，等待用户内存释放完成通知后从新的输出目录继续。
+- 各实施/验收报告已读取处理，root按阶段提交。尚未完成全图内部更新、三轴学习、对照研究或实飞；整体目标未完成，不以工具子批通过结束完整路线。
 
 用户通知内存已释放后，先按现有P1协议在新的输出目录登记实际完整图更新，600s/6GiB上限与4GiB系统预留保持。遇到具体瓶颈保留原结果再定向解决；不重跑旧检查。随后完成视觉到下降神经元的可观测性诊断，必要的背景工作状态/分级电位假设单列数值契约与对照，再进入任务训练、内部干预/重连比较、部署时延及Tello实验。无实测不得写成完成；硬件动作需当前现场状态，自动化检查不触发飞行。
 

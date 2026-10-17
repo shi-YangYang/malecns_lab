@@ -1,0 +1,76 @@
+# 完整图配对可观测性工具
+
+该工具检查工程视觉输入是否使下降神经元的电位或发放发生变化。它使用完整 MaleCNS 参考图、全部 R1–R6 输入和全部 `descending_neuron`，比较原无背景模型与固定 8 mV 的 L1–L5 背景变体。不训练参数、不生成动作、不连接 Tello。
+
+当前交付是软件工具。数值夹具检查不代表完整图运行，尚无本工具的完整 MaleCNS 实验结果。实际运行仍等待内存条件恢复及 P1 成本测量；[候选实验协议](../specs/spec-008-trainable-snn/observability-plan.md)保持 Draft。
+
+## 创建候选协议
+
+从项目根目录使用独立训练环境：
+
+```bash
+PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+  --write-template data/observability_candidate.json
+```
+
+该命令只创建新 JSON 文件，不载入脑、不运行实验。已有文件会被拒绝，不自动覆盖。
+
+模板登记：
+
+- 两模式均为 CPU float32、4 线程、`theta=0`；固定背景的 `rho=0`，没有梯度或优化器。
+- 12×16 掩码输入，映射种子 1701、相位种子 1702、最大 150 Hz、事件增量 68.75 mV、神经步长 0.1 ms。
+- 七个条件依次为空白、居中、左、右、上、下和居中大块。五个小块各占4格，大块16格；不把位置赋予动作符号。等面积不保证事件量相同，实际事件会单列。
+- 每模式空白预处理100 ms；每分支刺激50 ms，然后连续撤除50 ms。每个分支从该模式同一个完整预处理基态与输入相位开始。预处理不意味着稳态。
+- 原始模板合计16,000神经步，即两模式累计1.6秒模拟时间，**不是墙钟耗时**。
+
+只有三个 `windows_ms` 可在登记前显式调整为1–1000的整数毫秒。固定条件、映射和模型不能删减。预算默认600秒总墙钟、6 GiB进程树RSS上限、4 GiB系统预留、0.1秒采样；只能缩短墙钟、减少RSS、增加预留或缩短采样间隔。预算监督是采样监督，不是操作系统硬限制。运行中不能自动延长窗口或重试。
+
+## 实际运行与校验
+
+以下是工具接口示例；应在 P1 成本测量后冻结协议，确认内存条件满足后再执行：
+
+```bash
+PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+  --graph data/malecns_v2/full_reference.npz \
+  --protocol data/observability_candidate.json \
+  --out data/observability_run_001
+```
+
+输出目录必须全新。父进程在导入 Torch、载入图之前写 `registration.json`，记录协议、步数账本、图路径、源码身份、当前内存和有效预算。可用内存不足时直接保存未启动终态。图只载入一次，两个模型依次构造与释放，所有导入、载图、计算和保存都在父监督范围内。
+
+```bash
+PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+  --validate-run data/observability_run_001
+```
+
+校验只读小产物，不导入 Torch、不载图、不重算脑。它核对当前源码身份、来源和模型绑定、配对状态、事件账本、数组形状/类型/数值、阶段计数、资源终态，并重算描述性汇总。当前源码变化会使原登记的身份校验失败；应使用对应登记版本解释历史结果，不能把不匹配当作新结果。
+
+正常子进程退出只表示 `completed`。只有完整证据通过才形成 `result.json` 中的 `protocol_complete`；任何缺失、损坏或资源中止都不能给出完整阳性或阴性结论。`response_observation` 单列是否观察到DN差异，**零差异也允许协议完整**，不等于实验失败。
+
+## 输出含义
+
+| 产物 | 内容 |
+|---|---|
+| `registration.json` | 时间、输入协议及hash、预算、完整神经步账本、实现hash |
+| `supervisor.json` / `resources.csv` | 保留原父监督终态、实际墙钟与采样RSS，不由领域结果覆盖 |
+| `phase.json` / `worker.log` | 最新模型、条件、阶段、模拟时钟、累计实际神经步及日志 |
+| `worker_result.json` | 图、注释、策略映射、空间映射、驱动和两个动力学身份及产物hash |
+| `source_identity.json` / 各模式 `identity.json` | 图/映射加载和模型构造后立即保存的身份；中断时仍能解释已完成产物 |
+| `selections.npz` | 全部body ID、原始类型分组及R1、DN、L1–L5索引顺序 |
+| 各模式 `base_state.npz` | 完整v/g、不应期、18步延迟队列、步号和模型身份 |
+| 各模式 `precondition.npz` | 仅计算一次的预处理记录，和七分支分开 |
+| 各模式七个条件NPZ | 每1 ms的所有DN发放计数与平均v/g、L1–L5汇总、R1实际事件/发放、全节点各阶段计数、输入相位/事件账本 |
+| 各模式 `artifacts.json` | 每个已完成产物立即保存hash；后续中止仍保留先前分支证据 |
+| 各模式 `parameters.npz` | 两端theta及rho，必须保持零；不是训练checkpoint |
+| `differences.npz` / `summary.json` | 各条件减同模式空白、左右/上下/小大配对的全部DN逐桶差，及增加/减少/原始/容差计数 |
+| `report.md` / `result.json` | 可读描述报告和独立校验后的协议完整性结果 |
+
+`time_ms` 是每1 ms桶结束时的绝对模拟时间；每步采样模型返回的**复位后**v/g，用float64累加后平均。它不是阈值前电位。发放计数为int64，各阶段与完整节点计数交叉核对。输入事件按每个R1细胞保留阶段计数，校验器独立逐步复算相位递推；撤除刺激不会重置时钟。
+
+电位/g使用预登记 `atol=1e-5 mV, rtol=1e-6` 判断数值差异，发放计数整数精确比较。原始有符号差始终保留，数值容差不是生物学显著性或统计p值。一个细胞可在不同时间同时列入增加与减少计数。
+
+## 研究边界
+
+直接掩码绕过相机识别，这只能检查工程输入编码。空间映射没有实测视网膜定位；统一LIF与8 mV背景是模型假设。背景发放自身不是视觉传播证据。完整运行没有DN差异，只能描述本刺激、动力学和有限窗口；L群静默与L群有活动但DN静默需结合原始记录区分。
+
+DN出现差异仍不证明正确空间语义、动作可控性、生理还原、拓扑优势或飞行能力。本批不改变既有P0/P1协议，也不支持将数值小电路作为生产脑。后续依据可重复观测另行登记读出与闭环训练。
