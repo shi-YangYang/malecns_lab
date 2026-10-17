@@ -7,12 +7,14 @@
 - 前置基线已复核并提交 `69f0711`：完整数据、V2 离线研究工具与规划。没有重复已通过的旧诊断。
 - [P0 核心](../../specs/spec-008-trainable-snn/p0-core.md) 已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p0.md)并提交 `44aa5ac`，19项定向检查；尚无全图更新。独立 `.venv-train` 已安装 torch 2.14.1、NumPy 2.5.4、SciPy 1.18.1、pytest 9.1.1、psutil 7.2.2 等。旧 `.venv` 保留。
 - [P2a 环境](../../specs/spec-008-trainable-snn/p2-environment.md) 已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2a.md)并提交 `365fab0`；三轴环境、像素检测、分区与日志齐全。已有训练场景视觉基线合格率75% / 零动作0%，二者任务成功均为false；不是 SNN 结果。
-- [P1a 工具](../../specs/spec-008-trainable-snn/p1-tools.md)经返工后独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p1-tools-r1.md)，16项初始检查和30项返工检查；最终通过须验证完整产物，不只信任退出码。首次实际登记 `data/trainable_probe_20261017_p1/` 的 available=3,674,931,200 bytes，低于预留4GiB，明确未启动模型。用户回答会先释放内存、完成后通知；尚未收到完成通知，不自动重试。P1实际更新/AC2仍未完成。
+- [P1a 工具](../../specs/spec-008-trainable-snn/p1-tools.md)经返工后独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p1-tools-r1.md)并提交 `0d6e18a`，16项初始检查和30项返工检查；最终通过须验证完整产物，不只信任退出码。首次实际登记 `data/trainable_probe_20261017_p1/` 的 available=3,674,931,200 bytes，低于预留4GiB，明确未启动模型。用户回答会先释放内存、完成后通知；尚未收到完成通知，不自动重试。P1实际更新/AC2仍未完成。
 - [V1 清理](../../specs/spec-008-trainable-snn/cleanup-v1.md) 及20项定向检查通过；两处文档问题经新实施者返工、新验收者确认 PASS，已提交 `4e4a67f`。V2 已替代该离线流程，旧设备链仍保留到新链完成。
 - [旧仿真器清理](../../specs/spec-008-trainable-snn/cleanup-sim.md)已独立PASS并提交 `31b9761`；6项相关检查，感知回归改用明确的测试内针孔纹理刺激，未改Retina或新环境。
-- 三批实现文件互不重叠；分别由实施者返回后再独立验收，root 管理阶段提交。尚未完成全图内部更新、三轴学习、对照研究或实飞。
+- [P2b 映射](../../specs/spec-008-trainable-snn/p2b-mapping.md)已独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2b.md)，29项定向检查。完整R1–R6输入、全部descending_neuron输出、元数据身份校验及工程空间事件编码已实现；未加载完整图或训练动作，见 NEURAL_INTERFACE 文档。
+- 新发现：3,377个R1–R6全部histamine，当前P0只驱动它们、其余细胞静息无背景时无法产生第一批非输入脉冲。此为方程与注释的静态推论，不是全图实测。P1对L1膜电位的优化仍有效，但不能据此推断多跳输出已接通。细节与文献边界见[可观测性记录](../../specs/spec-008-trainable-snn/signal-observability.md)；尚未新增背景偏置或改变神经模型。
+- 各实施/验收报告已读取处理，root按阶段提交。尚未完成全图内部更新、三轴学习、对照研究或实飞；整体goal保持active。
 
-后续依次完成 P1 有预算的完整图内部更新、训练集成与实际闭环学习、冻结/恢复/重连比较、部署时延及 Tello 实验。无实测不得把目标写成已完成；硬件动作需当前现场状态，自动化检查不触发飞行。
+用户通知内存已释放后，先按现有P1协议在新的输出目录登记实际完整图更新，600s/6GiB上限与4GiB系统预留保持。遇到具体瓶颈保留原结果再定向解决；不重跑旧检查。随后完成视觉到下降神经元的可观测性诊断，必要的背景工作状态/分级电位假设单列数值契约与对照，再进入任务训练、内部干预/重连比较、部署时延及Tello实验。无实测不得写成完成；硬件动作需当前现场状态，自动化检查不触发飞行。
 
 ## 最新进展：Mac 执行路线（2026-10-17）
 
