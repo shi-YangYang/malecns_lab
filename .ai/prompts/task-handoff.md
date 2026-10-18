@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## P3a软件完成，准备实际数据（2026-10-19）
+
+[P3a](../../specs/spec-008-trainable-snn/p3a-data-checkpoint.md)首次验收FAIL：数据实际来源可被val轨迹重封存伪装，轻量checkpoint未校验固定gain语义。新实施者完成环境确定性重放和严格模型语义，新验收者[PASS](../../specs/spec-008-trainable-snn/acceptance-p3a-r1.md)已全文读取处理，71项受影响检查通过，原FAIL保留，无返工项。本状态随软件提交，下一步以新目录生成四个完整train场景，再独立核对实际数据；未加载完整图训练。P3b协议Ready并已提交926bf34，工具尚未实现，不跳过前置门槛。
+
 ## 下一次动作更新协议已冻结（2026-10-19）
 
 [P3b](../../specs/spec-008-trainable-snn/p3b-joint-update-pilot.md)已获新的独立[协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-protocol.md)，完整报告已读取处理：固定背景、50ms每帧、两帧连续100ms反向、60ms无梯度预处理；仅train-sine-combined的0/1帧同帧限幅教师目标，Adam一次联合更新，内部恢复/完整恢复/重载五分支。估计303s不是实测；内部数值更新与动作依赖性分开判定，阴性不重试。当前P3a仍实施中，P3b工具尚未实现；必须待数据/软件前置验收后再新目录登记实际运行，不把协议PASS当动作训练完成。
