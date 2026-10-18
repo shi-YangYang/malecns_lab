@@ -109,7 +109,8 @@ def _model(result: dict, protocol: dict) -> tuple[dict, int, int]:
              "Model and graph identities differ")
     for name in ("nodes", "edges", "synapse_count"):
         _require(type(graph[name]) is int and graph[name] > 0, f"Invalid graph count: {name}")
-    _require(model.get("dtype") == protocol["dtype"] and model.get("backend") == "torch_cpu_csr", "Model backend/dtype mismatch")
+    _require(model.get("dtype") == protocol["dtype"]
+             and model.get("backend") == "scipy_cpu_csr_forward_torch_csr_adjoint", "Model backend/dtype mismatch")
     expected_config = {"dt_ms": protocol["dt_ms"], "v_rest_mv": -52.0, "v_reset_mv": -52.0, "v_threshold_mv": -45.0,
                        "tau_m_ms": 20.0, "tau_syn_ms": 5.0, "refractory_ms": 2.2, "delay_ms": 1.8,
                        "weight_mv": 0.275, "surrogate_scale_mv": 1.0}

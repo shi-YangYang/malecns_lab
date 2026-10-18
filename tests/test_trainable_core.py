@@ -1,6 +1,8 @@
 """Small numerical fixtures only; no fixture serves as a production brain."""
 
 from dataclasses import replace
+import gc
+import weakref
 
 import numpy as np
 import pytest
@@ -134,12 +136,56 @@ def test_sparse_forward_and_cached_all_cell_adjoint_equal_dense_algebra(dtype, w
     assert not model.graph.counts.data.flags.writeable
     vector = torch.tensor([0.0, active_value, 0.0, 0.0], dtype=dtype, requires_grad=True)
     upstream = torch.tensor([2.0, 3.0, -1.0, 2.0], dtype=dtype)
-    actual = fixed_sparse_matvec(model.base_weights, model.base_weights_adjoint, vector)
+    actual = fixed_sparse_matvec(model._forward_csr, model.base_weights_adjoint, vector)
     (actual * upstream).sum().backward()
     torch.testing.assert_close(actual, dense @ vector)
     torch.testing.assert_close(vector.grad, dense.T @ upstream)
     # Zero-valued cells retain nonzero gradients, including an entirely silent vector.
     assert vector.grad[0] != 0 and vector.grad[2] != 0 and vector.grad[3] == 0
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_forward_cache_readonly_shared_storage_lifetime_and_noncontiguous_input(dtype):
+    counts = np.array([[0, -2, 0], [3, 0, 5], [0, 4, -7]], dtype=np.int64)
+    model = TrainableLIF.for_numerical_test(sparse.csc_matrix(counts), dtype=dtype)
+    matrix, adjoint = model._forward_csr, model.base_weights_adjoint
+    assert isinstance(matrix, sparse.csr_array)
+    assert model.identity["backend"] == "scipy_cpu_csr_forward_torch_csr_adjoint"
+    assert set(model.state_dict()) == {"theta"}
+    for view, tensor in zip((matrix.data, matrix.indices, matrix.indptr),
+                            (model.base_weights.values(), model.base_weights.col_indices(), model.base_weights.crow_indices())):
+        assert np.shares_memory(view, tensor.numpy())
+        assert view.dtype == tensor.numpy().dtype and not view.flags.writeable
+        with pytest.raises(ValueError, match="read-only"):
+            view[0] = 0
+    # Once constructed, repeated steps must use this exact cached sparse view.
+    model.run(torch.zeros((3, 3), dtype=dtype))
+    assert model._forward_csr is matrix
+    np.testing.assert_array_equal(model.graph.counts.toarray(), counts)
+    # Retaining the view is sufficient to retain its underlying Torch buffers.
+    reference = weakref.ref(model)
+    del model, tensor
+    gc.collect()
+    assert reference() is None
+    source = torch.tensor([1.0, 99.0, 0.0, 99.0, -0.5, 99.0], dtype=dtype, requires_grad=True)
+    vector = source[::2]
+    assert not vector.is_contiguous()
+    original = source.detach().clone()
+    output = fixed_sparse_matvec(matrix, adjoint, vector)
+    expected_matrix = torch.tensor(counts, dtype=dtype) * 0.275
+    torch.testing.assert_close(output, expected_matrix @ vector)
+    assert output.dtype == dtype and output.device.type == "cpu"
+    upstream = torch.tensor([2.0, 3.0, -1.0], dtype=dtype)
+    (output * upstream).sum().backward()
+    expected_gradient = torch.zeros_like(source)
+    expected_gradient[::2] = expected_matrix.T @ upstream
+    torch.testing.assert_close(source.grad, expected_gradient)
+    torch.testing.assert_close(source, original, rtol=0, atol=0)
+    assert not np.shares_memory(output.detach().numpy(), source.detach().numpy())
+    assert not np.shares_memory(output.detach().numpy(), matrix.data)
+    output.detach().fill_(123)
+    torch.testing.assert_close(source, original, rtol=0, atol=0)
+    np.testing.assert_array_equal(matrix.toarray(), expected_matrix.numpy())
 
 
 def test_silent_cell_surrogate_survives_recurrent_delay_and_sparse_propagation():

@@ -39,7 +39,7 @@ def software_evidence(tmp_path, monkeypatch):
                     "grouping": {"schema": "cnsbridge.presynaptic_raw_type.v1", "names": [None, "L1", "R1-R6"],
                                  "missing_index": 0, "mapping_sha256": "c" * 64}}, "training_graph_id")
     model = rehash({"schema": "cnsbridge.trainable_lif.v1", "graph": graph, "input_body_ids": [101],
-                    "dtype": "torch.float32", "backend": "torch_cpu_csr",
+                    "dtype": "torch.float32", "backend": "scipy_cpu_csr_forward_torch_csr_adjoint",
                     "config": {"dt_ms": 0.1, "v_rest_mv": -52.0, "v_reset_mv": -52.0, "v_threshold_mv": -45.0,
                                "tau_m_ms": 20.0, "tau_syn_ms": 5.0, "refractory_ms": 2.2, "delay_ms": 1.8,
                                "weight_mv": 0.275, "surrogate_scale_mv": 1.0},
@@ -104,6 +104,40 @@ def test_complete_software_fixture_needs_all_evidence_before_passed(tmp_path, mo
     assert final["evidence_validation"]["metrics"]["loss_before"] == 4.0
     assert final["evidence_validation"]["checkpoint_id"] == result["checkpoint_id"]
     assert json.loads((directory / "result.json").read_text()) == final
+
+
+@pytest.mark.parametrize("backend", [None, "torch_cpu_csr", "unknown_backend"])
+def test_current_model_identity_and_strict_backend_contract(tmp_path, monkeypatch, backend):
+    pytest.importorskip("torch")
+    from scipy import sparse
+    from cnsbridge.brain.trainable import TrainableLIF
+    from cnsbridge.brain.trainable_graph import TrainingGraph
+
+    directory, _, result = software_evidence(tmp_path, monkeypatch)
+    # Explicitly fabricated evidence identity, never a production loader/brain
+    # run. The normal model constructor supplies all model metadata itself.
+    graph = TrainingGraph(sparse.csc_matrix(np.array([[0, 0], [3, 0]], np.int64)),
+                          np.array([101, 202], np.int64), (None, "L1", "R1-R6"),
+                          np.array([2, 1], np.int64), result["graph"])
+    model = TrainableLIF(graph, [101]).identity
+    assert model["backend"] == "scipy_cpu_csr_forward_torch_csr_adjoint"
+    if backend is not None:
+        model["backend"] = backend
+        rehash(model, "model_id")
+    result["model"] = model
+    write_json(directory / "model_identity.json", model)
+    path = directory / "checkpoint/checkpoint.json"
+    checkpoint = json.loads(path.read_text())
+    checkpoint["model"] = model
+    rehash(checkpoint, "checkpoint_id")
+    write_json(path, checkpoint)
+    result["checkpoint_id"] = checkpoint["checkpoint_id"]
+    write_result(directory, result)
+    if backend is None:
+        assert validate_probe_evidence(directory, PROTOCOL)["status"] == "validated"
+    else:
+        with pytest.raises(ValueError, match="Model backend/dtype mismatch"):
+            validate_probe_evidence(directory, PROTOCOL)
 
 
 @pytest.mark.parametrize("defect,reason", [

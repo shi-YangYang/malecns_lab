@@ -135,7 +135,7 @@ def validate_mode_identity(record, mode, graph, policy, spatial, selection, sour
     identity(drive, "drive_id")
     expected_schema = "cnsbridge.trainable_lif.v1" if mode == MODES[0] else "cnsbridge.lamina_tonic_lif.v1"
     require(model["schema"] == expected_schema and model["graph"] == graph and model["config"] == CONFIG
-            and model["dtype"] == "torch.float32" and model["backend"] == "torch_cpu_csr"
+            and model["dtype"] == "torch.float32" and model["backend"] == "scipy_cpu_csr_forward_torch_csr_adjoint"
             and model["input_body_ids"] == policy["inputs"]["body_ids"], "Model identity/config mismatch")
     files = ("trainable.py", "trainable_graph.py") + (("tonic.py",) if mode == MODES[1] else ())
     require(model["implementation_sha256"] == {name: sources[f"brain/{name}"] for name in files}, "Model source mismatch")

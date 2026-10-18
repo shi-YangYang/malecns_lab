@@ -13,6 +13,7 @@ from typing import Iterable
 
 import numpy as np
 import torch
+from scipy.sparse import csr_array
 from torch import Tensor, nn
 
 from .metadata import canonical_hash, file_hashes
@@ -81,9 +82,9 @@ def surrogate_spike(distance_mv: Tensor, scale_mv: float = 1.0) -> Tensor:
 
 class _FixedSparseMatvec(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, matrix: Tensor, adjoint: Tensor, vector: Tensor) -> Tensor:
+    def forward(ctx, matrix: csr_array, adjoint: Tensor, vector: Tensor) -> Tensor:
         ctx.save_for_backward(adjoint)
-        return torch.sparse.mm(matrix, vector[:, None])[:, 0]
+        return torch.from_numpy(matrix @ vector.detach().numpy())
 
     @staticmethod
     def backward(ctx, gradient: Tensor):
@@ -93,8 +94,8 @@ class _FixedSparseMatvec(torch.autograd.Function):
         return None, None, torch.sparse.mm(adjoint, gradient[:, None])[:, 0]
 
 
-def fixed_sparse_matvec(matrix: Tensor, adjoint: Tensor, vector: Tensor) -> Tensor:
-    """Fixed (post, pre) CSR and cached transpose CSR; only the dense input learns."""
+def fixed_sparse_matvec(matrix: csr_array, adjoint: Tensor, vector: Tensor) -> Tensor:
+    """Cached SciPy forward and Torch all-cell adjoint; only the dense input learns."""
     return _FixedSparseMatvec.apply(matrix, adjoint, vector)
 
 
@@ -150,10 +151,21 @@ class TrainableLIF(nn.Module):
                                           torch.tensor(graph.counts.data, dtype=dtype) * self.config.weight_mv,
                                           size=graph.counts.shape[::-1], check_invariants=True)
         self.register_buffer("base_weights_adjoint", adjoint, persistent=False)
+        # These read-only NumPy views retain the Torch storage for the cache's
+        # lifetime. csr_array preserves int64 indices without a narrowing copy.
+        arrays = (matrix.values().numpy(), matrix.col_indices().numpy(), matrix.crow_indices().numpy())
+        for array in arrays:
+            array.flags.writeable = False
+        self._forward_csr = csr_array(arrays, shape=tuple(matrix.shape), copy=False)
+        for view, source in zip((self._forward_csr.data, self._forward_csr.indices, self._forward_csr.indptr), arrays):
+            if view.dtype != source.dtype or view.ctypes.data != source.ctypes.data:
+                raise RuntimeError("The fixed SciPy CSR must share the Torch buffers without conversion")
+            view.flags.writeable = False
         self._dtype = dtype
         self._identity = {
             "schema": MODEL_SCHEMA, "graph": graph.identity, "config": asdict(self.config),
-            "input_body_ids": list(self.input_body_ids), "dtype": str(dtype), "backend": "torch_cpu_csr",
+            "input_body_ids": list(self.input_body_ids), "dtype": str(dtype),
+            "backend": "scipy_cpu_csr_forward_torch_csr_adjoint",
             "gain": "1 + 0.5*tanh(theta[type(pre)]); initial theta=0; nextafter guards strict floating bounds",
             "gradient": "fast_sigmoid; reset/refractory gates detached; all-cell sparse adjoint",
             "event_order": "arrivals; exact active integration; explicit voltage input; strict threshold; reset; delayed enqueue",
@@ -239,7 +251,7 @@ class TrainableLIF(nn.Module):
         next_v = torch.where(fired, cfg.v_reset_mv, v)
         next_g = torch.where(fired, 0.0, g)
         refractory = torch.where(fired & ~self.input_mask, state.step + self.refractory_steps, state.refractory_until)
-        transmitted = fixed_sparse_matvec(self.base_weights, self.base_weights_adjoint,
+        transmitted = fixed_sparse_matvec(self._forward_csr, self.base_weights_adjoint,
                                           self.gains[self.group_index] * spikes)
         next_state = LIFState(next_v, next_g, refractory, state.pending[1:] + (transmitted,), state.step + 1, self.model_id)
         return spikes, next_state

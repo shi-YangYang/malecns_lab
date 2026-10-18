@@ -196,6 +196,21 @@ def test_numerical_role_never_becomes_production(numerical_records):
                                f.selected, implementation_hashes())
 
 
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("backend", ["torch_cpu_csr", "unknown_backend"])
+def test_mode_identity_rejects_self_consistent_wrong_backend(numerical_records, mode, backend):
+    f = numerical_records
+    record = deepcopy(f.records[mode])
+    # These identities come from the current normal/tonic model constructors.
+    assert record["model"]["backend"] == "scipy_cpu_csr_forward_torch_csr_adjoint"
+    record["model"]["backend"] = backend
+    record["model"].pop("model_id")
+    record["model"]["model_id"] = canonical_hash(record["model"])
+    with pytest.raises(ValueError, match="Model identity/config mismatch"):
+        validate_mode_identity(record, mode, f.graph.identity, f.policy.identity, f.spatial.identity,
+                               f.selected, implementation_hashes())
+
+
 def test_paired_collection_matches_independent_events_and_analytic_warmup(numerical_records):
     f = numerical_records
     for mode in MODES:
