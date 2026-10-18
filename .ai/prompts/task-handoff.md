@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 下一次动作更新协议已冻结（2026-10-19）
+
+[P3b](../../specs/spec-008-trainable-snn/p3b-joint-update-pilot.md)已获新的独立[协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-protocol.md)，完整报告已读取处理：固定背景、50ms每帧、两帧连续100ms反向、60ms无梯度预处理；仅train-sine-combined的0/1帧同帧限幅教师目标，Adam一次联合更新，内部恢复/完整恢复/重载五分支。估计303s不是实测；内部数值更新与动作依赖性分开判定，阴性不重试。当前P3a仍实施中，P3b工具尚未实现；必须待数据/软件前置验收后再新目录登记实际运行，不把协议PASS当动作训练完成。
+
 ## 最新实际证据与进行中工作（2026-10-19）
 
 [持续刺激实测](../../specs/spec-008-trainable-snn/sustained-observability-run-20261019-r1.md)新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-sustained-actual.md)已读取处理，所有72组窗口统计和296字段前缀复核通过。379.671s/RSS1.500GiB，固定背景在持续输入21–25ms已有差异，50ms窗口覆盖方向/大小信号，零背景阴性；不再重跑。本轮P2e已提交a2320b0。按[P3a](../../specs/spec-008-trainable-snn/p3a-data-checkpoint.md)实施教师序列与完整策略参数存档，单一实施Agent仅新增文件，尚待验收；完整训练续跑状态/优化器不在该参数格式中。下一次实际动作损失更新需预登记窗口、成本和干预标准；全部目标未完成。
