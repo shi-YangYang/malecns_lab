@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：P3b 软件通过，准备一次实际运行（2026-10-19）
+
+已核实1GiB额外系统预留在代码与协议中一致，原调整已完成，不重复修改或重跑旧检查。[P3b工具](../../specs/spec-008-trainable-snn/implementation-p3b.md)由新实施者完成并经新的独立[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3b.md)，36项定向检查通过。两份报告均已全文读取处理，没有返工项；原绑定核心/策略/数据/存档源码未修改。软件随本状态提交后，协调者按[使用说明](../../docs/JOINT_PROBE.md)在新目录`data/joint_update_20261019_r1`登记一次完整图运行，再由新实际验收者复核。当前没有完整图作业，Noria/Docker保持不变，不用软件PASS替代动作学习证据。
+
+只读规划报告已全文读取处理：下一阶段优先新增独立续训格式，保存命名Adam状态、完整PolicyState/驱动相位、下一帧游标和父存档身份；更新后detach再封存，场景内不reset。续评估可用已封存executed_action轻量重放环境，神经前缀直接恢复，避免改动现有数据绑定源码。按既有成本线性估计，80帧无梯度约780s、四场景一轮约3.8小时，均非实测，说明600s单段预算需要续跑。窗口数、训练规模和学习率须等P3b实际结果再冻结；该建议未实施，不关闭AC3–AC6。
+
 ## 当前断点：三轴联合更新的前置已齐（2026-10-19）
 
 本轮有实际进展：持续输入完整图379.67s/RSS1.500GiB、新有状态策略a2320b0、实际响应/工具规格85716d3、P3b协议926bf34、P3a实现65b35ca。P3a首次FAIL两缺口由新实施/新验收关闭，71项定向检查通过；其[实际四场景数据](../../specs/spec-008-trainable-snn/p3a-data-run-20261019-r1.md)也已由新的[实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3a-data.md)确认。全部报告已全文读取处理、所有Agent已完成、没有运行中的模型或未处理返工。
