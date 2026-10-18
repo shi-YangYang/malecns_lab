@@ -106,4 +106,4 @@ policy/parameters.npz     theta、读出 weight、bias
 
 51 项定向数值检查通过：joint/frozen 各自比较连续两次更新与首步保存、销毁对象、重建、恢复再更新，参数、Adam、全部状态、动作、特征和游标精确相同；包含非零延迟事件和感觉相位。还覆盖坏档晚期拒绝无部分恢复、更新边界校验、固定参数绑定、未封存目录与生产角色隔离。
 
-这些结果是小电路持久化证据，不是完整图续跑、长期训练有效性或无人机行为证据。后续 runner 的协议与软件验证见 [P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)及[使用说明](TRAINING_RUNNER.md)；真实完整图分段运行仍待独立证据。
+这些结果是P3c1小电路持久化证据，不是长期训练有效性或无人机行为证据。后续 runner 的协议与软件验证见 [P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)及[使用说明](TRAINING_RUNNER.md)；另外完成的[首两个真实完整图窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已有独立恢复验收，不混入上述51项软件检查。

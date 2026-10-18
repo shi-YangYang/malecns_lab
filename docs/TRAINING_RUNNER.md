@@ -1,12 +1,12 @@
 # 完整连接组的有界连续训练
 
-`python -m cnsbridge.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；尚无本批完整图运行、神经闭环跟随、收益或实飞结论。
+`python -m cnsbridge.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；[首两个完整图跨进程窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已独立验收，尚无完整epoch、神经闭环跟随、收益或实飞结论。
 
 规格：[P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)。完整状态格式：[训练存档](TRAINING_CHECKPOINT.md)。父入口、登记与证据复核不导入 Torch；脑计算全部在受监督子进程内。
 
 ## 首两个实际窗口
 
-以下是独立软件验收并提交后交给协调者执行的命令，不是本次实施已执行记录。在项目根目录运行。新输出目录必须不存在；不会覆盖失败记录。
+以下命令已在独立软件验收并提交后执行，两段实际证据已获[独立PASS](../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)。它们是已完成的首段与续段记录，不应重复创建此目录；继续同一run从frame4开始。新实验输出目录必须不存在，不覆盖历史或失败记录。
 
 ```bash
 PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \

@@ -1,6 +1,12 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：连续训练工具已通过，准备首两个实际窗口（2026-10-19）
+## 当前断点：首次完整图续训已通过，从frame4继续（2026-10-19）
+
+[P3c2首两窗实测](../../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)与新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)已全文读取处理，无返工项。软件33162f7后，data/neural_training_joint_20261019_r1两次--windows 1实际完成；session18740/43643均收取exit0，没有存活模型作业。首窗20个r2比较字段全部exact；次窗恢复全部参数/Adam/23状态摘要及游标精确，独立NumPy复算两步全部矩/参数最大差0。神经step600→1600→2600，累计4帧/2窗/2更新，真实增益和读出均改变。
+
+两段110.689845s/102.645659s、采样RSS2.794754/2.877975GiB；1GiB额外预留未触发，Noria/Docker保持。下一步在同一冻结run从frame4显式续段，可每次登记1–4窗，不重跑首两窗，不自动循环全部160窗；实际验收门槛已满足。原始失败/预算规则保持，AC3–AC6与整体目标仍未完成。所有本批Agent已完成，报告已处理。
+
+## 前置：连续训练工具软件通过（2026-10-19）
 
 [P3c2实施](../../specs/spec-008-trainable-snn/implementation-p3c-runner.md)及新的[独立软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-runner.md)已全文读取处理，无返工项。27项定向检查通过，实施者已收取session15953的exit0；两个真实数值子进程恢复后与连续四窗全部数组精确一致。新独立验收另只读使用r2真实保存数组检查新NumPy复核器，exit0，没有重算模型或重复旧检查。旧绑定源码保持，全部本批Agent已完成。
 

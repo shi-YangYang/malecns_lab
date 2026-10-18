@@ -1,6 +1,6 @@
 # P3c2 — 有界分段的连续场景模仿训练
 
-状态：软件已独立PASS，实际首两窗待执行。[实施报告](implementation-p3c-runner.md)和新的[独立软件验收](acceptance-p3c-runner.md)已全文读取处理，无返工项；27项定向检查通过，未执行本批生产完整图。此前P3c1及[协议](acceptance-p3c-runner-protocol.md)均已独立通过。该批沿用完整图和现有模型，把一次两帧更新扩展为连续场景训练；工具、实际续训和跟随成功分开。
+状态：软件和[实际首两窗](p3c-run-20261019-r1.md)均已独立PASS。[实施](implementation-p3c-runner.md)、[软件验收](acceptance-p3c-runner.md)与新的[实际验收](acceptance-p3c-run-r1.md)报告已全文读取处理，无返工项；27项定向检查通过，两次真实完整图worker完成4帧/2更新及完整状态恢复。当前仅2/160窗，独立frozen和闭环仍待推进。此前P3c1及[协议](acceptance-p3c-runner-protocol.md)均已独立通过；工具、实际续训和跟随成功分开。
 
 ## 前置证据与范围
 
