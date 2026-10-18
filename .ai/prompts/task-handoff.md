@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 最新完成：P2e软件接口（2026-10-19）
+
+[P2e](../../specs/spec-008-trainable-snn/p2e-neural-policy.md)实施报告和新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p2e.md)已读取处理，28项定向检查通过，无返工项，随本状态更新提交。全部DN两半窗电位、内部theta梯度、跨帧状态与controller已接好，只是软件证据，没有动作学习结论。持续刺激单次运行也已正常终止：exec56241退出0、19,400步、379.671s、RSS1.500GiB；固定背景持续期间有差异、零背景阴性，296前缀字段精确相同，实际独立验收正在进行，不重跑模型。后续要完成策略持久化及有界联合训练协议，整体AC3–AC6未完成。
+
 ## 当前子批：有状态策略接口与持续输入实测（2026-10-19）
 
 上一轮前向优化有实际进展，所有实验已终止。本轮按[持续刺激协议](../../specs/spec-008-trainable-snn/sustained-observability-plan.md)冻结60/100/30ms、19,400步，独立[协议PASS](../../specs/spec-008-trainable-snn/acceptance-sustained-protocol.md)已读取处理；提交后新目录登记并受监督运行一次，当前不预报响应。并行实施[P2e神经策略接口](../../specs/spec-008-trainable-snn/p2e-neural-policy.md)，仅新增learning模块/测试/说明，不修改诊断绑定的脑或空间驱动源码。两者真正独立：实际持续响应决定后续训练窗口，接口要求显式窗口配置，不用未验证默认值。Noria/Docker及1GiB预留不变。
