@@ -57,65 +57,12 @@ def _self_positions(matrix) -> np.ndarray:
         matrix.indices[matrix.indptr[source]:matrix.indptr[source + 1]], source) for source in sources], dtype=np.int64)
 
 
-def _replace_target(matrix, source: int, position: int, target: int) -> None:
-    """Move one weighted edge within its CSC column, keeping targets sorted."""
-    start, end = matrix.indptr[source:source + 2]
-    insertion = start + int(np.searchsorted(matrix.indices[start:end], target))
-    weight = matrix.data[position]
-    if insertion > position:
-        insertion -= 1
-        matrix.indices[position:insertion] = matrix.indices[position + 1:insertion + 1]
-        matrix.data[position:insertion] = matrix.data[position + 1:insertion + 1]
-    else:
-        matrix.indices[insertion + 1:position + 1] = matrix.indices[insertion:position]
-        matrix.data[insertion + 1:position + 1] = matrix.data[insertion:position]
-    matrix.indices[insertion], matrix.data[insertion] = target, weight
-
-
-def _contains(matrix, source: int, target: int) -> bool:
-    start, end = matrix.indptr[source:source + 2]
-    position = start + np.searchsorted(matrix.indices[start:end], target)
-    return bool(position < end and matrix.indices[position] == target)
-
-
 def _rewire(parent: Connectome, *, seed: int, max_attempts: int, target_swaps: int) -> tuple[Connectome, dict]:
-    """Uniform edge-pair proposals with sign-preserving double-edge swaps."""
-    rng = np.random.default_rng(seed)
-    graph = _clone(parent)
-    matrix = graph.weights
-    rejections = dict.fromkeys(("same_source", "self_edge", "different_source_sign", "same_target", "new_self_edge", "duplicate"), 0)
-    attempts = successful = 0
-    while matrix.nnz and attempts < max_attempts and successful < target_swaps:
-        attempts += 1
-        a, b = rng.integers(matrix.nnz, size=2)
-        u, w = np.searchsorted(matrix.indptr, [a, b], side="right") - 1
-        v, x = matrix.indices[[a, b]]
-        reason = None
-        if u == w:
-            reason = "same_source"
-        elif u == v or w == x:
-            reason = "self_edge"
-        elif np.sign(matrix.data[a]) != np.sign(matrix.data[b]):
-            reason = "different_source_sign"
-        elif v == x:
-            reason = "same_target"
-        elif u == x or w == v:
-            reason = "new_self_edge"
-        elif _contains(matrix, u, x) or _contains(matrix, w, v):
-            reason = "duplicate"
-        if reason:
-            rejections[reason] += 1
-            continue
-        _replace_target(matrix, u, a, x)
-        _replace_target(matrix, w, b, v)
-        successful += 1
-    nonself = matrix.nnz - len(_self_positions(matrix))
-    return graph, {"attempts": attempts, "successful_swaps": successful, "rejections": rejections,
-                   "target_reached": successful == target_swaps,
-                   "stop_reason": "target_reached" if successful == target_swaps else "proposal_budget_exhausted" if matrix.nnz else "no_edges",
-                   "effective_edge_moves_per_nonself_edge": 2 * successful / nonself if nonself else None,
-                   "proposal": "independent uniform edge positions, with replacement; all listed invalid proposals rejected",
-                   "budget_interpretation": "engineering budget, not experimentally validated mixing"}
+    """Uniform edge-pair proposals, using the same kernel as bounded generation."""
+    from .rewiring_steps import advance, counters, report
+    rng, graph, state = np.random.default_rng(seed), _clone(parent), counters()
+    advance(graph.weights, rng, state, max_attempts=max_attempts, target_swaps=target_swaps, proposals=max_attempts)
+    return graph, report(graph.weights, state, max_attempts=max_attempts, target_swaps=target_swaps)
 
 
 def _shuffle(parent: Connectome, *, seed: int) -> tuple[Connectome, dict]:
@@ -139,6 +86,12 @@ def _shuffle(parent: Connectome, *, seed: int) -> tuple[Connectome, dict]:
                    "permutations": "one seeded permutation per eligible source; identities and equal weights are allowed"}
 
 
+def _implementation_hashes():
+    # Include the shared kernel and all resumable-generation helpers in new identities.
+    from .rewiring_contract import source_hashes
+    return source_hashes()
+
+
 def _stamp(parent: Connectome, graph: Connectome, *, transform: str, seed: int,
            protocol: str, parameters: dict, diagnostics: dict) -> None:
     if not isinstance(protocol, str) or not protocol.strip():
@@ -149,8 +102,7 @@ def _stamp(parent: Connectome, graph: Connectome, *, transform: str, seed: int,
         "parent_graph_sha256": graph_hash(parent), "node_metadata_sha256": annotation_hash(graph),
         "graph_sha256": graph_identity, "transform": transform, "seed": seed,
         "protocol": protocol, "parameters": parameters, "diagnostics": diagnostics,
-        "implementation_sha256": {path.name: file_hashes(path)["sha256"] for path in
-                                   (Path(__file__), Path(__file__).with_name("graph_diagnostics.py"))},
+        "implementation_sha256": _implementation_hashes(),
         "scope": "offline research only; no hardware, fit, task accuracy or biological advantage demonstrated",
     }
     graph.meta = {"format_version": 2, "asset_type": "research_control", "source_id": canonical_hash(provenance),

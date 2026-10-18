@@ -57,6 +57,10 @@ def validate_rw(parent: Connectome, graph: Connectome, transform: str) -> None:
         a, b = (abs(old), abs(new)) if absolute else (old, new)
         if not np.array_equal(np.asarray(a.sum(axis=0)), np.asarray(b.sum(axis=0))):
             raise ValueError("Research control changed per-source outgoing strength")
+    for source in range(parent.n):
+        a, b = old.indptr[source:source + 2], new.indptr[source:source + 2]
+        if not np.array_equal(np.sort(old.data[a[0]:a[1]]), np.sort(new.data[b[0]:b[1]])):
+            raise ValueError(f"Research control changed per-source weight multiset: {source}")
     old_values, old_counts = np.unique(old.data, return_counts=True)
     new_values, new_counts = np.unique(new.data, return_counts=True)
     if not np.array_equal(old_values, new_values) or not np.array_equal(old_counts, new_counts):
@@ -140,3 +144,60 @@ def graph_diagnostics(parent: Connectome, graph: Connectome, *, paths: bool) -> 
                 "method": "input_output_paths: exact directed unweighted multi-source shortest paths for each input group"},
             "neural_activity": {"status": "not_executed", "reason": "requires separate offline neural replay"},
             "mixing": {"status": "not_established", "reason": "mechanical validity and swap counts do not establish mixing"}}
+
+
+def policy_path_vectors(graph: Connectome) -> dict:
+    """Complete policy selections; two multi-source queries, never all pairs."""
+    inputs = np.flatnonzero(graph.annotations["type"] == "R1-R6")
+    outputs = np.flatnonzero(graph.annotations["superclass"] == "descending_neuron")
+    matrix = graph.weights
+    adjacency = sparse.csr_matrix((np.ones(matrix.nnz, np.uint8), matrix.indices, matrix.indptr), shape=matrix.shape)
+    forward = (dijkstra(adjacency, directed=True, indices=inputs, unweighted=True, min_only=True)[outputs]
+               if inputs.size else np.full(outputs.size, np.inf))
+    reverse = (dijkstra(adjacency.T, directed=True, indices=outputs, unweighted=True, min_only=True)[inputs]
+               if outputs.size else np.full(inputs.size, np.inf))
+    def integral(values):
+        result = np.full(values.shape, -1, np.int64)
+        reachable = np.isfinite(values)
+        result[reachable] = values[reachable].astype(np.int64)
+        return result
+    return {"input_body_ids": graph.body_ids[inputs], "output_body_ids": graph.body_ids[outputs],
+            "input_to_any_dn_hops": integral(reverse), "any_input_to_dn_hops": integral(forward)}
+
+
+def incoming_strength_vectors(parent: Connectome, graph: Connectome) -> dict:
+    """Signed negative sums, positive sums and absolute sums for every target."""
+    result = {"body_ids": parent.body_ids.copy()}
+    for label, connectome in (("parent", parent), ("control", graph)):
+        matrix = connectome.weights
+        positive, negative = np.zeros(parent.n, np.int64), np.zeros(parent.n, np.int64)
+        for start in range(0, matrix.nnz, 1_000_000):
+            rows, weights = matrix.indices[start:start + 1_000_000], matrix.data[start:start + 1_000_000]
+            np.add.at(positive, rows[weights > 0], weights[weights > 0])
+            np.add.at(negative, rows[weights < 0], weights[weights < 0])
+        result[label + "_positive"] = positive
+        result[label + "_negative"] = negative
+        result[label + "_absolute"] = positive - negative
+    for field in ("positive", "negative", "absolute"):
+        result["delta_" + field] = result["control_" + field] - result["parent_" + field]
+    return result
+
+
+def complete_policy_diagnostics(parent: Connectome, graph: Connectome) -> tuple[dict, dict]:
+    """Return small explanation and complete NPZ-ready mechanical evidence."""
+    vectors = incoming_strength_vectors(parent, graph)
+    summary = {"incoming_strength": {}, "paths": {},
+               "paths_meaning": "any input to each DN; each input to any DN using reverse adjacency; -1 unreachable; not all pairs",
+               "selection": "type == R1-R6; superclass == descending_neuron; original body ID order"}
+    for field in ("positive", "negative", "absolute"):
+        delta = vectors["delta_" + field]
+        summary["incoming_strength"][field] = {"changed_targets": int(np.count_nonzero(delta)),
+            "delta_min": int(delta.min(initial=0)), "delta_max": int(delta.max(initial=0)),
+            "delta_l1": int(np.abs(delta).sum(dtype=np.int64))}
+    for label, connectome in (("parent", parent), ("control", graph)):
+        paths = policy_path_vectors(connectome)
+        vectors.update({label + "_" + key: value for key, value in paths.items()})
+        summary["paths"][label] = {"inputs": len(paths["input_body_ids"]), "outputs": len(paths["output_body_ids"]),
+            "unreachable_inputs": int((paths["input_to_any_dn_hops"] < 0).sum()),
+            "unreachable_outputs": int((paths["any_input_to_dn_hops"] < 0).sum())}
+    return summary, vectors
