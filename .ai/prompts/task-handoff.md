@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前子批：有状态策略接口与持续输入实测（2026-10-19）
+
+上一轮前向优化有实际进展，所有实验已终止。本轮按[持续刺激协议](../../specs/spec-008-trainable-snn/sustained-observability-plan.md)冻结60/100/30ms、19,400步，独立[协议PASS](../../specs/spec-008-trainable-snn/acceptance-sustained-protocol.md)已读取处理；提交后新目录登记并受监督运行一次，当前不预报响应。并行实施[P2e神经策略接口](../../specs/spec-008-trainable-snn/p2e-neural-policy.md)，仅新增learning模块/测试/说明，不修改诊断绑定的脑或空间驱动源码。两者真正独立：实际持续响应决定后续训练窗口，接口要求显式窗口配置，不用未验证默认值。Noria/Docker及1GiB预留不变。
+
 ## 当前断点：前向优化已完成完整图验证（2026-10-19）
 
 本轮有实际进展：内核基准2a3979a、实际依据与生产规格ef7a315、生产实现13716c6。软件首次验收发现证据校验仍期望旧backend，已由新实施者修复、新验收者通过；46项数值＋37项证据检查通过，原FAIL报告保留。P1 r5和配对r2随后均正常终止，新的[实际独立PASS](../../specs/spec-008-trainable-snn/acceptance-forward-csr-actual.md)已读取处理，无返工项。所有本轮Agent已完成，模型进程已退出，无需等待。
