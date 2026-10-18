@@ -1,12 +1,18 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：joint26/160窗，闭环评估软件已独立通过（2026-10-19）
+## 当前断点：joint40/160窗，首场景已结束，无运行中模型（2026-10-19）
 
-[连续训练记录](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)已追加segments4–8，session96146/36705/9089/64252/33707均已收取exit0；同一冻结run累计52帧/26更新、神经step26600，next_frame=52，末档27648a780bb77fa879227231c5d8408ed6e7ac044589ba2d1ff716ff454bed94。各段父数值/链复核成功，约403–411s，采样峰值约2.72–2.89GiB；1GiB预留未触发，Noria/Docker保持。首两窗/首次四窗已有独立实际验收，后续同协议段不重复旧检查或逐段重建独立验收。第22窗前缀已有vx输出接近正上限而教师转负的现象，完整保存，不作学习成功结论或临时改协议。
+本目标轮有实际进展。session53960/1973/51425/19423均已收取exit0，同一冻结joint r1新增窗口27–40、累计80帧/40更新；最后脑/感觉step40600，checkpoint `e1c656b913d9c1f51d8cada6214342623afc0dd7de7e66f4b5f2240229154096`，prefix `973724345d79154e1bb33970f3fcef00c8ee7dc0e5971d24b8e9e18ff8321b20`。游标仍为combined、next_frame80，下一窗口才进入forward场景并重置神经/感觉状态，参数与Adam延续。1GiB额外预留保持、Noria/Docker未操作；最新两窗段监督206.878887s、采样峰值3217833984 bytes、最低available4022337536 bytes。各段父数值/来源复核为registered_windows_verified，记录见[续段实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)。所有29个绑定训练源码保持，不重复已验证前缀。
 
-当前没有模型进程或活跃Agent，本批全部报告已全文读取处理。评估[首次实施](../../specs/spec-008-trainable-snn/implementation-p3d.md)及[原FAIL](../../specs/spec-008-trainable-snn/acceptance-p3d.md)保留；新的实施者已按[返工要求](../../specs/spec-008-trainable-snn/rework-p3d-r1.md)补齐最终训练父终态准入并区分环境终止与证据完成。[返工报告](../../specs/spec-008-trainable-snn/implementation-p3d-rework-r1.md)记录session45460退出0、25项定向检查通过（20新增＋5受影响）；其余20项沿用已有通过证据。新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p3d-rework-r1.md)无返工项，随状态更新提交软件。29个训练绑定源码摘要保持；不在两份最终参数具备前运行正式评估，也不把软件PASS当作完整图闭环结果。
+首个80帧场景的[只读动作汇总](../../specs/spec-008-trainable-snn/p3c-first-scene-20261019.md)、PNG与新[独立验收PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-first-scene.md)均已全文读取处理，无返工项。三轴归一化MSE为0.942383/0.028666/0.045410，SI RMSE为0.291229m/s、0.033862m/s、0.106548rad/s；这些是训练中变参数轨迹上的误差，不是固定策略闭环成绩。派生资产在data/neural_training_analysis_20261019_first_scene，脚本/输入/输出SHA和progress快照均保留。所有本批Agent已完成，无待处理报告或活跃作业。第26窗饱和/Adam动量的[只读诊断](../../specs/spec-008-trainable-snn/p3c-saturation-diagnosis-20261019.md)已保存，当前没有实现bug证据。首场景前进输出仍近+0.3且跟不上教师转负；参数变化不能称为学会控制，保持阴性结果与原协议，不暗改学习率或挑档。joint余120窗，独立frozen160窗未开始，实际闭环/拓扑比较与实飞均未完成。整体goal保持active，不因为阶段提交或当前输出不佳就标记complete/blocked。
 
-两项只读规划报告已读取处理：评估建议已纳入正式协议；[拓扑入口边界草稿](../../specs/spec-008-trainable-snn/p3e-topology-boundaries-draft.md)已bef957d提交，尚未冻结科学预算/运行R图，不能冒充full_reference或直接复用P3c固定身份。下一步从frame52显式续训同run；joint余134窗、frozen未开始，维持每段1–4窗/600秒/1GiB，失败留证不自动裁图/重试。两份160窗完成后才进入评估首次1+1帧实际验收。AC3–AC6及goal仍未完成。
+## P3e：完整R成本探针已实际PASS，正式生成器协议Ready
+
+[P3e0成本协议](../../specs/spec-008-trainable-snn/p3e-generation-probe.md)及独立协议PASS已9a6ee72提交。data/topology_generation_20261019_probe_r1仅运行一次，session24773已收取exit0，父assessment passed；完整166700/25582938/124177617/101自环保持，100000提案、51847交换、target_reached=false，约0.4044%边位置变化。生成16.017873s、重载3.310660s，监督23.072731s，采样RSS2075377664 bytes、getrusage2358689792 bytes，二者口径分别保留。[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3e-generation-run-r1.md)已全文读取处理、无返工项，随报告提交f905472。原始脚本/协议文件已绑定SHA，勿为更新状态而覆写历史字节；该图仅成本样本，不进入训练，不声称混合充分或拓扑收益。
+
+[P3e1续段生成器协议](../../specs/spec-008-trainable-snn/p3e1-bounded-rewiring-draft.md)已获新的[独立协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3e1-generator-protocol.md)，全文读取处理、标记Ready并提交d4b395a。仅生成器范围具备实施条件，尚未实施/运行。下一步由单一实施者按该协议提取原交换循环、封存完整CSC/PCG64/累计计数与父链，补足逐源权重多重集和实际输入/DN机械诊断，29个G训练绑定文件保持；新的独立软件验收后提交，再正式首两段各100000提案/新worker恢复实测，新独立实际验收后才可扩大到1000000提案/段。完整研究神经工厂/存档/训练比较另行冻结，不冒充本批已完成AC6。
+
+全部完整图作业串行，不并行模型或模型数值测试，不停止Noria/Docker。后续显式推进joint剩余四窗段；P3d软件已ac2c3b9独立PASS，实际评估只能等待joint/frozen两个160窗最终父证据具备后运行。没有新的硬件许可或付费算力授权。
 
 ## 前置：首次完整图续训已通过（2026-10-19）
 
