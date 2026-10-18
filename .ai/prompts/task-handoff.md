@@ -1,6 +1,14 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：连续训练协议已Ready，待单一实施（2026-10-19）
+## 当前断点：连续训练工具已通过，准备首两个实际窗口（2026-10-19）
+
+[P3c2实施](../../specs/spec-008-trainable-snn/implementation-p3c-runner.md)及新的[独立软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-runner.md)已全文读取处理，无返工项。27项定向检查通过，实施者已收取session15953的exit0；两个真实数值子进程恢复后与连续四窗全部数组精确一致。新独立验收另只读使用r2真实保存数组检查新NumPy复核器，exit0，没有重算模型或重复旧检查。旧绑定源码保持，全部本批Agent已完成。
+
+随软件提交后，协调者按[命令](../../docs/TRAINING_RUNNER.md)在新目录data/neural_training_joint_20261019_r1先运行joint第一窗，再用新进程续第二窗，各--windows 1。不得先跑4窗或自动160窗；终态收取后新独立实际验收，再推进真实前缀。当前无活跃模型进程。启动预算以实际新登记为准，1GiB额外预留与Noria/Docker限制保持。整体AC3–AC6尚未完成。
+
+只读闭环规划报告也已读取处理，候选保存到[p3d Draft](../../specs/spec-008-trainable-snn/p3d-closed-loop-evaluation-draft.md)，不属于P3c2软件验收或Ready协议。下一阶段可重放廉价环境、直接恢复神经状态；还需独立冻结评估格式/场景/实际门槛，不能以本草案提前运行。
+
+## 前置：连续训练协议Ready（2026-10-19）
 
 [P3c1实施](../../specs/spec-008-trainable-snn/implementation-p3c-state.md)及新的独立[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-state.md)已全文读取处理，无返工项。51项定向检查通过，实施者已收取session45861的exit0；两模式均在同进程销毁/重建后实现两次更新的全部参数/Adam/神经与感觉状态/动作/特征/游标精确一致。新增training_optimizer和training_checkpoint、使用说明与测试，已登记核心/策略/数据/旧checkpoint/P3b源码保持。真实跨进程完整图续跑未执行，不以小电路替代。实施与验收Agent均已完成，所有报告已处理，无待等待作业。
 
