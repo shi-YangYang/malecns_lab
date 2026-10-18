@@ -1,5 +1,13 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前进行中：P3c1完整状态续训存档（2026-10-19）
+
+[P3b r2实际报告](../../specs/spec-008-trainable-snn/p3b-run-20261019-r2.md)及新的独立[实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-run-r2.md)已全文读取处理。软件`a088bbf`后新目录`data/joint_update_20261019_r2/`仅运行一次，终端session78116已收取exit0，没有存活模型进程。协议完整、联合数值更新、内部动作效应均true；4255个theta/453个gain和全部读出改变，完整恢复/重载精确相等，r1优化前22个字段精确一致。238.290s、RSS2.75699GiB，1GiB预留未触发；Noria/Docker保持。
+
+关键阴性：baseline动作误差0.50265934→updated0.20494002，但acute_restore0.19793667更低，内部变化本步使误差恶化0.00700335。不得把总误差下降归功于内部收益；独立冻结脑训练和未见场景仍待执行。审查指出DN逐位变化5040、超容差4895的文案精度问题，报告已修正，无未处理返工；实际验收Agent已完成。
+
+新的单一实施者`training_resume_impl`按Ready [P3c1续训状态规格](../../specs/spec-008-trainable-snn/p3c-resumable-state.md)新增完整神经/感觉状态、命名Adam与游标存档；只新learning模块/定向测试/说明，不改脑/策略/教师数据/旧checkpoint/P3b绑定来源，不运行完整图。实现后新独立软件验收、提交，再登记短的连续多窗口及跨进程恢复实测。当前软件工作进行中；总目标仍未完成，AC3–AC6保持未勾选。
+
 ## 当前进行中：P3b r2分组裁剪实施（2026-10-19）
 
 稳定分组裁剪已完成[实施](../../specs/spec-008-trainable-snn/implementation-p3b-stable.md)，新的独立验收者[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-stable.md)已全文读取处理，无返工项。62项定向检查通过，独立核对9个历史锚点、6个原终态文件和17个保持源码相符；不重复检查。脑核心/策略/数据/参数存档源码保持，1GiB额外预留已实时核对。实施与验收Agent均已完成，无待处理报告。本状态随软件提交后，协调者在新目录`data/joint_update_20261019_r2/`运行一次完整图，再新独立实际验收；不重跑r1。Noria/Docker保持，完整目标AC3–AC6仍未完成。
