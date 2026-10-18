@@ -81,21 +81,21 @@ def surrogate_spike(distance_mv: Tensor, scale_mv: float = 1.0) -> Tensor:
 
 class _FixedSparseMatvec(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, matrix: Tensor, vector: Tensor) -> Tensor:
-        ctx.save_for_backward(matrix)
+    def forward(ctx, matrix: Tensor, adjoint: Tensor, vector: Tensor) -> Tensor:
+        ctx.save_for_backward(adjoint)
         return torch.sparse.mm(matrix, vector[:, None])[:, 0]
 
     @staticmethod
     def backward(ctx, gradient: Tensor):
-        (matrix,) = ctx.saved_tensors
+        (adjoint,) = ctx.saved_tensors
         # Every presynaptic component contributes to the adjoint. Restricting
         # this product to actual spike indices would destroy silent-cell gradients.
-        return None, torch.sparse.mm(matrix.transpose(0, 1), gradient[:, None])[:, 0]
+        return None, None, torch.sparse.mm(adjoint, gradient[:, None])[:, 0]
 
 
-def fixed_sparse_matvec(matrix: Tensor, vector: Tensor) -> Tensor:
-    """Fixed sparse (post, pre) matrix; gradients only for its dense input."""
-    return _FixedSparseMatvec.apply(matrix, vector)
+def fixed_sparse_matvec(matrix: Tensor, adjoint: Tensor, vector: Tensor) -> Tensor:
+    """Fixed (post, pre) CSR and cached transpose CSR; only the dense input learns."""
+    return _FixedSparseMatvec.apply(matrix, adjoint, vector)
 
 
 @dataclass(frozen=True)
@@ -142,6 +142,14 @@ class TrainableLIF(nn.Module):
                                          torch.tensor(csr.data, dtype=dtype) * self.config.weight_mv,
                                          size=csr.shape, check_invariants=True)
         self.register_buffer("base_weights", matrix, persistent=False)
+        del csr  # Release the forward conversion before allocating the adjoint.
+        # CSC(post, pre) buffers encode CSR(pre, post) without a graph conversion.
+        # Copy into Torch so the original read-only integer counts stay untouched.
+        adjoint = torch.sparse_csr_tensor(torch.tensor(graph.counts.indptr, dtype=torch.int64),
+                                          torch.tensor(graph.counts.indices, dtype=torch.int64),
+                                          torch.tensor(graph.counts.data, dtype=dtype) * self.config.weight_mv,
+                                          size=graph.counts.shape[::-1], check_invariants=True)
+        self.register_buffer("base_weights_adjoint", adjoint, persistent=False)
         self._dtype = dtype
         self._identity = {
             "schema": MODEL_SCHEMA, "graph": graph.identity, "config": asdict(self.config),
@@ -231,7 +239,8 @@ class TrainableLIF(nn.Module):
         next_v = torch.where(fired, cfg.v_reset_mv, v)
         next_g = torch.where(fired, 0.0, g)
         refractory = torch.where(fired & ~self.input_mask, state.step + self.refractory_steps, state.refractory_until)
-        transmitted = fixed_sparse_matvec(self.base_weights, self.gains[self.group_index] * spikes)
+        transmitted = fixed_sparse_matvec(self.base_weights, self.base_weights_adjoint,
+                                          self.gains[self.group_index] * spikes)
         next_state = LIFState(next_v, next_g, refractory, state.pending[1:] + (transmitted,), state.step + 1, self.model_id)
         return spikes, next_state
 

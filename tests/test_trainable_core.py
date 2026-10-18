@@ -117,15 +117,29 @@ def test_binary_spike_backward_is_declared_surrogate_not_hard_threshold_derivati
     np.testing.assert_allclose(distance.grad.numpy(), expected)
 
 
-def test_sparse_forward_and_all_cell_adjoint_equal_dense_algebra():
-    dense = torch.tensor([[0.0, -2.0, 0.0], [3.0, 0.0, 5.0], [0.0, 4.0, 0.0]], dtype=torch.float64)
-    vector = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64, requires_grad=True)
-    upstream = torch.tensor([2.0, 3.0, -1.0], dtype=torch.float64)
-    actual = fixed_sparse_matvec(dense.to_sparse_csr(), vector)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("weight_mv", [0.275, 1.0, 1.7])
+@pytest.mark.parametrize("active_value", [0.0, 1.0])
+def test_sparse_forward_and_cached_all_cell_adjoint_equal_dense_algebra(dtype, weight_mv, active_value):
+    counts = np.array([[0, -2, 0, 0], [3, 0, 5, 0], [0, 4, -7, 0], [0, 0, 0, 0]], dtype=np.int64)
+    model = TrainableLIF.for_numerical_test(sparse.csc_matrix(counts), dtype=dtype,
+                                           config=config(weight_mv=weight_mv))
+    dense = torch.tensor(counts, dtype=dtype) * weight_mv
+    for matrix, expected in ((model.base_weights, dense), (model.base_weights_adjoint, dense.T)):
+        assert matrix.layout == torch.sparse_csr and matrix.dtype == dtype and not matrix.requires_grad
+        assert matrix._nnz() == np.count_nonzero(counts)
+        torch.testing.assert_close(matrix.to_dense(), expected, rtol=0, atol=0)
+    assert set(model.state_dict()) == {"theta"}  # Neither fixed direction is checkpoint content.
+    np.testing.assert_array_equal(model.graph.counts.toarray(), counts)
+    assert not model.graph.counts.data.flags.writeable
+    vector = torch.tensor([0.0, active_value, 0.0, 0.0], dtype=dtype, requires_grad=True)
+    upstream = torch.tensor([2.0, 3.0, -1.0, 2.0], dtype=dtype)
+    actual = fixed_sparse_matvec(model.base_weights, model.base_weights_adjoint, vector)
     (actual * upstream).sum().backward()
     torch.testing.assert_close(actual, dense @ vector)
     torch.testing.assert_close(vector.grad, dense.T @ upstream)
-    assert vector.grad[0] == 9 and vector.grad[2] == 15  # Zero-valued presynaptic cells keep gradients.
+    # Zero-valued cells retain nonzero gradients, including an entirely silent vector.
+    assert vector.grad[0] != 0 and vector.grad[2] != 0 and vector.grad[3] == 0
 
 
 def test_silent_cell_surrogate_survives_recurrent_delay_and_sparse_propagation():

@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前子批：复用完整图伴随矩阵（2026-10-19）
+
+上一轮属于实际进展：`62818a2` 已记录完整图 P1/AC2 的新独立 PASS，短窗资源阻塞解除。按[p1-adjoint-cache](../../specs/spec-008-trainable-snn/p1-adjoint-cache.md)实施静态转置 CSR 缓存，保留所有梯度与原数值协议。软件验收及提交后仅用新目录进行一次相同 P1 对照，实际性能另报。没有新的产品决策或硬件操作，不需要再次请求已授权的本机研究权限。
+
+伴随缓存的软件 A–D 已获新的[独立 PASS](../../specs/spec-008-trainable-snn/acceptance-adjoint-cache.md)，44 项相关检查通过，实施及验收报告均已读取处理，无返工项；E 实测仍待提交后运行。后续配对可观测性只读规划已返回并读取：完整七条件、两动力学的60/20/10ms候选为5400步，最终窗口依据优化后无梯度前向成本在运行前冻结；不提前声明视觉到 DN 接通。Noria/Docker 保留，系统预留 1 GiB。各子批提交不结束完整目标。
+
 ## 最新实测：完整图内部更新已跑通（2026-10-19）
 
 1GiB预留的软件调整已独立PASS并提交 `28e1b55`。随后一次新登记 `data/trainable_probe_20261019_p1_r3/` 正常结束，父进程完整证据校验后返回 `passed / numeric_internal_update_verified`，见[P1运行报告](../../specs/spec-008-trainable-snn/p1-run-20261019-r3.md)。完整166,700节点、25,582,938边、124,177,617突触计数保持；本次只有R1–R6内部共享增益实际变化，809个L1响应改变，恢复/重载/原始图摘要均通过。
