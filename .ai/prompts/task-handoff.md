@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前资源限制：Noria 必须保持运行（2026-10-19）
+
+用户要求检查资源并清理无用内容后，进程审计未发现遗留训练或测试进程，发现 Docker 的四个 Noria 容器仍在运行。用户明确拒绝停机：“不可以，Noria 还在使用”。按[Decision 011](../decisions/011-preserve-noria-services.md)，禁止为本项目释放内存而停止、暂停、删除 Noria 或其 Docker / 虚拟机。没有执行此类清理；完整图训练仍未完成，目标当前为 blocked。后续依据其他可用资源变化继续，不再将 Noria 作为待批准的清理对象。
+
 ## 最新进展：P1 实际加载触及 RSS 上限（2026-10-18）
 
 用户重新要求“继续”，无遗留模型进程，内存已高于4GiB门槛，因此按原协议只运行一次新登记 `data/trainable_probe_20261018_p1_r2/`。启动前 available=5,190,090,752 bytes；扣除4GiB预留后 RSS 上限为895,123,456 bytes。约2.7075秒后在 `load_graph` 阶段因 `rss_limit` 停止，采样峰值918,536,192 bytes。没有进入模型构造、前向或更新，P1/AC2仍未完成。原始记录与静态内存分析见[P1第二次登记报告](../../specs/spec-008-trainable-snn/p1-run-20261018-r2.md)。
