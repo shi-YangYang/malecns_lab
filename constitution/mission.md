@@ -6,7 +6,7 @@ CNSBridge 研究如何在真实果蝇连接组约束下，让神经网络学习�
 
 ## 当前方法与原则
 
-- 让任务优化更新网络内部受约束参数，完整连接拓扑保留；方向见 [Decision 008](../.ai/decisions/008-trainable-malecns-control.md)，设计见 [Spec 008](../specs/spec-008-trainable-snn/spec.md)。可训练 SNN 数值核心和独立目标跟随环境已实现并验收；完整图更新、神经策略学习与实飞尚待证据。冻结脑＋岭回归作为对照保留。
+- 让任务优化更新网络内部受约束参数，完整连接拓扑保留；方向见 [Decision 008](../.ai/decisions/008-trainable-malecns-control.md)，设计见 [Spec 008](../specs/spec-008-trainable-snn/spec.md)。可训练 SNN 数值核心和独立目标跟随环境已实现并验收；[完整图短窗一次内部更新](../specs/spec-008-trainable-snn/p1-run-20261019-r3.md)已有实测及恢复证据，神经策略学习与实飞尚待证据。冻结脑＋岭回归作为对照保留。
 - 使用带来源身份的特征模式和 SI 机身运动目标，设备适配器承担坐标、比例和能力转换。
 - 保留人工 `MotorDecoder` 作为既有实验基线；将软件检查、离线评估和实体闭环证据分别报告。
 - 数据划分、动作标签和对照实验应支持可复现的结论，不把旧控制器输出自动视为正确标签。
