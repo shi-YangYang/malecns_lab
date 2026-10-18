@@ -1,12 +1,12 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：joint14/160窗，闭环评估工具实施中（2026-10-19）
+## 当前断点：joint26/160窗，闭环评估软件已独立通过（2026-10-19）
 
-[连续训练记录](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)已追加segments4/5，session96146/36705均已收取exit0；同一冻结run累计28帧/14更新、神经step14600，next_frame=28，末档c0c912dae879ddc1f91a4b766f7a6fe89d1f6fd8f55ea78287f633bb65a5b2ad。两段父数值/链复核成功，监督405.16/411.00s，1GiB预留未触发，Noria/Docker保持。首两窗/首次四窗已有独立实际验收，后续同协议段不重复旧检查或逐段重建独立验收；有限loss波动均保留，未作学习收益结论。
+[连续训练记录](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)已追加segments4–8，session96146/36705/9089/64252/33707均已收取exit0；同一冻结run累计52帧/26更新、神经step26600，next_frame=52，末档27648a780bb77fa879227231c5d8408ed6e7ac044589ba2d1ff716ff454bed94。各段父数值/链复核成功，约403–411s，采样峰值约2.72–2.89GiB；1GiB预留未触发，Noria/Docker保持。首两窗/首次四窗已有独立实际验收，后续同协议段不重复旧检查或逐段重建独立验收。第22窗前缀已有vx输出接近正上限而教师转负的现象，完整保存，不作学习成功结论或临时改协议。
 
-本记录写入时**session9089正在运行segment6的窗口15–18**；后续必须先poll该原session收取终态，不得重复启动。实施Agent `closed_loop_evaluator_impl` 正新增P3d评估模块，未准备测试；待其通知后在训练段结束时提供小数值测试时段，不与生产全图并行。新[评估协议](../../specs/spec-008-trainable-snn/p3d-closed-loop-evaluation.md)已独立协议PASS并提交3b0de42，报告已读取处理；正式评估仍须joint和独立frozen各完成160窗。
+当前没有模型进程或活跃Agent，本批全部报告已全文读取处理。评估[首次实施](../../specs/spec-008-trainable-snn/implementation-p3d.md)及[原FAIL](../../specs/spec-008-trainable-snn/acceptance-p3d.md)保留；新的实施者已按[返工要求](../../specs/spec-008-trainable-snn/rework-p3d-r1.md)补齐最终训练父终态准入并区分环境终止与证据完成。[返工报告](../../specs/spec-008-trainable-snn/implementation-p3d-rework-r1.md)记录session45460退出0、25项定向检查通过（20新增＋5受影响）；其余20项沿用已有通过证据。新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-p3d-rework-r1.md)无返工项，随状态更新提交软件。29个训练绑定源码摘要保持；不在两份最终参数具备前运行正式评估，也不把软件PASS当作完整图闭环结果。
 
-两项只读规划报告已读取处理，无未收取报告：评估任意帧/参数身份建议已纳入Ready；拓扑入口边界已查明，研究图不能冒充full_reference或直接复用P3c固定身份，后续另立研究协议。完整目标继续；joint余146窗、frozen未开始，维持每段1–4窗/600秒/1GiB，保持29个训练绑定源码，失败留证不自动裁图/重试。AC3–AC6及goal不标complete/blocked。
+两项只读规划报告已读取处理：评估建议已纳入正式协议；[拓扑入口边界草稿](../../specs/spec-008-trainable-snn/p3e-topology-boundaries-draft.md)已bef957d提交，尚未冻结科学预算/运行R图，不能冒充full_reference或直接复用P3c固定身份。下一步从frame52显式续训同run；joint余134窗、frozen未开始，维持每段1–4窗/600秒/1GiB，失败留证不自动裁图/重试。两份160窗完成后才进入评估首次1+1帧实际验收。AC3–AC6及goal仍未完成。
 
 ## 前置：首次完整图续训已通过（2026-10-19）
 
