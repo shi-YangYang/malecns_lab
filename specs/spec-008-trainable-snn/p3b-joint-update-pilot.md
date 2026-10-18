@@ -1,6 +1,8 @@
 # P3b — 完整图三轴动作损失的一次联合更新
 
-状态：软件已实现并获新的独立[PASS](acceptance-p3b.md)，[实施报告](implementation-p3b.md)及验收报告已全文读取处理，36项定向检查通过，无返工项；实际完整图运行尚待本软件提交后进行。此前独立[协议PASS](acceptance-p3b-protocol.md)、P3a软件65b35ca及[四训练场景封存](p3a-data-run-20261019-r1.md)均已完成。本文件冻结研究选择，不代表模型已经训练；实际运行与独立实际验收另行记录提交。
+状态：软件已实现并获新的独立[PASS](acceptance-p3b.md)，[实施报告](implementation-p3b.md)及验收报告已全文读取处理，36项定向检查通过。此前独立[协议PASS](acceptance-p3b-protocol.md)、P3a软件65b35ca及[四训练场景封存](p3a-data-run-20261019-r1.md)均已完成。本文件保留原冻结研究选择；软件通过与实际实验结果分开记录。
+
+2026-10-19软件提交0373c87后已按原协议运行一次，[r1实际结果FAIL](p3b-run-20261019-r1.md)：内存/墙钟未超预算，保存梯度有限但theta尺度巨大，float32梯度范数归约溢出，在optimizer.step前停止。失败证据与报告已获新的独立[PASS](acceptance-p3b-run-r1.md)，原协议与失败产物不改写；没有联合更新或动作效应结论。下一步为另行版本化的[稳定分组裁剪候选](p3b-stable-group-clip.md)，不把优化规则变化说成等价修复。
 
 ## 问题与边界
 

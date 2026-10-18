@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：P3b r1数值失败，内存门槛未触发（2026-10-19）
+
+软件`0373c87`后仅运行一次`data/joint_update_20261019_r1/`，终端session `11160`已收取退出1；没有运行中实验，不重跑。见[实际报告](../../specs/spec-008-trainable-snn/p3b-run-20261019-r1.md)：完整两帧前向和反向完成，clip_grad_norm_的float32总范数溢出，optimizer.step未执行；实际P3b为FAIL，数值更新/动作效应均未判定。墙钟110.389s、采样RSS2.94583GiB，低于本次4.15309GiB上限，系统最低可用3.82401GiB高于1GiB预留，非资源失败。全部theta梯度有限但float64范数7.78556e31，4259项非零；读出梯度范数约156.62，正则梯度零。新的[实际验收PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-run-r1.md)只针对失败证据/报告完整性，已全文读取处理，无返工项；原失败保留。
+
+只读梯度分析报告已全文读取处理：稳定全局clip系数约1.28443e−32，预测7884个读出权重均无法形成float32可表示更新，因此仅修范数不足。下一步直接实施已Ready的[稳定分组裁剪候选](../../specs/spec-008-trainable-snn/p3b-stable-group-clip.md)，新独立[协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-stable-protocol.md)已全文读取处理。它保持100ms完整图路径和原模型，只将theta/读出分别稳定裁剪，并保存Adam矩、绑定r1基线一致性；是新的优化规则，不解释巨大梯度机制。单一新实施Agent→新软件验收→提交→新目录r2一次运行→新实际验收；不得重跑r1。全部本轮Agent已完成，无待收取报告。Noria/Docker、1GiB预留及完整目标不变，AC3–AC6未完成，不标记goal完成或blocked。
+
 ## 当前断点：P3b 软件通过，准备一次实际运行（2026-10-19）
 
 已核实1GiB额外系统预留在代码与协议中一致，原调整已完成，不重复修改或重跑旧检查。[P3b工具](../../specs/spec-008-trainable-snn/implementation-p3b.md)由新实施者完成并经新的独立[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3b.md)，36项定向检查通过。两份报告均已全文读取处理，没有返工项；原绑定核心/策略/数据/存档源码未修改。软件随本状态提交后，协调者按[使用说明](../../docs/JOINT_PROBE.md)在新目录`data/joint_update_20261019_r1`登记一次完整图运行，再由新实际验收者复核。当前没有完整图作业，Noria/Docker保持不变，不用软件PASS替代动作学习证据。
