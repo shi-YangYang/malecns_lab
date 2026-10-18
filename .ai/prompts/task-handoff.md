@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 最新进展：伴随优化及实际对照完成（2026-10-19）
+
+软件提交 `3f68a09` 后，新登记 `data/trainable_probe_20261019_p1_r4/` 返回完整数值通过；[r4报告](../../specs/spec-008-trainable-snn/p1-run-20261019-r4.md)及[新独立PASS](../../specs/spec-008-trainable-snn/acceptance-p1-run-r4.md)均已读取处理，无返工项，缓存子批A–E完成。实际总墙钟83.69s、反向13.79s、采样峰值1.745GiB；与r3相比全部gain/神经响应精确相同，梯度和theta有已记录的浮点末位差。只解释同协议单次性能，不代表通路或任务能力。
+
+下一步[首轮通路协议](../../specs/spec-008-trainable-snn/observability-plan.md)已按新前向成本冻结60/20/10ms、5400步，预存 `data/observability_20261019_r1.protocol.json`；预估574.58s并非实测。使用新目录保留全部两模型七条件，无梯度；未启动前不声称结果。现有1GiB预留及Noria/Docker保留约束不变。整体AC3–AC6仍未完成。
+
 ## 当前子批：复用完整图伴随矩阵（2026-10-19）
 
 上一轮属于实际进展：`62818a2` 已记录完整图 P1/AC2 的新独立 PASS，短窗资源阻塞解除。按[p1-adjoint-cache](../../specs/spec-008-trainable-snn/p1-adjoint-cache.md)实施静态转置 CSR 缓存，保留所有梯度与原数值协议。软件验收及提交后仅用新目录进行一次相同 P1 对照，实际性能另报。没有新的产品决策或硬件操作，不需要再次请求已授权的本机研究权限。
