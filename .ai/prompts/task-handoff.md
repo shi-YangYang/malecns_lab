@@ -1,5 +1,19 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：完整图配对响应已有实际证据（2026-10-19）
+
+上一轮属于实际进展：完整图内核缓存软件及r4实际对照均独立通过，首轮配对诊断也已完成。新运行 `data/observability_20261019_r1/` 正常终止，5400步、468.51s、采样峰值1.500GiB；[实测报告](../../specs/spec-008-trainable-snn/observability-run-20261019-r1.md)及[新独立PASS](../../specs/spec-008-trainable-snn/acceptance-observability-r1.md)已读取处理，无返工项。没有活跃的模型进程或未处理Agent报告，所有模型与证据保持完整。
+
+科学结论：零背景本窗DN无差异；固定8mV背景全部六刺激的DN电位有差异，数量378/246/105/243/50/699，左右/上下/小大对比249/229/682。超容差差异首次出现在刺激开始后21–25ms桶，即撤除后1–5ms，不能区分延迟传播与撤除响应。所有条件每个DN的30ms总脉冲数相同（全体总计127），唯一脉冲桶变化为body11072的87→88ms。因此不能把当前总发放率当可区分刺激的读出，也不能每帧清零后只观察20ms。图、绘图脚本与派生时序分析在该本地目录；不重复本次已完成实验来增加信心。
+
+下一步已授权且不受旧内存等待限制：
+
+1. 前向成本仍约16.5s/200神经步。只读 `forward_kernel_cost_review` 已返回并处理：本机非MKL Torch路径对每条边调用长度1的axpy，建议先受监督计时同一完整权重的Torch CSR与SciPy `csr_array`乘向量（固定零/稀疏/稠密向量、包含桥接成本、全部dtype/索引/内存共享语义），不要提前改生产核或宣称加速。参考官方源码：Torch `5c4886908584029761b579af026dcfb627c84070` 的 `aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp`，SciPy `v1.18.1/scipy/sparse/sparsetools/csr.h`。候选未实施/未计时；核级通过不能替代后续完整动力学与梯度对照。保留1GiB预留、Noria/Docker，不并行加载多个全图模型。
+2. 只读 `snn_training_integration_readiness` 已返回并处理：复用FollowEnvironment/target_mask/SpatialDrive/全部1314 DN；新策略需 `forward_tensor` 保梯度，部署边界才转BodyVelocity；跨帧保存LIFState及SpatialDriveState、场景边界reset、TBPTT只detach。固定背景、电位或时间特征是由本次信号支持的候选，不自动解冻rho。后续协议须覆盖延迟/撤除效应并验证持续输入响应，再做有内部gain更新的三轴任务训练。
+3. 策略checkpoint需独立保存theta、读出、归一化和背景/时间/图身份；旧gain-only checkpoint不支持tonic或新读出，不可绕过。研究重连图目前被训练loader及policy map拒绝，后续需要隔离的受验证研究入口，不能把research_control冒充full_reference。冻结脑、急性恢复、直接视觉和拓扑比较均保留；AC3–AC6未完成。
+
+本轮不创建新的硬件许可、不停止在用服务、不宣布整个goal完成。旧段落中“待内存释放/尚未运行”只描述当时状态，以本节与实际报告为准。
+
 ## 最新进展：伴随优化及实际对照完成（2026-10-19）
 
 软件提交 `3f68a09` 后，新登记 `data/trainable_probe_20261019_p1_r4/` 返回完整数值通过；[r4报告](../../specs/spec-008-trainable-snn/p1-run-20261019-r4.md)及[新独立PASS](../../specs/spec-008-trainable-snn/acceptance-p1-run-r4.md)均已读取处理，无返工项，缓存子批A–E完成。实际总墙钟83.69s、反向13.79s、采样峰值1.745GiB；与r3相比全部gain/神经响应精确相同，梯度和theta有已记录的浮点末位差。只解释同协议单次性能，不代表通路或任务能力。

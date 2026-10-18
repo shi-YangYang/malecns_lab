@@ -1,6 +1,6 @@
 # 完整图配对可观测性诊断 — 首轮实际协议
 
-状态：Ready（2026-10-19，60/20/10ms 已冻结，尚未运行）。[P2d工具](p2d-observability-tools.md)的软件实现与本实验分开验收。[P1 r3](p1-run-20261019-r3.md)及[r4](p1-run-20261019-r4.md)已有完整图成本实测；按下述成本规则冻结窗口，没有读取本轮神经响应后选窗。实际启动在 r4 新独立验收通过后。本文件不授权绕过资源门槛。初始设计由 `observability_plan_review` 只读审查；本轮资源与窗口建议由新的 `observability_run_planning` 依据生产路径和P1实测只读复核，报告已读取处理。
+状态：Done（2026-10-19，60/20/10ms 全部条件实际完成并获[独立 PASS](acceptance-observability-r1.md)）。[实测报告](observability-run-20261019-r1.md)记录468.51s墙钟及有限窗口响应；[P2d工具](p2d-observability-tools.md)的软件实现与本实验分开验收。[P1 r3](p1-run-20261019-r3.md)及[r4](p1-run-20261019-r4.md)已有完整图成本实测；按下述成本规则冻结窗口，没有读取本轮神经响应后选窗。实际启动在r4新独立验收通过后，保留以下运行前协议及预算依据。初始设计由 `observability_plan_review` 只读审查；本轮资源与窗口建议由新的 `observability_run_planning` 依据生产路径和P1实测只读复核，报告已读取处理。
 
 ## 问题与比较
 
