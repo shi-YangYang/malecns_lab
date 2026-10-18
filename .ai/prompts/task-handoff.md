@@ -1,10 +1,12 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：完整状态存档软件通过，连续训练协议待细化（2026-10-19）
+## 当前断点：连续训练协议已Ready，待单一实施（2026-10-19）
 
 [P3c1实施](../../specs/spec-008-trainable-snn/implementation-p3c-state.md)及新的独立[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-state.md)已全文读取处理，无返工项。51项定向检查通过，实施者已收取session45861的exit0；两模式均在同进程销毁/重建后实现两次更新的全部参数/Adam/神经与感觉状态/动作/特征/游标精确一致。新增training_optimizer和training_checkpoint、使用说明与测试，已登记核心/策略/数据/旧checkpoint/P3b源码保持。真实跨进程完整图续跑未执行，不以小电路替代。实施与验收Agent均已完成，所有报告已处理，无待等待作业。
 
-下一步按[连续训练runner草案](../../specs/spec-008-trainable-snn/p3c-training-runner.md)细化run/segment/窗口日志封存、真实dataset/父链核对及一般步Adam复算，再新独立协议审查、单一实施、新软件验收与提交。实际先joint前两窗口分两个worker，验证继承完整状态后再推进登记的全场景；不得直接启动草案。1GiB额外预留、Noria/Docker和完整图要求保持。P3b r2内部收益阴性保留，整体AC3–AC6仍未完成，不标记goal complete或blocked。
+现已细化[连续训练runner协议](../../specs/spec-008-trainable-snn/p3c-training-runner.md)：run/segment/窗口封存、真实dataset与父链核对、一般步Adam浮点复算、四场景160窗一epoch的joint/独立frozen训练和首次跨进程门槛均已冻结。新的[独立协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-runner-protocol.md)全文读取处理，无返工项；只读Adam分析也已读取并纳入协议。当前无活跃模型进程或未处理Agent报告，协议标记Ready并先提交。
+
+下一步单一新实施者新增runner/worker/证据模块及定向检查，保持旧绑定源码；新独立软件验收并提交后，joint前两窗口分两个worker执行，实际验收确认继承完整状态后再推进登记的全场景。1GiB额外预留、Noria/Docker和完整图要求保持。P3b r2内部收益阴性保留，整体AC3–AC6仍未完成，不标记goal complete或blocked。
 
 ## 当前进行中：P3c1完整状态续训存档（2026-10-19）
 

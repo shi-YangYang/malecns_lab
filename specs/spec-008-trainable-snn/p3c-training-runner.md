@@ -1,6 +1,6 @@
 # P3c2 — 有界分段的连续场景模仿训练
 
-状态：Draft。P3c1软件已获[独立PASS](acceptance-p3c-state.md)，本协议仍待下方边界细化与独立审查，尚未实施或运行。该批沿用完整图和现有模型，目标是把一次两帧更新扩展为真正连续的场景训练；训练完成与跟随成功分开。
+状态：Ready。P3c1软件已获[独立PASS](acceptance-p3c-state.md)，本协议的封存/恢复边界及一般步Adam条款已获新的[独立协议PASS](acceptance-p3c-runner-protocol.md)，完整报告已读取处理，无返工项；尚未实施或运行。该批沿用完整图和现有模型，目标是把一次两帧更新扩展为真正连续的场景训练；训练完成与跟随成功分开。
 
 ## 前置证据与范围
 
@@ -8,9 +8,9 @@
 
 新增训练 runner、轻量资源监督入口和离线证据复核，复用新的训练存档 API。所有模型计算位于受监督 worker；父进程不导入 Torch/实例化图。单一实施者处理高度耦合的数据选择、更新循环、持久化和监督；通过独立验收并提交后才运行完整图。
 
-## 首轮研究登记候选
+## 首轮研究登记
 
-正式登记在实施前冻结以下候选，不根据实际训练输出改变：
+以下训练范围在实施前冻结，不根据实际训练输出改变：
 
 - 使用已封存 `neural_teacher_20261019_r1` 的全部四场景，固定顺序 combined、forward、vertical、yaw，各80帧、一个epoch、共160个两帧窗口；只读取train，不能把val/test混入训练。场景来源与正负标签覆盖见[采集报告](p3a-data-run-20261019-r1.md)。
 - 两个独立模式：joint 与 frozen_brain，分别从相同原始theta=0、读出seed1703初始化；完整图、感觉/背景/时间/特征/动作契约与r2保持一致。两模式不能共享训练后的读出或隐藏状态；一次只能运行一份生产图。
@@ -47,9 +47,58 @@
 
 整个epoch报告实际帧/有效帧/窗口/更新、每轴标签及动作覆盖、失败与资源、最终完整参数及续训档；训练动作来自固定教师轨迹上的图像，仍属于离线模仿，不能称为神经策略闭环。frozen_brain必须独立训练相同容量读出，不能从joint读出临时恢复theta来冒充。
 
-## 待完成的协议审查
+## 文件、封存和入口契约
 
-1. P3c1真实API和软件验收结果与本调用边界核对。
-2. 细化窗口文件命名、日志前缀封存和失败尾部恢复规则，避免跨segment重计窗口；明确固定初始run/segment身份与源码绑定集合。
-3. 对一般步Adam复算及资源暂停边界做直接数值检查计划；限制在新训练子系统，不重跑旧已通过实验。
-4. 新独立协议审查后再标记Ready并派实施者。未Ready前不启动完整图或对用户承诺长轨迹成本。
+入口为 `python -m cnsbridge.learning.train_snn`。首次提供 `--graph --dataset --out --mode joint|frozen_brain --windows N`，新建一个run并执行第一段；续段提供 `--run <已存在run目录> --windows N`，从本run最后验证的封存窗口继续。首次与续段参数不能混用，N必须为1至4且不能越过160窗终点。没有自动连续跑完整epoch或自动重试循环；协调者按初次实际门槛分段推进。禁止同一工作区并行两个本入口的生产worker，使用父进程持有的OS文件锁且退出自动释放；文件存在本身不作为存活证据。
+
+每个新run的`run.json`最后登记canonical run ID，包含固定协议/版本、mode、epoch预算、真实有序场景清单和每场景帧数、完整图绝对路径/文件SHA/provenance、封存dataset路径/身份/manifest SHA、完整policy身份、代码和环境，以及r2锚点。r2策略身份在启动前由已验收文件读取并核验，而非父进程实例化脑；worker生产构造再独立匹配。固定policy ID为`2e2945c5c9925e7d05698912a034bb34a815ae2e52e295317ad7732d1d910f09`。源绑定至少含所有新入口/契约/worker/优化和证据模块、训练存档和优化器、既有模型/感觉/数据/参数存档/监督器，以及实际复用的P3b辅助源码；不要修改这些既有文件来适配新协议。
+
+段目录固定为`segments/000001/`等递增编号，新段不得覆盖旧失败段。段内有`registration.json`（事前绑定run ID、起始窗口/游标、父checkpoint ID、上一封存前缀、窗口数和本次资源）、`phase.json`、`resources.csv`、`worker.log`、`worker_result.json`、保留原值的`supervisor_result.json`及父复核`result.json`。段序号与完成窗口数分开；失败段不自动增加已训练窗口数。
+
+窗口目录为段内`windows/000001/`等全局窗口编号，保存：
+
+- `evidence.npz`：原始两帧像素/索引/时间/valid/float64目标，实际float32动作/全部DN特征，theta/读出/gain/rho前后数组、原始及裁剪后梯度、实际优化前后命名Adam矩与step。第一次优化前Adam确实尚无state，显式记录该状态，复核采用初始零矩，不能把合成零数组说成实际optimizer内部已存在的矩。
+- `event.json`：run/segment/window身份、场景与前后游标、实际更新或无效窗跳过标记、证据文件SHA、损失、裁剪/下溢/更新计数、开始和结束的完整状态摘要及阶段时间。记录parent checkpoint ID，但不包含尚未生成的当前checkpoint ID。
+- `prefix.jsonl`：按全局窗口顺序复制上一已封存前缀，再追加本窗口事件的规范JSON引用行（固定相对位置、event文件SHA）。前缀的实际字节SHA写入P3c1 context.log_prefix_sha256，completed_windows严格等于前缀行数。规范相对位置由数字段/窗号生成，读取拒绝越界路径、重复/跳号窗口及错误事件；不得把任意外部路径放入清单。
+- `checkpoint/`：P3c1完整训练存档，context的run/protocol/dataset四身份来自外部登记，scenes与真实dataset清单精确一致，parent为上一封存checkpoint ID。更新后state.detach并zero_grad后再保存。
+- `window.json`：最后封存，绑定上面文件摘要、当前checkpoint ID、前一封存窗口/parent及完整cursor。这是窗口完成的标记；只有checkpoint存在但缺window.json仍视为未完成尾部。这样prefix在checkpoint前写、window在checkpoint后写，避免checkpoint ID与自身日志前缀的循环哈希。
+
+恢复选择只能沿本run从窗口1开始的唯一连续已验证链，核对每行前缀对应真实事件、真实输入序列和封存文件。窗口验证同时检查根训练manifest、nested参数、训练NPZ、状态/矩/游标与event一致，不能只信任worker自报completed。父进程逐窗口处理，释放大状态数组，不将所有checkpoint同时常驻内存。恢复后的worker在任何前向之前保存实际参数/Adam及完整状态摘要，和选定父checkpoint逐值/摘要匹配；该记录进入段终态清单。
+
+资源/进程失败段仍为failed。父复核可另列`recoverable_prefix`，仅包含该段资源采样区间内已封存且证据完整、数值有限、与先前链连续的窗口；不把部分进展改写成段成功。下一次显式续段才能使用该已验证前缀。数值异常窗口、缺末尾manifest、漏事件、摘要错误或链分叉拒绝恢复，不自动回退到更旧窗口掩盖损坏。纯未封存尾部保留但不计数；同一次调用不会重试它。
+
+P3c1不支持零优化步的存档。本次登记的第一个窗口及全部320帧均已确认valid；注册再次核验此固定数据事实。独立数值窗口函数可检查全无效窗的跳过语义；若未来数据在第一次更新前出现全无效窗口，当前生产协议明确拒绝并保留诊断，不伪造step=1或擅自改P3c1。已至少更新一次之后的全无效窗可保留状态、矩和参数不变并推进游标，但不得说本数据中实际发生过。
+
+## r2历史锚点与首窗对照
+
+固定历史目录为封存dataset同级`joint_update_20261019_r2`，r2 registration ID为`7ed634ceda4f6e495848fcf6ef7b1567691de3c14ef5aad29a2ca6945152be07`，protocol ID为`b4c292aa34d649c3d2d8d1cbe68154400ac0953239cfd64872feb795a2f85c9b`。以下SHA在r2独立实际PASS后冻结，并且需与r2原worker/终态清单核对；不能覆盖旧记录或借本绑定冒称重新运行了r2：
+
+| 文件 | SHA256 |
+|---|---|
+| registration.json | e54f7c95a270ff2577448cceb3e9abef122dbf8d9821dc2e3e6091e673674582 |
+| result.json | a62ca9c55323e3f30e02a43f55d6663f16784477485b820bc84237121d4775a1 |
+| policy_identity.json | 573e3e5f96f76b11e290629924026d5dd54f594a460020d90df9deccc34c65d8 |
+| initial_parameters.npz | bf36ff1ccd15918b076481f7e2935b7c875df304719378361ceef11d0d12ef75 |
+| baseline.npz | 2133633c08800152e6a20dc3ebb9ac32b8946276b3d293854eec1b9248eb4240 |
+| gradients_before_clip.npz | 26b2eb26f2a02c398dc7bc4cc61529e6b5904839f25d2d58b29f92fb631540e6 |
+| update.npz | fb3905ca1e1a24c75efd328a64039c6ffeeba1fa1a68a780ec7f91555b2f17fb |
+| adam_state.npz | ed7ad30b8fb8866354e2b29e7e5da6d833a1d8d7e31bad8c44836440486b1d95 |
+| selection.npz | 1c4f14ba2a98be54ad19200dac2364df043972076e44b966e043f48e5ef6cf11 |
+
+joint第一窗口的对照在封存为有效训练窗口前完成；超差即保存比较诊断并将窗口/段判无效，不靠解释或放宽阈值放行。frozen模式保留相同初始化来源和独立模式身份，不要求其theta更新等于joint。
+
+## 验证计划与实施分工
+
+风险S3，限新训练子系统及直接接口。单一实施者可按入口、登记/来源、窗口运算、持久化worker、轻量证据复核拆职责模块，不将所有功能堆在单文件，也不重构既有已绑定来源。现有训练存档API与P3c1最终说明一致，所有生产加载都使用full_reference。
+
+数值测试至少包括：joint/frozen多步含旧矩的真实Adam独立复算，非零旧矩抵消及二阶矩下溢；两次worker/等价入口的恢复与不中断逐值比较；帧/窗口/场景切换恰好一次；一窗无效后状态推进而参数/步数不变；保存中断、资源终止的已验证前缀及未封存尾部分离；坏父链/真实dataset不匹配/改日志/重复窗口/外部路径/假成功拒绝；父模块无Torch导入；R2历史超差拒绝；终态只靠进程exit0但证据缺失不能成功。用明确小电路入口检查数值，不伪装生产图或通过伪数据回退；不重跑旧51/62项检查或完整项目。
+
+### 一般步Adam独立复算
+
+本机Torch 2.14.1的非foreach/非fused路径使用`m.lerp_(g, 1-beta1)`，而非简单分步的`beta1*m+(1-beta1)*g`。独立只读数值分析已用低内存参数向量运行160步：普通float32 `m+.1*(g-m)`在64元素实验中有246个一阶矩违反原容差；具体抵消反例为step3，旧矩−0.0019786758348345757、梯度0.017808081582188606，Torch新矩−1.5677995013341217e−10，而普通分步得到−2.3283064365386963e−10。禁止以放宽容差掩盖此差异。
+
+父复核必须每窗口从已绑定的**实际旧矩**开始，所有输入数组为float32：先`delta=g-old_m`（float32舍入），再以`(old_m.astype(float64)+float(np.float32(1-0.9))*delta.astype(float64)).astype(float32)`模拟本机lerp乘加。二阶矩按`old_v*np.float32(.999)+(np.float32(1-.999)*g)*g`的顺序，不能改成先平方。先独立校验两个实际新矩，再用已校验的实际新矩计算参数：`denom=sqrt(v)/np.float32(sqrt(1-.999**step))`，float32加1e−8，最后`before+(np.float32(-lr/(1-.9**step))*m)/denom`。不跨窗口累积近似重算矩，不仅检查最终参数。
+
+矩比较在float64中进行，容差固定rtol=1e−6、atol=float32最小正次正规数；参数保留rtol=5e−6、atol=1e−9。160步的长度64、3、7、11,752、7,884针对性算术实验均满足此契约，其中一阶矩全部逐位相等；3元素二阶矩最大差1.86265e−9（相应量级下满足相对容差），7,884元素参数最大差2.32831e−10。实验含正负/零/1e−30/经裁剪的大有限梯度、下溢和抵消，两个heredoc终态exit0，耗时约0.288s和0.341s，没有模型或图计算。
+
+这是当前Mac、已安装Torch源码路径与有限实验支持的操作契约，不宣称float64模拟普遍等价IEEE fmaf或跨平台逐位保证。实施的定向检查必须包含该抵消反例和多步矩传递。超差保留诊断并拒绝证据，不事后放宽本条。协议已通过独立审查；仍须实施、新独立软件验收并提交后才启动登记的完整图首两个窗口，不承诺长轨迹成本。
