@@ -1,12 +1,12 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：joint已完成6/160窗，从frame12继续（2026-10-19）
+## 当前断点：joint14/160窗，闭环评估工具实施中（2026-10-19）
 
-[首次四窗续段](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)和新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-four-windows.md)已全文读取处理，无返工项。f34c56d后只运行一次同run --windows 4，session75106已收取exit0，segments/000003完成窗口3–6；累计12帧/6更新、神经step6600，next_frame=12，最后checkpoint f85f5376019778d40a50db68f0ab10b58b92d00ece21d51616dd2637a2cb7be9。没有活跃模型进程或未处理Agent报告，所有本批Agent已完成。
+[连续训练记录](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)已追加segments4/5，session96146/36705均已收取exit0；同一冻结run累计28帧/14更新、神经step14600，next_frame=28，末档c0c912dae879ddc1f91a4b766f7a6fe89d1f6fd8f55ea78287f633bb65a5b2ad。两段父数值/链复核成功，监督405.16/411.00s，1GiB预留未触发，Noria/Docker保持。首两窗/首次四窗已有独立实际验收，后续同协议段不重复旧检查或逐段重建独立验收；有限loss波动均保留，未作学习收益结论。
 
-四窗实测401.859676秒、采样RSS2.973846GiB，1GiB预留未触发，Noria/Docker保持。各窗MSE0.00660/0.12428/0.14177/0.04076，不同帧波动不作内部收益结论。独立一般步Adam一阶矩/参数exact，readout.weight二阶矩step4/6有微小容差内差异，未误报全部exact。源/图/数据/协议保持，前6窗均有独立证据。
+本记录写入时**session9089正在运行segment6的窗口15–18**；后续必须先poll该原session收取终态，不得重复启动。实施Agent `closed_loop_evaluator_impl` 正新增P3d评估模块，未准备测试；待其通知后在训练段结束时提供小数值测试时段，不与生产全图并行。新[评估协议](../../specs/spec-008-trainable-snn/p3d-closed-loop-evaluation.md)已独立协议PASS并提交3b0de42，报告已读取处理；正式评估仍须joint和独立frozen各完成160窗。
 
-下一步继续已授权完整目标，在data/neural_training_joint_20261019_r1显式 --windows 4，从frame12前进，不重复前6窗、不等待已完成作业、不重复旧测试。joint余154窗，独立frozen未开始；维持每段1–4窗/600秒/1GiB，失败按已冻结规则留证停止，不自动裁图或重试。跨场景实际边界、完整epoch、独立对照、神经闭环、拓扑与部署仍待完成，AC3–AC6及goal不标complete/blocked。本轮属于实际进展。
+两项只读规划报告已读取处理，无未收取报告：评估任意帧/参数身份建议已纳入Ready；拓扑入口边界已查明，研究图不能冒充full_reference或直接复用P3c固定身份，后续另立研究协议。完整目标继续；joint余146窗、frozen未开始，维持每段1–4窗/600秒/1GiB，保持29个训练绑定源码，失败留证不自动裁图/重试。AC3–AC6及goal不标complete/blocked。
 
 ## 前置：首次完整图续训已通过（2026-10-19）
 
