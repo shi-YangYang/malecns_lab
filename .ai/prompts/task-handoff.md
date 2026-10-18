@@ -1,5 +1,15 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：前向优化已完成完整图验证（2026-10-19）
+
+本轮有实际进展：内核基准2a3979a、实际依据与生产规格ef7a315、生产实现13716c6。软件首次验收发现证据校验仍期望旧backend，已由新实施者修复、新验收者通过；46项数值＋37项证据检查通过，原FAIL报告保留。P1 r5和配对r2随后均正常终止，新的[实际独立PASS](../../specs/spec-008-trainable-snn/acceptance-forward-csr-actual.md)已读取处理，无返工项。所有本轮Agent已完成，模型进程已退出，无需等待。
+
+最新成本与证据见[实测报告](../../specs/spec-008-trainable-snn/forward-csr-run-20261019.md)：P1 32.391s、RSS1.753GiB，全部已保存响应/gradient/theta/gain与r4精确一致；配对108.558s、RSS1.506GiB，22个NPZ/465字段与r1精确一致。两次源身份更新正常，原始图/数据未改，1GiB额外预留与Noria/Docker限制保留。不得重跑这些已通过实验或测试来增加信心；当前前向约3.9s/20ms神经窗仍非实时。
+
+下一步推进三轴神经策略集成，而非继续停留在数值探针：先明确跨帧保留LIFState及SpatialDriveState、场景边界reset、TBPTT detach保留队列/相位/时钟；读出选全部1314 DN的电位/时间信息，不能只用已证明各条件相同的总发放率。视觉仅进入SpatialDrive，不直连动作；BodyVelocity的float转换只能在部署边界，训练须tensor输出。当前60/20/10ms结果的DN差异均在撤除后出现，因此持续输入与控制窗口的关系须用预登记新证据确定，不能默认每帧reset20ms。可依据新前向成本执行有界持续刺激协议，同时准备可配置但身份绑定的状态/时间接口；具体实际协议需先冻结，不根据输出追改窗口。
+
+完整图任务训练还需独立策略checkpoint（theta/读出/归一化/固定背景/图与时间身份，旧checkpoint有意拒绝tonic）、教师/场景划分/预算、冻结脑与急性恢复/直接视觉/研究重连对照、部署时延及Tello现场条件。AC3–AC6和整个goal未完成，不标记complete或blocked，也不以资源设置已完成结束路线。未启动新硬件或付费资源。
+
 ## 当前子批：完整图前向内核候选计时（2026-10-19）
 
 生产缓存A/B已实现，46项数值检查通过；首轮独立验收发现两个证据入口仍只接受旧backend，未运行全图。新实施者同步严格新身份，37项相关证据检查通过，新验收者[PASS](../../specs/spec-008-trainable-snn/acceptance-forward-csr-cache-r1.md)已读取处理，无返工项。随状态更新提交后串行运行P1 r5与配对r2，数值协议保持；尚无此版本完整图性能结论。
