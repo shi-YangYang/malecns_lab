@@ -1,5 +1,13 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：三轴联合更新的前置已齐（2026-10-19）
+
+本轮有实际进展：持续输入完整图379.67s/RSS1.500GiB、新有状态策略a2320b0、实际响应/工具规格85716d3、P3b协议926bf34、P3a实现65b35ca。P3a首次FAIL两缺口由新实施/新验收关闭，71项定向检查通过；其[实际四场景数据](../../specs/spec-008-trainable-snn/p3a-data-run-20261019-r1.md)也已由新的[实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3a-data.md)确认。全部报告已全文读取处理、所有Agent已完成、没有运行中的模型或未处理返工。
+
+下一步直接实施已Ready的[P3b](../../specs/spec-008-trainable-snn/p3b-joint-update-pilot.md)，不要再停留在内存设置/旧诊断/软件数据检查。单一新实施Agent负责joint_probe及证据工具，软件独立验收提交后新目录登记一次实际完整图动作损失更新。数据目录`data/neural_teacher_20261019_r1/`，dataset ID `f0fe9735abbffff6135a8a5d7c8f3943d638da90bfe6a40eb21ba53583137076`，manifest SHA `2418141cc7711c64cfc27f7bd8056150b8a170dd0ebed3a3079c25bffecb1104`。四场景320帧全有效，P3b预选combined的0/1帧在0/.1s，三个标签均正；不改选。生产读取已核对登记环境来源，勿为增加信心重新采集或重跑旧实验。
+
+P3b固定50ms/帧、两帧100ms反向、60ms无梯度空白预处理；约303s是估计，反向内存未知。保留1GiB额外预留、6GiB/600s监督和Noria/Docker；工具和实际分别验收，内部数值更新/内部动作影响/协议完整分开。完整目标仍需可恢复长场景联合训练、神经闭环、冻结脑/急性恢复/视觉/重连对照及部署/设备条件，AC3–AC6未完成。没有付费或新硬件动作，不标记goal complete/blocked。
+
 ## P3a软件完成，准备实际数据（2026-10-19）
 
 [P3a](../../specs/spec-008-trainable-snn/p3a-data-checkpoint.md)首次验收FAIL：数据实际来源可被val轨迹重封存伪装，轻量checkpoint未校验固定gain语义。新实施者完成环境确定性重放和严格模型语义，新验收者[PASS](../../specs/spec-008-trainable-snn/acceptance-p3a-r1.md)已全文读取处理，71项受影响检查通过，原FAIL保留，无返工项。本状态随软件提交，下一步以新目录生成四个完整train场景，再独立核对实际数据；未加载完整图训练。P3b协议Ready并已提交926bf34，工具尚未实现，不跳过前置门槛。
