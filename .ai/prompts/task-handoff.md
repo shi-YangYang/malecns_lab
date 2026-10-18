@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前子批：完整图前向内核候选计时（2026-10-19）
+
+上一轮只确认既有1GiB设置，属于状态复核，没有新的实施进展。本轮继续已授权目标，按[前向内核实测协议](../../specs/spec-008-trainable-snn/forward-kernel-benchmark.md)先实现可重复的离线基准并独立验收，再提交和运行一次。生产模型暂不修改；数值或性能结论待原始结果。启动前只读快照可用5.513GiB、swap1.434GiB，无已有模型进程；实际预算以新登记时为准。Noria/Docker保留。
+
 ## 当前断点：完整图配对响应已有实际证据（2026-10-19）
 
 上一轮属于实际进展：完整图内核缓存软件及r4实际对照均独立通过，首轮配对诊断也已完成。新运行 `data/observability_20261019_r1/` 正常终止，5400步、468.51s、采样峰值1.500GiB；[实测报告](../../specs/spec-008-trainable-snn/observability-run-20261019-r1.md)及[新独立PASS](../../specs/spec-008-trainable-snn/acceptance-observability-r1.md)已读取处理，无返工项。没有活跃的模型进程或未处理Agent报告，所有模型与证据保持完整。
