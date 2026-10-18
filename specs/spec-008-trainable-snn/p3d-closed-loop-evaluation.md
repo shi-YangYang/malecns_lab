@@ -1,6 +1,6 @@
 # P3d — 有状态神经闭环评估
 
-状态：Ready；新的独立[协议审查PASS](acceptance-p3d-protocol.md)已全文读取处理，无返工项。由[早期候选](p3d-closed-loop-evaluation-draft.md)收敛。工具可在训练期间开发；实际评估须等 joint 与独立 frozen_brain 均完成冻结的160窗。当前无正式评估结果，AC3–AC6仍未完成。
+状态：软件已通过新的独立[返工验收PASS](acceptance-p3d-rework-r1.md)，无返工项；[原FAIL](acceptance-p3d.md)和[返工实施](implementation-p3d-rework-r1.md)保留。协议由[早期候选](p3d-closed-loop-evaluation-draft.md)收敛并已独立[协议PASS](acceptance-p3d-protocol.md)。实际评估须等 joint 与独立 frozen_brain 均完成冻结的160窗，再执行首次1+1帧实际验收。当前无正式评估结果，AC3–AC6仍未完成。
 
 ## 目标与边界
 
