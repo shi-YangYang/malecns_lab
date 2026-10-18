@@ -10,6 +10,8 @@ from pathlib import Path
 
 import numpy as np
 
+from cnsbridge.learning.resource_guard import DEFAULT_SYSTEM_RESERVE_BYTES, GIB
+
 SCHEMA = "cnsbridge.observability_protocol.v1"
 REGISTRATION_SCHEMA = "cnsbridge.observability_registration.v1"
 WORKER_SCHEMA = "cnsbridge.observability_worker.v1"
@@ -17,7 +19,6 @@ MODES = ("zero_background", "fixed_lamina_8mv")
 CONDITIONS = ("blank", "center", "left", "right", "up", "down", "large")
 LAMINA = ("L1", "L2", "L3", "L4", "L5")
 RECTANGLES = (None, (5, 7, 7, 9), (5, 7, 3, 5), (5, 7, 11, 13), (2, 4, 7, 9), (8, 10, 7, 9), (4, 8, 6, 10))
-GIB = 1024 ** 3
 
 
 def canonical_hash(value) -> str:
@@ -79,7 +80,8 @@ def template() -> dict:
                            for name, rect in zip(CONDITIONS, RECTANGLES)],
             "windows_ms": {"precondition": 100, "stimulus": 50, "withdrawal": 50},
             "difference": {"atol_mv": 1e-5, "rtol": 1e-6, "spikes": "exact integer"},
-            "resources": {"wall_seconds": 600, "rss_bytes": 6 * GIB, "reserve_bytes": 4 * GIB, "poll_seconds": 0.1}}
+            "resources": {"wall_seconds": 600, "rss_bytes": 6 * GIB,
+                          "reserve_bytes": DEFAULT_SYSTEM_RESERVE_BYTES, "poll_seconds": 0.1}}
 
 
 def validate_protocol(value: dict) -> dict:
@@ -99,7 +101,8 @@ def validate_protocol(value: dict) -> dict:
         v = resources[name]
         require(type(v) in (int, float) and math.isfinite(v) and 0 < v <= limit, f"Resource limit may only tighten: {name}")
     require(type(resources["rss_bytes"]) is int and 0 < resources["rss_bytes"] <= 6 * GIB, "RSS may only tighten")
-    require(type(resources["reserve_bytes"]) is int and resources["reserve_bytes"] >= 4 * GIB, "Reserve may only increase")
+    require(type(resources["reserve_bytes"]) is int and resources["reserve_bytes"] >= DEFAULT_SYSTEM_RESERVE_BYTES,
+            "Reserve may only increase from the 1 GiB minimum")
     normalized = deepcopy(value)
     normalized["windows_ms"] = {name: int(v) for name, v in windows.items()}
     return normalized

@@ -51,14 +51,15 @@ def run_registered(graph: Path, directory: Path) -> dict:
     budget = registration["resources"]
     if not budget["can_launch"]:
         result = {"schema": "cnsbridge.resource_run.v1", "status": "failed", "reason": "resource_preflight_failed",
-                  "detail": "Available memory does not leave the registered 4 GiB system reserve",
+                  "detail": f"Available memory does not leave the registered {budget['reserve_bytes'] / GIB:g} GiB system reserve",
                   "peak_observed_rss_bytes": 0, "wall_seconds": 0.0, "returncode": None,
                   "worker_status": "not_launched", "last_phase": None}
         write_json(directory / "result.json", result)
         return result
     outcome = supervise([sys.executable, "-m", "cnsbridge.learning.probe", "--worker", str(directory.resolve())],
                         directory, rss_limit_bytes=budget["effective_rss_limit_bytes"],
-                        wall_seconds=600, reserve_bytes=4 * GIB)
+                        wall_seconds=budget["wall_limit_seconds"], reserve_bytes=budget["reserve_bytes"],
+                        poll_seconds=budget["sampling_seconds"])
     return finalize_run(directory, outcome)
 
 

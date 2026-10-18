@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前任务：按用户要求预留 1 GiB 并重新测量（2026-10-19）
+
+用户明确要求“保留到1gb”。[Decision 012](../decisions/012-one-gib-system-reserve.md)和[资源调整子规格](../../specs/spec-008-trainable-snn/resource-reserve-1g.md)授权将共享监督、P1及配对诊断新协议默认预留改为1GiB；保持6GiB进程上限、600秒、持续监控及完整连接组。实施与独立验收通过后提交，再由协调者用新目录运行一次P1探针，实际结果另报。旧4GiB登记/失败证据不覆盖，Noria限制继续有效。下面blocked及4GiB限制属于此前阶段记录，不覆盖本次用户授权。
+
+软件调整现已完成，41项定向检查通过并获新独立验收者[PASS](../../specs/spec-008-trainable-snn/acceptance-reserve-1g.md)；两份报告均已读取处理，没有未解决返工项。下一步按新规则实际测量，不以软件通过计作全图学习通过。
+
 ## 当前资源限制：Noria 必须保持运行（2026-10-19）
 
 用户要求检查资源并清理无用内容后，进程审计未发现遗留训练或测试进程，发现 Docker 的四个 Noria 容器仍在运行。用户明确拒绝停机：“不可以，Noria 还在使用”。按[Decision 011](../decisions/011-preserve-noria-services.md)，禁止为本项目释放内存而停止、暂停、删除 Noria 或其 Docker / 虚拟机。没有执行此类清理；完整图训练仍未完成，目标当前为 blocked。后续依据其他可用资源变化继续，不再将 Noria 作为待批准的清理对象。

@@ -138,22 +138,47 @@ def test_checkpoint_rejects_unrepresented_metadata_before_reading_graph_or_resto
 
 def test_resource_budget_reserves_system_memory():
     assert resource_budget(12 * GIB)["effective_rss_limit_bytes"] == 6 * GIB
-    assert resource_budget(7 * GIB)["effective_rss_limit_bytes"] == 3 * GIB
-    assert not resource_budget(4 * GIB)["can_launch"]
-    assert not resource_budget(3 * GIB)["can_launch"]
+    assert resource_budget(4 * GIB)["effective_rss_limit_bytes"] == 3 * GIB
+    assert resource_budget(GIB + 1)["effective_rss_limit_bytes"] == 1
+    assert not resource_budget(GIB)["can_launch"]
+    assert not resource_budget(GIB - 1)["can_launch"]
 
 
-def test_preflight_failure_is_registered_and_does_not_launch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("available", [GIB - 1, GIB])
+def test_preflight_failure_is_registered_and_does_not_launch(tmp_path, monkeypatch, available):
     import cnsbridge.learning.probe as probe
-    monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=3 * GIB))
+    monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
     monkeypatch.setattr(probe, "supervise", lambda *args, **kwargs: pytest.fail("Child must not launch"))
     directory = tmp_path / "failed"
     result = run_registered(Path("not-even-loaded.npz"), directory)
     assert result["reason"] == "resource_preflight_failed"
+    assert "1 GiB system reserve" in result["detail"]
     assert json.loads((directory / "registration.json").read_text())["protocol"]["steps"] == 200
     assert json.loads((directory / "result.json").read_text())["worker_status"] == "not_launched"
     with pytest.raises(FileExistsError):
         run_registered(Path("not-even-loaded.npz"), directory)
+
+
+@pytest.mark.parametrize("available,expected_limit", [(GIB + 1, 1), (4 * GIB, 3 * GIB), (8 * GIB, 6 * GIB)])
+def test_probe_supervision_uses_registered_budget(tmp_path, monkeypatch, available, expected_limit):
+    import cnsbridge.learning.probe as probe
+    from cnsbridge.learning.probe_evidence import validate_registration
+    monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
+    calls = []
+
+    def stop_without_loading(command, directory, **budget):
+        registration = json.loads((directory / "registration.json").read_text())
+        validate_registration(registration, probe.PROTOCOL)
+        assert budget == {"rss_limit_bytes": expected_limit, "wall_seconds": 600,
+                          "reserve_bytes": GIB, "poll_seconds": 0.1}
+        assert budget["reserve_bytes"] == registration["resources"]["reserve_bytes"]
+        calls.append(command)
+        return {"status": "failed", "reason": "rss_limit", "returncode": -15}
+
+    monkeypatch.setattr(probe, "supervise", stop_without_loading)
+    result = run_registered(tmp_path / "not_loaded.npz", tmp_path / "registered")
+    assert len(calls) == 1
+    assert result == {"status": "failed", "reason": "rss_limit", "returncode": -15}
 
 
 @pytest.mark.parametrize("mode,expected", [("status_only", "completed"), ("checkpoint_only", "completed"),
@@ -184,6 +209,17 @@ def test_timeout_terminates_child_and_retains_failure(tmp_path):
     assert result["status"] == "failed" and result["reason"] == "wall_limit"
     assert result["returncode"] != 0
     assert result["wall_seconds"] < 5
+
+
+@pytest.mark.parametrize("available,expected", [(GIB, "completed"), (GIB - 1, "failed")])
+def test_supervisor_default_reserve_enforces_running_boundary(tmp_path, monkeypatch, available, expected):
+    import cnsbridge.learning.resource_guard as guard
+    monkeypatch.setattr(guard.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
+    result = supervise([sys.executable, "-c", "pass"], tmp_path, rss_limit_bytes=GIB,
+                       wall_seconds=10, poll_seconds=0.02)
+    assert result["status"] == expected
+    assert result["reason"] == ("worker_exited" if expected == "completed" else "system_reserve")
+    assert json.loads((tmp_path / "result.json").read_text()) == result
 
 
 def test_rss_stop_is_distinct_from_success(tmp_path):

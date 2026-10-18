@@ -179,7 +179,8 @@ def test_incomplete_or_inconsistent_evidence_never_passes(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("defect,reason", [("hash", "registration_id"), ("protocol", "protocol differs"),
-                                         ("implementation", "implementation changed"), ("budget", "resource protocol")])
+                                         ("implementation", "implementation changed"), ("budget", "resource protocol"),
+                                         ("reserve_below", "resource protocol"), ("reserve_above", "resource protocol")])
 def test_registration_binds_protocol_implementation_and_budget(tmp_path, monkeypatch, defect, reason):
     _, registration, _ = software_evidence(tmp_path, monkeypatch)
     value = deepcopy(registration)
@@ -187,6 +188,8 @@ def test_registration_binds_protocol_implementation_and_budget(tmp_path, monkeyp
         value["protocol"]["steps"] = 201
     elif defect == "implementation":
         value["implementation_sha256"]["probe.py"] = "wrong"
+    elif defect.startswith("reserve_"):
+        value["resources"]["reserve_bytes"] = GIB - 1 if defect == "reserve_below" else 2 * GIB
     else:
         value["resources"]["wall_limit_seconds"] = 601
     if defect != "hash":

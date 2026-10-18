@@ -14,6 +14,7 @@ import time
 import psutil
 
 GIB = 1024 ** 3
+DEFAULT_SYSTEM_RESERVE_BYTES = GIB
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -30,7 +31,8 @@ def _read_status(path: Path) -> dict:
         return {"status": "missing_or_malformed"}
 
 
-def resource_budget(available_bytes: int, *, rss_bytes: int = 6 * GIB, reserve_bytes: int = 4 * GIB) -> dict:
+def resource_budget(available_bytes: int, *, rss_bytes: int = 6 * GIB,
+                    reserve_bytes: int = DEFAULT_SYSTEM_RESERVE_BYTES) -> dict:
     if min(available_bytes, rss_bytes, reserve_bytes) < 0 or rss_bytes == 0:
         raise ValueError("Resource budgets must be nonnegative with a positive RSS limit")
     limit = min(rss_bytes, max(0, available_bytes - reserve_bytes))
@@ -40,7 +42,7 @@ def resource_budget(available_bytes: int, *, rss_bytes: int = 6 * GIB, reserve_b
 
 
 def supervise(command: list[str], directory: Path, *, rss_limit_bytes: int,
-              wall_seconds: float = 600, reserve_bytes: int = 4 * GIB,
+              wall_seconds: float = 600, reserve_bytes: int = DEFAULT_SYSTEM_RESERVE_BYTES,
               poll_seconds: float = 0.1) -> dict:
     """Report process completion or supervision failure, never scientific success.
 

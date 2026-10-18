@@ -96,7 +96,7 @@ def test_protocol_rejects_unregistered_variations(field, value):
 
 @pytest.mark.parametrize("section,key,value", [("windows_ms", "stimulus", 0), ("windows_ms", "withdrawal", 1.5),
     ("windows_ms", "precondition", float("nan")), ("windows_ms", "precondition", 1001),
-    ("resources", "wall_seconds", 601), ("resources", "reserve_bytes", 3 * GIB),
+    ("resources", "wall_seconds", 601), ("resources", "reserve_bytes", GIB - 1),
     ("resources", "rss_bytes", 7 * GIB), ("resources", "poll_seconds", 0.2)])
 def test_windows_and_budget_only_permit_registered_tightening(section, key, value):
     p = template()
@@ -118,19 +118,46 @@ def test_fixed_masks_and_step_ledger():
     assert validate_protocol(p) == p
 
 
-def test_registered_preflight_does_not_launch_or_overwrite(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reserve", [GIB, 2 * GIB])
+def test_registered_preflight_does_not_launch_or_overwrite(tmp_path, monkeypatch, reserve):
     protocol = tmp_path / "candidate.json"
-    write_json(protocol, template())
-    monkeypatch.setattr(cli.psutil, "virtual_memory", lambda: SimpleNamespace(available=3 * GIB))
+    candidate = template()
+    candidate["resources"]["reserve_bytes"] = reserve
+    write_json(protocol, candidate)
+    monkeypatch.setattr(cli.psutil, "virtual_memory", lambda: SimpleNamespace(available=reserve))
     monkeypatch.setattr(cli, "supervise", lambda *a, **kw: pytest.fail("Must not start a worker"))
     destination = tmp_path / "run"
     result = cli.run_registered(tmp_path / "not_loaded.npz", protocol, destination)
     assert result["status"] == "incomplete" and result["reason"] == "resource_preflight_failed"
     registration = read_json(destination / "registration.json")
-    assert validate_registration(registration) == template()
+    assert validate_registration(registration) == candidate
     assert read_json(destination / "supervisor.json")["worker_status"] == "not_launched"
     with pytest.raises(FileExistsError):
         cli.register(tmp_path / "not_loaded.npz", protocol, destination)
+
+
+@pytest.mark.parametrize("reserve,expected_limit", [(GIB, 3 * GIB), (2 * GIB, 2 * GIB)])
+def test_observability_supervision_uses_registered_reserve(tmp_path, monkeypatch, reserve, expected_limit):
+    candidate = template()
+    candidate["resources"]["reserve_bytes"] = reserve
+    protocol = tmp_path / "candidate.json"
+    write_json(protocol, candidate)
+    monkeypatch.setattr(cli.psutil, "virtual_memory", lambda: SimpleNamespace(available=4 * GIB))
+    calls = []
+
+    def stop_without_loading(command, directory, **budget):
+        registration = read_json(directory / "registration.json")
+        assert validate_registration(registration) == candidate
+        assert budget == {"rss_limit_bytes": expected_limit, "wall_seconds": 600,
+                          "reserve_bytes": reserve, "poll_seconds": 0.1}
+        assert budget["reserve_bytes"] == registration["budget"]["reserve_bytes"]
+        calls.append(command)
+        return {"status": "failed", "reason": "rss_limit", "returncode": -15}
+
+    monkeypatch.setattr(cli, "supervise", stop_without_loading)
+    result = cli.run_registered(tmp_path / "not_loaded.npz", protocol, tmp_path / "registered")
+    assert len(calls) == 1
+    assert result["status"] == "incomplete" and result["reason"] == "rss_limit"
 
 
 def test_registration_rejects_source_changes(tmp_path, monkeypatch):

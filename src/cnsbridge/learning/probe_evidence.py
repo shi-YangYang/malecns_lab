@@ -7,6 +7,8 @@ import json
 import math
 from pathlib import Path
 
+from .resource_guard import DEFAULT_SYSTEM_RESERVE_BYTES, GIB
+
 REGISTRATION_SCHEMA = "cnsbridge.probe_registration.v2"
 RESULT_SCHEMA = "cnsbridge.fullgraph_probe_result.v2"
 ARTIFACTS = ("model_identity.json", "baseline.npz", "update.npz", "responses.npz",
@@ -71,7 +73,7 @@ def validate_registration(registration: dict, protocol: dict) -> dict:
              "Registered graph path must be absolute")
     resources = registration["resources"]
     _require(resources["wall_limit_seconds"] == 600 and resources["sampling_seconds"] == 0.1
-             and resources["reserve_bytes"] == 4 * 1024 ** 3 and resources["requested_rss_limit_bytes"] == 6 * 1024 ** 3,
+             and resources["reserve_bytes"] == DEFAULT_SYSTEM_RESERVE_BYTES and resources["requested_rss_limit_bytes"] == 6 * GIB,
              "Registered resource protocol differs")
     available = _finite(resources["available_bytes_before_launch"], "available_bytes_before_launch")
     expected_limit = min(resources["requested_rss_limit_bytes"], max(0, available - resources["reserve_bytes"]))

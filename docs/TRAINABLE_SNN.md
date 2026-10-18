@@ -107,7 +107,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.probe \
   --out data/trainable_probe_NEW_RUN
 ```
 
-输出必须是新目录。父进程先写 `registration.json`，再启动 CPU float32 / 4 线程子进程。首次墙钟预算 600 s，RSS 上限 6 GiB；启动前按可用内存减去系统预留 4 GiB 收紧上限，若无剩余预算则拒绝启动。运行中采样进程树 RSS、系统可用内存和墙钟；超过预算会终止子进程，写明失败原因。采样监督不是操作系统级硬内存隔离。
+输出必须是新目录。父进程先写 `registration.json`，再启动 CPU float32 / 4 线程子进程。墙钟预算 600 s，RSS 上限 6 GiB；启动前按可用内存减去系统额外预留 **1 GiB** 收紧上限，若无剩余预算则拒绝启动。运行中每 0.1 s 采样进程树 RSS、系统可用内存和墙钟；超过预算会终止子进程，写明失败原因。预留按用户 2026-10-19 的要求调整，见 [Decision 012](../.ai/decisions/012-one-gib-system-reserve.md)；既有 4 GiB 登记和失败记录保持原值。采样监督不是操作系统级硬内存隔离。
 
 `result.json` 是父进程最终状态；`worker_result.json` 保存完成数值流程的阶段时间、梯度、参数和响应变化、恢复比较及图身份。正常完成还会有 `resources.csv`、`worker.log`、`model_identity.json`、`baseline.npz`、`update.npz`、`responses.npz` 和 `checkpoint/`。仅有日志、checkpoint 或子进程退出码 0 都不能判为完成。损失上升会如实记录，不通过换目标制造下降；非零内部参数和下游响应变化也只证明一次数值更新，不能证明学会目标跟随。
 
