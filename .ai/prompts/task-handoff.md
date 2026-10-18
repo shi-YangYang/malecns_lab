@@ -1,6 +1,14 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：首次完整图续训已通过，从frame4继续（2026-10-19）
+## 当前断点：joint已完成6/160窗，从frame12继续（2026-10-19）
+
+[首次四窗续段](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)和新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-four-windows.md)已全文读取处理，无返工项。f34c56d后只运行一次同run --windows 4，session75106已收取exit0，segments/000003完成窗口3–6；累计12帧/6更新、神经step6600，next_frame=12，最后checkpoint f85f5376019778d40a50db68f0ab10b58b92d00ece21d51616dd2637a2cb7be9。没有活跃模型进程或未处理Agent报告，所有本批Agent已完成。
+
+四窗实测401.859676秒、采样RSS2.973846GiB，1GiB预留未触发，Noria/Docker保持。各窗MSE0.00660/0.12428/0.14177/0.04076，不同帧波动不作内部收益结论。独立一般步Adam一阶矩/参数exact，readout.weight二阶矩step4/6有微小容差内差异，未误报全部exact。源/图/数据/协议保持，前6窗均有独立证据。
+
+下一步继续已授权完整目标，在data/neural_training_joint_20261019_r1显式 --windows 4，从frame12前进，不重复前6窗、不等待已完成作业、不重复旧测试。joint余154窗，独立frozen未开始；维持每段1–4窗/600秒/1GiB，失败按已冻结规则留证停止，不自动裁图或重试。跨场景实际边界、完整epoch、独立对照、神经闭环、拓扑与部署仍待完成，AC3–AC6及goal不标complete/blocked。本轮属于实际进展。
+
+## 前置：首次完整图续训已通过（2026-10-19）
 
 [P3c2首两窗实测](../../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)与新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)已全文读取处理，无返工项。软件33162f7后，data/neural_training_joint_20261019_r1两次--windows 1实际完成；session18740/43643均收取exit0，没有存活模型作业。首窗20个r2比较字段全部exact；次窗恢复全部参数/Adam/23状态摘要及游标精确，独立NumPy复算两步全部矩/参数最大差0。神经step600→1600→2600，累计4帧/2窗/2更新，真实增益和读出均改变。
 

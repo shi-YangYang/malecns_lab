@@ -24,7 +24,7 @@ P2c已独立验收并提交 `d9d79a5`。[P2d](p2d-observability-tools.md)将配�
 
 ## 数据流与接口变化
 
-[P3b r2联合更新实测](p3b-run-20261019-r2.md)及新的独立[实际PASS](acceptance-p3b-run-r2.md)已完成：完整图两帧动作损失更新内部参数和读出，恢复内部参数会改变动作，但本步内部影响使动作误差相对急性恢复增加0.00700335，未证明正向收益。五分支总238.29s、采样RSS2.757GiB。[P3c1](p3c-resumable-state.md)完整状态/Adam/游标续训存档也已软件独立PASS，51项检查通过；真实跨进程完整图恢复及后续[连续训练runner草案](p3c-training-runner.md)仍待实施/实测。随后登记独立冻结脑、未见场景和拓扑比较，不能用两帧阳性数值效应关闭AC3–AC6。
+[P3b r2联合更新实测](p3b-run-20261019-r2.md)及独立[实际PASS](acceptance-p3b-run-r2.md)已完成：完整图两帧动作损失更新内部参数和读出，恢复内部参数会改变动作，但本步内部影响使动作误差相对急性恢复增加0.00700335，未证明正向收益。五分支总238.29s、采样RSS2.757GiB。[P3c1](p3c-resumable-state.md)完整状态/Adam/游标续训存档已软件PASS，51项检查通过；[P3c2连续训练](p3c-training-runner.md)27项检查及首两窗跨进程/首次四窗实际续段均已独立PASS，累计6/160窗。继续同一冻结run完成训练和独立frozen，再做未见场景与拓扑比较，不能用短前缀的数值效应关闭AC3–AC6。
 
 [P2e有状态策略](p2e-neural-policy.md)已完成新的独立[软件PASS](acceptance-p2e.md)：28项定向数值检查证明跨帧完整状态、全部DN两半窗电位读出、内部theta动作损失梯度及controller边界。该接口仅有数值fixture证据，实际完整图动作更新、独立策略checkpoint及场景训练仍待下一批；旧gain-only持久化不能保存新策略。
 
