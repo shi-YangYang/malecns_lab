@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import math
 from pathlib import Path
 import sys
 import time
@@ -13,7 +14,7 @@ import psutil
 import scipy
 import torch
 
-from .joint_probe_contract import (BRANCHES, PARAMETERS, PROTOCOL, RESULT_SCHEMA, array_digest, bound,
+from .joint_probe_contract import (ADAM_FIELDS, CLIP_GROUPS, PARAMETERS, PROTOCOL, RESULT_SCHEMA, array_digest,
                                    read_json, require, select_data, sha256, validate_registration)
 from .neural_policy import NeuralPolicy, NeuralPolicyConfig
 from .policy_checkpoint import load_policy_checkpoint, save_policy_checkpoint
@@ -95,15 +96,33 @@ def optimizer_for(policy):
 
 def clip_gradients(policy):
     parameters = dict(policy.named_parameters())
-    ordered = [parameters[name] for name in PARAMETERS.values()]
     before = {key: parameters[name].grad.detach().numpy().copy() for key, name in PARAMETERS.items()}
-    norm = torch.nn.utils.clip_grad_norm_(ordered, 1.0, error_if_nonfinite=True, foreach=False)
-    coefficient = torch.clamp(norm.new_tensor(1.0) / (norm + 1e-6), max=1.0)
+    # Inspect every group before mutating any. A finite float32 value may have a
+    # square that overflows float32; the registered reductions use float64.
+    require(all(value.dtype == np.float32 and np.isfinite(value).all() for value in before.values()),
+            "Nonfinite or non-float32 raw gradient")
+    groups = {}
+    for group, keys in CLIP_GROUPS.items():
+        norm = math.sqrt(sum(float(np.square(before[key].astype(np.float64)).sum()) for key in keys))
+        coefficient = min(1.0, 1.0 / (norm + 1e-6))
+        actual = np.float32(coefficient)
+        for key in keys:
+            parameters[PARAMETERS[key]].grad.mul_(float(actual))
+        groups[group] = {"parameters": [PARAMETERS[key] for key in keys], "norm_before": norm,
+                         "coefficient_float64": coefficient, "coefficient_float32": float(actual),
+                         "nonzero_before": sum(int(np.count_nonzero(before[key])) for key in keys)}
     after = {key: parameters[name].grad.detach().numpy().copy() for key, name in PARAMETERS.items()}
-    return before, after, float(norm), float(coefficient)
+    for group, keys in CLIP_GROUPS.items():
+        groups[group].update(norm_after=math.sqrt(sum(float(np.square(after[key].astype(np.float64)).sum()) for key in keys)),
+                             nonzero_after=sum(int(np.count_nonzero(after[key])) for key in keys))
+        require(groups[group]["norm_after"] <= 1 + PROTOCOL["clipping"]["post_norm_tolerance"], "Post-clip norm exceeds cap")
+    record = {"schema": "cnsbridge.group_gradient_clip.v1", "groups": groups,
+              "total_norm_before": math.sqrt(sum(float(np.square(v.astype(np.float64)).sum()) for v in before.values())),
+              "total_norm_after": math.sqrt(sum(float(np.square(v.astype(np.float64)).sum()) for v in after.values()))}
+    return before, after, record
 
 
-def update_and_intervene(policy, frames, targets, directory, run_identity, phase):
+def update_and_intervene(policy, frames, targets, directory, run_identity, phase, *, prior_run=None):
     """Shared numerical experiment; production construction/reload stay in run_worker."""
     require(tuple(dict(policy.named_parameters())) == tuple(PARAMETERS.values()), "Wrong trainable parameter order")
     before = snapshot(policy)
@@ -127,19 +146,41 @@ def update_and_intervene(policy, frames, targets, directory, run_identity, phase
     np.savez(directory / "gradients_before_clip.npz",
              **{key: parameters[name].grad.detach().numpy().copy() for key, name in PARAMETERS.items()},
              reg_gradient=reg_gradient, **run_identity)
-    pre, post, norm, coefficient = clip_gradients(policy)
+    if prior_run is not None:
+        from .joint_probe_history import compare_r1
+        report = compare_r1(directory, prior_run, run_identity)
+        write_json(directory / "r1_comparison.json", report)
+        require(report["passed"], "r1 pre-optimization comparison failed; new protocol is invalid")
+    pre, post, clipping = clip_gradients(policy)
     phase("optimizer_step")
     optimizer.step()  # The only optimizer step in this experiment.
     after = snapshot(policy)
     require(all(np.isfinite(value).all() for value in after.values()), "Nonfinite updated parameters")
+    adam_states = {name + "." + field: optimizer.state[parameters[name]][field].detach().numpy().copy()
+                   for name in PARAMETERS.values() for field in ADAM_FIELDS}
+    np.savez(directory / "adam_state.npz", **adam_states, **run_identity)
+    for name in PARAMETERS.values():
+        for field in ADAM_FIELDS:
+            value = adam_states[name + "." + field]
+            require(value.dtype == np.float32 and np.isfinite(value).all()
+                    and value.shape == (() if field == "step" else tuple(parameters[name].shape)),
+                    "Invalid actual Adam state")
+        require(adam_states[name + ".step"].item() == 1, "Actual Adam step must equal one")
     np.savez(directory / "update.npz", **{f"before_{key}": value for key, value in before.items()},
              **{f"after_{key}": value for key, value in after.items()},
              **{f"pre_clip_{key}": value for key, value in pre.items()},
              **{f"post_clip_{key}": value for key, value in post.items()}, reg_gradient=reg_gradient,
              **run_identity)
     optimizer_steps = {key: float(optimizer.state[parameters[name]]["step"]) for key, name in PARAMETERS.items()}
+    changes = {}
+    for group, keys in CLIP_GROUPS.items():
+        deltas = [after[key].astype(np.float64) - before[key].astype(np.float64) for key in keys]
+        changes[group] = {"parameters": [PARAMETERS[key] for key in keys],
+                          "changed_elements": sum(int(np.count_nonzero(delta)) for delta in deltas),
+                          "l2": math.sqrt(sum(float(np.square(delta).sum()) for delta in deltas)),
+                          "max_abs": max(float(np.abs(delta).max()) for delta in deltas)}
     details = {"optimizer": PROTOCOL["optimizer"], "optimizer_steps": optimizer_steps,
-               "gradient_total_norm": norm, "clip_coefficient": coefficient, "training_losses": training_losses,
+               "gradient_clipping": clipping, "parameter_updates": changes, "training_losses": training_losses,
                "branches": {"baseline": baseline_record}}
     # Free the entire 100 ms autograd graph before further forward branches.
     del actions, target_tensor, task, loss, reg, optimizer, parameters
@@ -203,7 +244,8 @@ def run_worker(directory):
         write_json(directory / "policy_identity.json", policy.identity)
         np.savez(directory / "dn_ids.npz", body_ids=policy.mapping.outputs.body_ids.copy(), **identity)
         result["raw_counts_sha256_before"] = raw_counts_digest(policy.brain.graph)
-        result.update(update_and_intervene(policy, selection["frames"], selection["teacher_target"], directory, identity, phase))
+        result.update(update_and_intervene(policy, selection["frames"], selection["teacher_target"], directory, identity, phase,
+                                           prior_run=registration["prior_run"]))
         phase("verify_raw_graph")
         result["raw_counts_sha256_after"] = raw_counts_digest(policy.brain.graph)
         # Nothing containing a graph or a parameter survives this boundary.

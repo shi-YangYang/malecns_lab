@@ -12,16 +12,19 @@ from ..brain.metadata import canonical_hash
 from ..senses.target import TargetCamera
 from .resource_guard import GIB, resource_budget
 
-SCHEMA = "cnsbridge.joint_probe_registration.v1"
-RESULT_SCHEMA = "cnsbridge.joint_probe_worker.v1"
+SCHEMA = "cnsbridge.joint_probe_registration.v2"
+RESULT_SCHEMA = "cnsbridge.joint_probe_worker.v2"
+FINAL_SCHEMA = "cnsbridge.joint_probe_result.v2"
 BRANCHES = ("baseline", "updated", "acute_restore", "full_restore", "checkpoint_reload")
 PARAMETERS = {"theta": "brain.theta", "readout_weight": "readout.weight", "readout_bias": "readout.bias"}
+CLIP_GROUPS = {"theta": ("theta",), "readout": ("readout_weight", "readout_bias")}
+ADAM_FIELDS = ("step", "exp_avg", "exp_avg_sq")
 SCALES = [0.3, 0.2, 0.5]
 LIF_CONFIG = {"dt_ms": 0.1, "v_rest_mv": -52.0, "v_reset_mv": -52.0, "v_threshold_mv": -45.0,
               "tau_m_ms": 20.0, "tau_syn_ms": 5.0, "refractory_ms": 2.2, "delay_ms": 1.8,
               "weight_mv": 0.275, "surrogate_scale_mv": 1.0}
 PROTOCOL = {
-    "schema": "cnsbridge.joint_action_update.v1", "role": "offline_two_frame_feasibility_only",
+    "schema": "cnsbridge.joint_action_update.v2", "role": "offline_two_frame_feasibility_only",
     "dataset_id": "f0fe9735abbffff6135a8a5d7c8f3943d638da90bfe6a40eb21ba53583137076",
     "dataset_manifest_sha256": "2418141cc7711c64cfc27f7bd8056150b8a170dd0ebed3a3079c25bffecb1104",
     "scene_id": "train-sine-combined", "indices": [0, 1], "times_s": [0.0, 0.1],
@@ -39,12 +42,21 @@ PROTOCOL = {
                   "betas": [0.9, 0.999], "eps": 1e-8, "weight_decay": 0, "amsgrad": False,
                   "foreach": False, "fused": False, "updates": 1},
     "objective": "mean(((actions-targets)/axis_scales)**2)", "axis_scales": SCALES,
-    "regularization": 1e-4, "clip_norm": 1.0, "clip_foreach": False, "clip_error_if_nonfinite": True,
+    "regularization": 1e-4,
+    "clipping": {"rule": "per_optimizer_group_l2", "groups": {k: [PARAMETERS[p] for p in v] for k, v in CLIP_GROUPS.items()},
+                 "max_norm_per_group": 1.0, "norm_dtype": "float64", "coefficient_epsilon": 1e-6,
+                 "coefficient": "float64 min(1,1/(norm+1e-6)); cast float32 then multiply float32 gradient",
+                 "nonfinite": "reject_before_mutating_any_gradient", "post_norm_tolerance": 1e-6},
+    "adam_evidence": {"fields": list(ADAM_FIELDS), "dtype": "float32", "step": 1,
+                      "moment_rtol": 1e-6, "moment_atol": float(np.nextafter(np.float32(0), np.float32(1))),
+                      "update_rtol": 5e-6, "update_atol": 1e-9,
+                      "recompute": "zero initial moments; float32 lerp/addcmul, sqrt/div/add, addcdiv"},
     "branches": list(BRANCHES), "rtol": 1e-6, "atol": 1e-7,
 }
 SOURCE_FILES = (
     "learning/joint_probe.py", "learning/joint_probe_contract.py", "learning/joint_probe_worker.py",
-    "learning/joint_probe_evidence.py", "learning/joint_probe_identity.py", "learning/resource_guard.py",
+    "learning/joint_probe_evidence.py", "learning/joint_probe_identity.py", "learning/joint_probe_history.py",
+    "learning/joint_probe_optimizer.py", "learning/resource_guard.py",
     "learning/neural_policy.py", "learning/neural_data.py", "learning/policy_checkpoint.py", "learning/follow_task.py",
     "brain/trainable.py", "brain/trainable_graph.py", "brain/tonic.py", "brain/policy_groups.py",
     "brain/reference.py", "brain/connectome.py", "brain/metadata.py", "senses/spatial_drive.py",
@@ -130,4 +142,7 @@ def validate_registration(registration):
             and registration["dataset_manifest_sha256"] == PROTOCOL["dataset_manifest_sha256"], "Registered dataset changed")
     require(registration["graph"]["source_id"] == canonical_hash(registration["graph"]["provenance"]),
             "Registered graph provenance mismatch")
+    from .joint_probe_history import history_binding
+    require(registration["prior_run"] == history_binding(registration["prior_run"]["path"],
+            registration["implementation_sha256"], registration["graph"]), "r1 history binding changed")
     return {"registration_id": registration["registration_id"], "protocol_id": registration["protocol_id"]}

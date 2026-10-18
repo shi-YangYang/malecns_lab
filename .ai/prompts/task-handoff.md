@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前进行中：P3b r2分组裁剪实施（2026-10-19）
+
+稳定分组裁剪已完成[实施](../../specs/spec-008-trainable-snn/implementation-p3b-stable.md)，新的独立验收者[软件PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-stable.md)已全文读取处理，无返工项。62项定向检查通过，独立核对9个历史锚点、6个原终态文件和17个保持源码相符；不重复检查。脑核心/策略/数据/参数存档源码保持，1GiB额外预留已实时核对。实施与验收Agent均已完成，无待处理报告。本状态随软件提交后，协调者在新目录`data/joint_update_20261019_r2/`运行一次完整图，再新独立实际验收；不重跑r1。Noria/Docker保持，完整目标AC3–AC6仍未完成。
+
 ## 当前断点：P3b r1数值失败，内存门槛未触发（2026-10-19）
 
 软件`0373c87`后仅运行一次`data/joint_update_20261019_r1/`，终端session `11160`已收取退出1；没有运行中实验，不重跑。见[实际报告](../../specs/spec-008-trainable-snn/p3b-run-20261019-r1.md)：完整两帧前向和反向完成，clip_grad_norm_的float32总范数溢出，optimizer.step未执行；实际P3b为FAIL，数值更新/动作效应均未判定。墙钟110.389s、采样RSS2.94583GiB，低于本次4.15309GiB上限，系统最低可用3.82401GiB高于1GiB预留，非资源失败。全部theta梯度有限但float64范数7.78556e31，4259项非零；读出梯度范数约156.62，正则梯度零。新的[实际验收PASS](../../specs/spec-008-trainable-snn/acceptance-p3b-run-r1.md)只针对失败证据/报告完整性，已全文读取处理，无返工项；原失败保留。

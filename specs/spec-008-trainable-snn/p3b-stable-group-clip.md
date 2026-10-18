@@ -1,6 +1,6 @@
 # P3b r2 — 稳定范数与分参数组裁剪候选
 
-状态：Ready，依据[r1实际失败](p3b-run-20261019-r1.md)和既有梯度的轻量分析制定，已获新的独立[协议PASS](acceptance-p3b-stable-protocol.md)。r1实际证据验收和本协议报告均已全文读取处理，无返工项；尚未实施或运行，不改写r1结果，不代表联合学习已通过。
+状态：软件已独立验收，实际运行待执行。依据[r1实际失败](p3b-run-20261019-r1.md)和既有梯度的轻量分析制定，已获新的独立[协议PASS](acceptance-p3b-stable-protocol.md)。[实施报告](implementation-p3b-stable.md)与新的独立[软件PASS](acceptance-p3b-stable.md)均已全文读取处理，62项定向检查通过，无返工项；提交后在新目录r2运行一次，不改写r1结果，不代表联合学习已通过。
 
 ## 原因与范围
 

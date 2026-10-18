@@ -10,8 +10,9 @@ import sys
 import psutil
 
 from ..brain.metadata import canonical_hash
-from .joint_probe_contract import (PROTOCOL, SCHEMA, graph_registration, read_json, require, select_data,
+from .joint_probe_contract import (FINAL_SCHEMA, PROTOCOL, SCHEMA, graph_registration, require, select_data,
                                    sha256, sources)
+from .joint_probe_history import history_binding
 from .joint_probe_evidence import validate_joint_evidence
 from .resource_guard import GIB, resource_budget, supervise, write_json
 
@@ -22,13 +23,15 @@ def register(graph, dataset, directory):
     directory.mkdir(parents=True, exist_ok=False)
     select_data(dataset)  # Sealed dataset validation is light and never constructs a brain.
     graph_info = graph_registration(graph)
+    implementation = sources()
+    prior_run = history_binding(Path(dataset).resolve().parent / "joint_update_20261019_r1", implementation, graph_info)
     budget = resource_budget(psutil.virtual_memory().available, reserve_bytes=GIB, rss_bytes=6 * GIB)
     registration = {
         "schema": SCHEMA, "registered_utc": datetime.now(timezone.utc).isoformat(),
         "protocol": PROTOCOL, "protocol_id": canonical_hash(PROTOCOL),
         "graph": graph_info, "dataset_path": str(Path(dataset).resolve()),
         "dataset_id": PROTOCOL["dataset_id"], "dataset_manifest_sha256": sha256(Path(dataset) / "manifest.json"),
-        "implementation_sha256": sources(),
+        "implementation_sha256": implementation, "prior_run": prior_run,
         "resources": {**budget, "wall_limit_seconds": 600, "sampling_seconds": 0.1},
         "environment": {"python": sys.version, "platform": platform.platform(), "psutil": psutil.__version__},
     }
@@ -41,7 +44,7 @@ def finalize_run(directory, outcome):
     """Keep raw supervision separate; classify negative scientific outcomes honestly."""
     directory = Path(directory)
     write_json(directory / "supervisor_result.json", outcome)
-    result = {"schema": "cnsbridge.joint_probe_result.v1", "status": "failed", "protocol_complete": False,
+    result = {"schema": FINAL_SCHEMA, "status": "failed", "protocol_complete": False,
               "joint_numeric_update": None, "internal_action_effect": None, "reason": outcome.get("reason"),
               "supervisor": outcome}
     if outcome.get("status") == "completed":
@@ -65,7 +68,7 @@ def run_registered(graph, dataset, directory):
         registration = register(graph, dataset, directory)
     except Exception as error:
         directory.mkdir(parents=True, exist_ok=True)
-        result = {"schema": "cnsbridge.joint_probe_result.v1", "status": "failed", "protocol_complete": False,
+        result = {"schema": FINAL_SCHEMA, "status": "failed", "protocol_complete": False,
                   "joint_numeric_update": None, "internal_action_effect": None, "reason": "registration_failed",
                   "detail": f"{type(error).__name__}:{error}"}
         write_json(directory / "result.json", result)

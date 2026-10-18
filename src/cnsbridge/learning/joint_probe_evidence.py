@@ -8,12 +8,12 @@ import re
 
 import numpy as np
 
-from .joint_probe_contract import (BRANCHES, PARAMETERS, PROTOCOL, RESULT_SCHEMA, array_digest, bound,
+from .joint_probe_contract import (ADAM_FIELDS, BRANCHES, PARAMETERS, PROTOCOL, RESULT_SCHEMA, bound,
                                    read_json, require, select_data, sha256, validate_registration)
 from .joint_probe_identity import validate_policy_identity
 
 ARTIFACTS = ("selection.npz", "dn_ids.npz", "policy_identity.json", "initial_parameters.npz", "update.npz",
-             "gradients_before_clip.npz", "checkpoint/checkpoint.json", "checkpoint/parameters.npz",
+             "gradients_before_clip.npz", "adam_state.npz", "r1_comparison.json", "checkpoint/checkpoint.json", "checkpoint/parameters.npz",
              *(name + suffix for name in BRANCHES for suffix in (".npz", ".json")))
 
 
@@ -120,26 +120,14 @@ def validate_numeric_evidence(directory, policy, shapes, run_identity, worker):
     require(not np.count_nonzero(update["reg_gradient"]), "Regularizer contributed an initial gradient")
     gradient_file = arrays(directory / "gradients_before_clip.npz", set(PARAMETERS) | {"reg_gradient"}, run_identity)
     require(np.array_equal(gradient_file["reg_gradient"], update["reg_gradient"]), "Regularizer gradient files disagree")
-    norm_squared = 0.0
     for key in PARAMETERS:
         for prefix in ("pre_clip", "post_clip"):
             check_array(update[f"{prefix}_{key}"], shapes[key], "float32", f"{prefix}_{key}")
         require(np.array_equal(update[f"pre_clip_{key}"], gradient_file[key]), "Pre-clip gradient files disagree")
-        norm_squared += np.square(update[f"pre_clip_{key}"].astype(np.float64)).sum()
-    norm = math.sqrt(norm_squared)
-    recorded_norm = finite(worker["gradient_total_norm"], "gradient_total_norm")
-    require(math.isclose(recorded_norm, norm, rel_tol=2e-5, abs_tol=1e-12), "Global gradient norm differs")
-    coefficient = float(min(np.float32(1), np.float32(1) / (np.float32(recorded_norm) + np.float32(1e-6))))
-    require(worker["clip_coefficient"] == coefficient, "Clip coefficient differs")
-    require(worker["optimizer"] == PROTOCOL["optimizer"] and worker["optimizer_steps"] == dict.fromkeys(PARAMETERS, 1.0),
-            "Optimizer declaration or one-step count differs")
-    for key in PARAMETERS:
-        grad = update[f"post_clip_{key}"]
-        require(np.array_equal(grad, update[f"pre_clip_{key}"] * np.float32(coefficient)), "Post-clip gradient differs")
-        # First Adam step from zero moment state, independently in NumPy.
-        lr = 0.001 if key == "theta" else 0.0001
-        expected = before[key].astype(np.float64) - lr * grad.astype(np.float64) / (np.abs(grad.astype(np.float64)) + 1e-8)
-        require(np.allclose(after[key], expected, rtol=5e-6, atol=1e-9), "Parameters do not match the registered Adam step")
+    adam_states = arrays(directory / "adam_state.npz", {name + "." + field for name in PARAMETERS.values()
+                                                       for field in ADAM_FIELDS}, run_identity)
+    from .joint_probe_optimizer import validate_optimizer_update
+    optimizer_evidence = validate_optimizer_update(update, adam_states, before, after, shapes, worker)
     records, outputs, computed_losses = {}, {}, {}
     for branch in BRANCHES:
         values = arrays(directory / f"{branch}.npz", set(shapes) | {"actions", "features_mv"}, run_identity)
@@ -195,7 +183,7 @@ def validate_numeric_evidence(directory, policy, shapes, run_identity, worker):
                 "background_fixed": bool(not np.any(after["rho"]))}
     difference = computed_losses["updated"]["action_loss"] - computed_losses["baseline"]["action_loss"]
     acute_difference = computed_losses["updated"]["action_loss"] - computed_losses["acute_restore"]["action_loss"]
-    return {"joint_numeric_update": all(criteria.values()), "joint_numeric_update_details": criteria,
+    return {**optimizer_evidence, "joint_numeric_update": all(criteria.values()), "joint_numeric_update_details": criteria,
             "internal_action_effect": not checks["acute_restore"]["actions"]["allclose"], "comparisons": checks,
             "losses": computed_losses, "action_loss_change": difference,
             "action_loss_direction": "decreased" if difference < 0 else "increased" if difference > 0 else "unchanged",
@@ -260,7 +248,11 @@ def validate_joint_evidence(directory, supervisor):
     require(set(phases) == expected_phases, "Worker phase inventory differs")
     wall = finite(worker["wall_seconds"], "worker wall")
     require(sum(finite(v, k) for k, v in phases.items()) <= wall + 1e-6 and wall <= 600, "Worker phases/wall inconsistent")
+    from .joint_probe_history import compare_r1
+    previous = compare_r1(directory, registration["prior_run"], identity)
+    require(read_json(directory / "r1_comparison.json") == previous and previous["passed"],
+            "r1 pre-optimization comparison failed or recorded comparisons differ")
     numeric = validate_numeric_evidence(directory, policy, shapes, identity, worker)
     resources = validate_resources(directory, registration, supervisor)
-    return {"protocol_complete": True, **numeric, "resources": resources,
+    return {"protocol_complete": True, **numeric, "r1_comparison": previous, "resources": resources,
             "scope": "one offline two-frame update; not closed-loop learning, generalization or AC3-AC6 completion"}
