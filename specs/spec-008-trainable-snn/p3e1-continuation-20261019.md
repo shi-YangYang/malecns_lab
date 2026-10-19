@@ -38,3 +38,15 @@ session36212已收取exit0，父`completed / registered_proposals_and_terminal_e
 同一run串行续段，session37731已收取exit0；父completed，累计3,200,000提案/1,666,368成功，本段新增520,043次成功，terminal=false。监督29.476552s、worker29.339227s；采样峰值1,580,777,472 bytes、最低available3,597,254,656 bytes、271样本。启动available=4,645,371,904 bytes，有效RSS上限=3,571,630,080 bytes，1GiB预留未触发。
 
 末档 `3f1cb7730fbe4c6264af30521d1f84fc133c07c5e3c8e4018185bab45afa3332`，逻辑图SHA `b0f9634858e636dbe86319667e2a80f5c8201ed45c610b35f3493993fe01c72c`，前缀 `4655b22f42b1361542eae32bd9552024ecac014365ac412f589b91e977c6ff55`。完整原始/父批准证据保持；当前仍没有最终candidate或神经任务结果。累计拒绝计数 `{"different_source_sign": 1513137, "duplicate": 20326, "new_self_edge": 49, "same_source": 66, "same_target": 25, "self_edge": 29}`。下一段从此唯一前缀显式继续，不重跑首3200000提案。
+
+## Segment 6：累计4200000提案
+
+冻结脑首两窗和相关数值检查均退出后，串行续正式R，session80085已收取exit0；父completed。累计4,200,000提案/2,186,263成功，本段新增519,895成功，terminal=false。监督30.040843s、worker29.909362s；283个样本，采样峰值1,643,479,040 bytes、最低available2,723,774,464 bytes。启动available=2,784,215,040 bytes，额外预留1,073,741,824 bytes，有效RSS上限1,710,473,216 bytes；未触发停止，没有操作Noria/Docker。
+
+末档`1ee5705737b9f46e4b78b2fed463b752c5dfca84bb52d13b0098e506871ff895`，逻辑图SHA`266e806c4bdb9b3912133e22ee1b183694eea99b589a2a27ac2ce17a3ec8e66e`，前缀`09a33f58538f4c259f8028a23ce4d58ba778268e914c7301fc8e955b19246a53`。父注册/恢复/封存链保持；没有最终candidate或神经任务结果。
+
+## Segment 7：累计5200000提案
+
+上段退出后显式再续1000000提案，session93764已收取exit0；父completed。累计5,200,000提案/2,705,909成功，本段新增519,646成功，terminal=false。监督30.458140s、worker30.317938s；287个样本，采样峰值1,638,006,784 bytes、最低available2,799,337,472 bytes。启动available=3,464,871,936 bytes，有效RSS上限2,391,130,112 bytes，1GiB预留未触发，Noria/Docker保持。
+
+末档`8e5d5bb09761bf41c36dad41964905dc8c59e913ab3a186102494d46349120f7`，逻辑图SHA`50014e834b8e9dab5e5b2011607503b8221a285870b557ab671fea8ac4d0f092`，前缀`21509d18cdd7e05b09a89604344d007bdcebf776d6139d221ec3960f886b85a2`。累计拒绝计数`{"different_source_sign":2460339,"duplicate":33478,"new_self_edge":67,"same_source":110,"same_target":49,"self_edge":48}`。继续保留完整父批准证据和唯一前缀，不重跑、换种子或以中间图替代最终R；本次未执行最终诊断及神经训练。

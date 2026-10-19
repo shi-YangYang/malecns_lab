@@ -23,7 +23,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
 
 这两个实际窗口另经独立验收后，才在同一 run 显式继续，每次指定 `--windows 1` 至 `4`；剩余不足 4 窗时相应减少，不能超过 160 窗。没有自动完整 epoch 循环或失败重试。
 
-独立冻结脑对照使用一个新的目录和 `--mode frozen_brain`，其余图和数据相同。它从原始 theta=0、相同读出种子重新开始，保留完整脑动态，仅训练读出；不能沿用 joint 的最终参数或状态。恢复时只接受 `--run` 和 `--windows`，不能换图、数据、模式或源版本。
+独立冻结脑对照使用一个新的目录和 `--mode frozen_brain`，其余图和数据相同。它从原始 theta=0、相同读出种子重新开始，保留完整脑动态，仅训练读出；不能沿用 joint 的最终参数或状态。恢复时只接受 `--run` 和 `--windows`，不能换图、数据、模式或源版本。2026-10-19已完成[首两个完整图冻结脑窗口](../specs/spec-008-trainable-snn/p3c-frozen-run-20261019-r1.md)并获新的独立实际PASS：theta/gain保持，读出和Adam真实更新，全部跨进程状态恢复一致；当前2/160窗，不是完整基线结果。
 
 ## 计算和资源
 

@@ -215,3 +215,18 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
 启动available=3,863,855,104 bytes，1GiB预留后RSS上限2,790,113,280 bytes。3850样本，采样峰值2,697,019,392 bytes，最低available=2,809,659,392 bytes；监督418.324132s、worker417.102220s。未触发资源终止，Noria/Docker保持；末窗DN范围-555.450..-45.489mV。
 
 段ID `8a0e8a48c14d9078720a94ddcf8b2b4fe320d7aaa56b6d358a780b117b73c39a`；末档 `6bf2ba97d7c7cfa8a73325370c1bbbaefa7be5b2021850da0e11d27bbd0348c3`，路径`segments/000015/windows/000052/checkpoint`，前缀 `27e90dc86f28f40988198e51057787b0007bd48bfc0a30280e5e85bfc37dde0c`。累计104帧/52窗/52更新，joint余108窗、frozen未开始。末窗前进输出范围0.300000..0.300000m/s，教师范围0.127425..0.139028m/s；保持阴性及饱和记录，未改学习规则。下一窗口从forward frame24继续。
+
+## Segment 16：窗口53–56
+
+同run显式四窗，session78754已收取exit0；父复核`registered_windows_verified`。累计112帧/56更新，forward帧24→32，脑/感觉step12600→16600。没有重演前缀或新增预处理；原始计数摘要前后保持。
+
+| 窗口 | 更新前动作MSE | 本窗theta改变数 | 原始theta梯度L2 | 两帧前向s | 反向/裁剪s |
+| --- | --- | --- | --- | --- | --- |
+| 53 | 0.1946649104 | 5,154 | 2.05303e31 | 19.882070 | 79.438743 |
+| 54 | 0.1799550503 | 5,156 | 1.10672e30 | 19.912071 | 83.521111 |
+| 55 | 0.1969027370 | 5,157 | 6.20900e29 | 20.560259 | 84.363483 |
+| 56 | 0.2564437687 | 5,158 | 5.69662e30 | 19.871460 | 85.812152 |
+
+启动available=4,172,431,360 bytes，额外预留1,073,741,824 bytes，实际RSS上限3,098,689,536 bytes。3953个资源样本，采样峰值2,668,707,840 bytes（约2.49GiB），最低available=2,552,365,056 bytes；监督420.380251s、worker419.113327s。未触发资源停止，Noria/Docker保持。第56窗vx仍约+0.300000012m/s，教师约+0.04208至+0.05428m/s，不能称为跟随成功。
+
+段ID `39656cf0fb6beacda76eae15b0f62ba10df5746b5c5f807f9f99e2608fd265ac`；末档 `d055897e887fa880fca267178d6ddb38c24a816b63adde0eef547093fc2dc337`，路径`segments/000016/windows/000056/checkpoint`，前缀 `bbf0792059f1e4651f4438ff28cfca2919dff1468e24544fc8bec24c57dd86ed`。joint余104窗；独立frozen_brain随后从共同初值另起run，未拷贝joint训练参数。本段未重复旧测试，按已独立验收的父数值/来源检查续接，完整训练与闭环结论仍待完成。

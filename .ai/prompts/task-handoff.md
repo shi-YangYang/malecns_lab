@@ -1,5 +1,19 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前断点：joint56窗、frozen2窗、R520万提案、研究工厂软件PASS（2026-10-19）
+
+本目标轮有实际实施和运行进展，不是连续阻塞。P3e3配对科学协议已独立PASS/Ready并提交aca219b；P3e2研究工厂37个不同相关检查与新的独立软件PASS已完成并提交32d2915。实施/验收报告均全文读取处理，无返工项。1GiB额外预留、完整母图和Noria/Docker保留要求不变；所有已绑定G29/R13源字节保持。
+
+G第16段session78754已收取exit0，父registered_windows_verified；同joint run累计56/160窗、112帧/56更新，forward next_frame32，脑/感觉step16600。末档`d055897e887fa880fca267178d6ddb38c24a816b63adde0eef547093fc2dc337`，前缀`bbf0792059f1e4651f4438ff28cfca2919dff1468e24544fc8bec24c57dd86ed`。监督420.380251s、采样峰值2668707840 bytes，最低available2552365056 bytes；见[续训实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)。joint余104窗，前进饱和仍保留，不能称已学会控制。
+
+P3c2独立frozen_brain新run `data/neural_training_frozen_20261019_r1` 首两窗session20537/99503均收取exit0，父registered_windows_verified，已获新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3c-frozen-run-r1.md)，全文读取处理。runID `6e32b92e5923c00552e9dfb33e0d51915b4cbc6c7bf313570c2ef124aae27938`，共同原始初值，theta=0/gain=1保持、读出及Adam真实更新，参数/全部神经感觉状态跨进程精确恢复。末档`48d2a7c54810f606a3ccab3a44e3c970960c34bc0dfcd24f5fa19fb3e8fecd55`，前缀`d49c3340211cefbf0bae1fcad307b0b1b6ee9fd18a53dfbc4e459f98ca535b8b`，combined next_frame4，brain/drive2600。实测36.745026s/24.411172s、RSS1526218752/1785577472 bytes。余158窗；可续同run显式1–4窗，不重跑首前缀。
+
+R第6/7段session80085/93764均收取exit0，父completed。正式run累计5200000提案/2705909成功、terminal=false；末档`8e5d5bb09761bf41c36dad41964905dc8c59e913ab3a186102494d46349120f7`，逻辑图SHA`50014e834b8e9dab5e5b2011607503b8221a285870b557ab671fea8ac4d0f092`，前缀`21509d18cdd7e05b09a89604344d007bdcebf776d6139d221ec3960f886b85a2`。见[续段实测](../../specs/spec-008-trainable-snn/p3e1-continuation-20261019.md)。没有最终candidate，不启动正式R神经计算。下段可从唯一前缀显式继续1000000提案。
+
+当前所有模型/生成/测试终端均已收取终态，全部本批Agent已完成且报告均处理，没有活动作业。下一步继续串行G/frozen/R；编码/静态审查可并行，Torch/数值测试须独占。研究工厂已完成软件边界，后续需要按[已Ready科学契约](../../specs/spec-008-trainable-snn/p3e3-topology-study-protocol.md)设计严格研究参数/Adam/完整状态档和训练边界，保留原数值核心与绑定源，避免复制整个训练器或角色伪装；正式R首窗之前新边界必须实际对齐G历史首窗，最终R构造须另立受监督实际协议。旧NeuralController仅类型检查，不宣称通用角色隔离。
+
+整体goal仍active；AC3–AC6、两个完整训练终档、未见场景闭环、内部/拓扑收益、时延和条件实飞均未完成。不得因本轮阶段提交标记complete/blocked；没有具体阻断，也未操作Noria/Docker。
+
 ## 当前断点：joint52窗、R320万提案、P3e2协议Ready（2026-10-19）
 
 本目标轮有实际进展，不是连续阻塞。P3e1生成器软件/37项不同检查及独立软件PASS已bcb0afc提交；首两段实际门槛PASS及G48窗记录已5410687提交。所有报告全文读取处理，无返工项。1GiB额外预留、Noria/Docker限制及完整母图不变；未重复旧模型前缀。
