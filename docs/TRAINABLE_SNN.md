@@ -14,7 +14,7 @@ python3 -m venv .venv-train
 .venv-train/bin/python -m pytest tests/test_trainable_core.py -q
 ```
 
-`train` 固定 PyTorch 2.14.1；下文原核心允许CPU float32/float64，P0记录见 `specs/spec-008-trainable-snn/implementation-p0.md`。另有独立MPS float32核心及[GPU续训入口](MPS_TRAINING.md)，已经从完整CPU状态实际接续两窗；GPU前后向配合CPU主参数Adam和固定50步分段重算。两条实现使用不同身份，MPS明确禁用CPU算子fallback，不保证CPU/GPU训练轨迹逐位一致。
+`train` 固定 PyTorch 2.14.1；下文原核心允许CPU float32/float64，P0记录见 `specs/spec-008-trainable-snn/implementation-p0.md`。当前[全GPU修复入口](MPS_TRAINING.md)使用MPS感觉、完整脑、损失、反向、裁剪及Adam参数/状态，已通过完整图纠错与两进程单窗恢复，并完成新协议[160窗实测](../specs/spec-008-trainable-snn/gpu-recovery-run-20261019.md)，数值稳定但仍有方向错误与超调；50步分段重算负责内存，100步递归反向边界负责限制梯度传播，两者不同。历史MPS前后向配合CPU Adam的160窗来源保留。各数值协议使用不同身份，MPS禁用CPU算子fallback，不保证CPU/GPU训练轨迹逐位一致。
 
 ```python
 import torch

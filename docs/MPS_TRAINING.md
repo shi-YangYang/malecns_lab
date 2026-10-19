@@ -6,7 +6,9 @@
 
 [根因报告](../specs/spec-008-trainable-snn/gpu-recovery-causes.md)与[集成规格](../specs/spec-008-trainable-snn/gpu-recovery-integration.md)解释本次数值变化：稳定logit损失、100步递归反向范围、全部1000步前向、原始theta L2上限1000。新协议继承旧160窗的模型参数，Adam清零，新场景使用float32 GPU感觉；旧160窗原样保留，不称同协议第161窗。
 
-软件已独立验收，完整图实际门槛按以下顺序执行。新目录必须不存在；示例目录不要与正在运行的实验共用：
+本轮 `data/neural_training_gpu_recovery_20261019_r1` 已完成[160/160窗实测](../specs/spec-008-trainable-snn/gpu-recovery-run-20261019.md)，预算耗尽，勿再对该run运行续训命令。完整图纠错、首两窗恢复及余下158窗的保存证据均通过独立审查；仍有策略方向错误和超调，尚未完成闭环效果验证。
+
+下面是另行登记新实验时的执行顺序，当前不需要重跑。新目录必须不存在；示例目录不得与既有运行共用：
 
 ```bash
 cd /Users/yang/project/FlyDrones

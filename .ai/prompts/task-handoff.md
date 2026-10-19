@@ -1,12 +1,18 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前任务：诊断饱和/大梯度并全GPU修复续训（2026-10-19）
+## 当前任务：全GPU修复及新160窗已完成（2026-10-19）
 
-用户明确要求“先排查前进输出饱和、方向错误和梯度过大的原因，找到问题后修复，再继续训练；训练全部GPU”，并要求解释模型功能。已说明当前是标记目标跟随的监督模仿学习（像素→目标掩码→完整SNN→vx/vz/wz），非任意物体识别或已证明控制。见[Decision015](../decisions/015-diagnose-repair-and-all-gpu-training.md)、[修复Spec](../../specs/spec-008-trainable-snn/gpu-recovery.md)和[Plan](../../specs/spec-008-trainable-snn/gpu-recovery-plan.md)。A完整图诊断已完成；B/C现按[集成规格](../../specs/spec-008-trainable-snn/gpu-recovery-integration.md)实施。
+用户要求先排查前进饱和、错向与大梯度，修复后全部GPU训练，并先解释模型功能。当前目标仍是指定彩色标记目标跟随的监督模仿学习：画面→掩码/感觉→完整MaleCNS SNN→vx/vz/wz；内部群组增益和动作读出共同训练，不等于任意目标识别或已经学会控制。见[Decision015](../decisions/015-diagnose-repair-and-all-gpu-training.md)、[修复Spec](../../specs/spec-008-trainable-snn/gpu-recovery.md)、[Plan](../../specs/spec-008-trainable-snn/gpu-recovery-plan.md)与[实测报告](../../specs/spec-008-trainable-snn/gpu-recovery-run-20261019.md)。
 
-根因与证据汇总见[gpu-recovery-causes.md](../../specs/spec-008-trainable-snn/gpu-recovery-causes.md)。115/160窗vx梯度精确零，43–60已在CPU出现；没有符号接反证据。r1严格theta逐位检查失败保留；r2原路径两次重放有普通末位变化，但登记数值/支持/符号约束通过。session23042 exit0，147.345秒，五支完整前向/读出/末态exact；h1000/500/250/100的theta L2分别9.76024e29/3.66161e11/410.734/.00662055。新的[实际独立PASS](../../specs/spec-008-trainable-snn/acceptance-gradient-probe-r2-actual.md)已全文处理，未更新参数。GPU基础模块初验发现满增量phase边界，已局部修复、新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-gpu-foundations-r1.md)，不重复已通过检查。
+[根因报告](../../specs/spec-008-trainable-snn/gpu-recovery-causes.md)：旧115/160窗vx梯度精确零，CPU窗43起已出现；没有轴符号接反证据。r1严格逐位FAIL保留，r2诊断与新的独立实际PASS已处理；完整1000步前向相同时，theta L2随递归反向1000/500/250/100步约为9.76e29/3.66e11/410.734/.00662055。GPU基础phase边界修复已独立PASS。新集成eea319e保留旧42源，冻结100步递归信用、稳定logit损失、theta原始L2停止上限1000；继承旧160参数但Adam清零、场景状态重置，新数值身份明确。
 
-当前单一实施者整合新GPU策略/状态/存档/监督入口，复用旧脑核与数据，旧42源不变。冻结horizon100（完整1000步前向保持）、logit损失、raw theta稳定L2停止上限1000、继承旧160参数但Adam清零、新epoch场景重置。initialize→可丢弃固定负标签gate→正式1窗→另一进程1窗，独立实际通过后每段最多4窗完成新增160预算。全部训练数值在MPS；CPU只资产/调度/I/O/独立证据。所有GPU检查与模型运行必须workspace_lock串行，当前没有活动完整图进程。1GiB预留和Noria/Docker不动；既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
+initialize/gate/1+1已实际独立PASS并提交76bac7b。此后session42726以40段完成剩余158窗，已收取exit0、batch completed，正式新轮160/160、Adam160、epoch_complete=true，墙钟5838.242526秒（仅后158窗）。新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-gpu-recovery-epoch-actual.md)全文已读取处理，无执行/证据返工项；session53179只读NumPy审查exit0、torch_loaded=false。旧42源和新增共54源SHA、完整图、40段各18数组逐位恢复、3次场景重置、MPS驻留、loss/clip/Adam/封存链/资源通过。没有活跃训练作业或未处理Agent报告，停止追加检查和训练。
+
+run `data/neural_training_gpu_recovery_20261019_r1`，ID `601aad8e5ef0fd52034952d4790dc2c812d2063508c746ec45fd7e1dbec41b81`；末档 `segments/000042/windows/000160/checkpoint`，ID `30b09f6a7d4a2a879472648fa49b504d918e8a1225fe797532327bb937198f63`，prefix `fde97b7c808475e24b43e8e6bec01ab73a869b34de2e768d5dbca25742a22439`。最终yaw frame80、脑/感觉step40600。批次在 `data/gpu_recovery_continue_20261019`，审查在 `data/gpu_recovery_epoch_review_20261019`；本轮预算用尽，不重启从2窗开始的批脚本，不对完成run继续训练，也不修改54绑定源后冒充同run续接。
+
+新增158窗theta原始L2=.000669–.083919，每窗5132–5370项内部参数改变。训练期同输入三轴平均归一化MSE .319461→.111334，精确正vx饱和230→18帧，负vx目标正确方向0/121→81/121；仍40帧负目标输出正、vertical正目标有28帧输出负，存在振荡/超调，combined的vz/wz MSE退化。新vx零梯度只有3/4/5窗，均因预测与+.3目标相等。以上是变权重训练期统计，不是固定最终策略效果。CPU初始化/I/O/调度/独立审查保留，训练数值全部MPS；1GiB预留与Noria/Docker不动保持。
+
+本次授权工程阶段完成，整体Spec008未完成。固定模型闭环、未见场景、内部/拓扑贡献及新模型实飞未验证；独立冻结脑仍CPU10/160，R仍520万提案。本轮不自动开展这些后续实验。原未跟踪 `specs/spec-008-trainable-snn/scipy-backward-boundary-audit.md` 保留、不提交。以下为旧运行历史。
 
 ## 当前任务：GPU剩余98窗完成并通过独立验收（2026-10-19）
 
