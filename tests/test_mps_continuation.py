@@ -92,6 +92,18 @@ def test_parent_is_lightweight_and_source_mode_guards():
 
 def test_mps_signed_adjoint_silent_cell_gradient_and_state_guards():
     counts = sparse.csc_array([[0, -2, 0], [3, 0, 1], [0, 0, 0]])
+    for matrix in (counts, counts.T):
+        coo = matrix.tocoo()
+        reference = torch.sparse_coo_tensor(torch.tensor(np.stack((coo.row, coo.col)), dtype=torch.int64),
+                                            torch.tensor(coo.data, dtype=torch.float32) * .275,
+                                            size=coo.shape).coalesce()
+        cached = checked_coo(matrix, .275)
+        assert cached.is_coalesced() and not cached.requires_grad and cached.device.type == "mps"
+        assert torch.equal(cached.indices().cpu(), reference.indices())
+        assert torch.equal(cached.values().cpu(), reference.values())
+    duplicate = sparse.csr_array((np.array([1, 2]), np.array([1, 1]), np.array([0, 2, 2])), shape=(2, 2))
+    with pytest.raises(ValueError, match="canonical"):
+        checked_coo(duplicate, .275)
     w, wt = checked_coo(counts, 1.), checked_coo(counts.T, 1.)
     x = torch.tensor([0., .5, 0.], device="mps", requires_grad=True)
     y = fixed_mps_matvec(w, wt, x)

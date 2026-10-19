@@ -44,13 +44,22 @@ def fixed_mps_matvec(matrix, adjoint, vector):
 
 def checked_coo(matrix, weight):
     """Verify every ordered coordinate/value on the actual device, in chunks."""
-    coo = matrix.tocoo()
-    cpu = torch.sparse_coo_tensor(torch.from_numpy(np.stack((coo.row, coo.col)).astype(np.int64)),
-                                  torch.tensor(coo.data, dtype=torch.float32) * weight,
-                                  size=coo.shape, check_invariants=True).coalesce()
-    del coo
+    if not matrix.has_canonical_format:
+        raise ValueError("COO cache requires canonical unique edges")
+    csr = matrix.tocsr()
+    compressed = torch.sparse_csr_tensor(torch.tensor(csr.indptr, dtype=torch.int64),
+                                         torch.tensor(csr.indices, dtype=torch.int64),
+                                         torch.tensor(csr.data, dtype=torch.float32) * weight,
+                                         size=csr.shape, check_invariants=True)
+    del csr
+    # Canonical CSR already orders unique edges: do not allocate another full
+    # coordinate sort/aggregation workspace by constructing uncoalesced COO.
+    cpu = compressed.to_sparse_coo()
+    del compressed
+    if not cpu.is_coalesced() or cpu._nnz() != matrix.nnz:
+        raise ValueError("CSR to COO changed canonical edge count/order")
     device = cpu.to("mps")
-    if not device.is_coalesced() or device._nnz() != cpu._nnz():
+    if not device.is_coalesced() or device.shape != cpu.shape or device._nnz() != cpu._nnz():
         raise ValueError("COO cache changed shape/order")
     for start in range(0, cpu._nnz(), 262144):
         sl = slice(start, start + 262144)
