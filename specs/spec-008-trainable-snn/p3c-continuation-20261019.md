@@ -200,3 +200,18 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
 启动available=5,609,668,608 bytes，1GiB预留后RSS上限4,535,926,784 bytes。3745样本，采样峰值3,512,188,928 bytes，最低available=3,351,592,960 bytes；监督410.227291s、worker408.763836s。未触发资源终止，Noria/Docker保持。末窗DN范围-571.711..-45.342mV。
 
 段ID `7cbeb25e1b71096425cec70c70b61312cce827534aa3683f60a4d1af6e7992c4`；末档 `adca4b067ecf0a77942d9b584c7db4c650512777364604eb9cbc444dff6694c5`，路径`segments/000014/windows/000048/checkpoint`，前缀 `c65b7b2ca7cde61cddbc28e6b8b37260e05255ae704f23bc1e3e33b629eb5191`。累计96帧/48窗/48更新，joint余112窗、frozen未开始。末窗前进输出仍为约+0.3m/s，而教师约+0.235..+0.248m/s；不能将参数更新或部分标签接近饱和输出视为跟随成功。下一窗口从forward frame16继续，未改冻结协议或重复旧前缀。
+
+## Segment 15：窗口49–52
+
+同run显式四窗，session89107已收取exit0，父复核`registered_windows_verified`。forward帧16→24、Adam48→52、脑/感觉step8600→12600；原始计数摘要前后保持。仅与P3e2静态审计和协议工作并行，没有运行完整R或数值测试。
+
+| 窗口 | 更新前动作MSE | 本窗theta改变数 | 原始theta梯度L2 | 两帧前向s | 反向/裁剪s |
+| --- | --- | --- | --- | --- | --- |
+| 49 | 0.0664581599 | 5,153 | 7.12452e+28 | 20.624286 | 80.694837 |
+| 50 | 0.0533078358 | 5,153 | 1.03506e+29 | 19.834258 | 82.129249 |
+| 51 | 0.1214963368 | 5,153 | 4.22201e+30 | 20.731395 | 83.165535 |
+| 52 | 0.1754459894 | 5,154 | 2.62757e+29 | 20.104569 | 84.268395 |
+
+启动available=3,863,855,104 bytes，1GiB预留后RSS上限2,790,113,280 bytes。3850样本，采样峰值2,697,019,392 bytes，最低available=2,809,659,392 bytes；监督418.324132s、worker417.102220s。未触发资源终止，Noria/Docker保持；末窗DN范围-555.450..-45.489mV。
+
+段ID `8a0e8a48c14d9078720a94ddcf8b2b4fe320d7aaa56b6d358a780b117b73c39a`；末档 `6bf2ba97d7c7cfa8a73325370c1bbbaefa7be5b2021850da0e11d27bbd0348c3`，路径`segments/000015/windows/000052/checkpoint`，前缀 `27e90dc86f28f40988198e51057787b0007bd48bfc0a30280e5e85bfc37dde0c`。累计104帧/52窗/52更新，joint余108窗、frozen未开始。末窗前进输出范围0.300000..0.300000m/s，教师范围0.127425..0.139028m/s；保持阴性及饱和记录，未改学习规则。下一窗口从forward frame24继续。
