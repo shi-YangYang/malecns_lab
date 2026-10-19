@@ -56,8 +56,8 @@ def run_probe(directory):
                 actual_selection = read_arrays(directory / "selection.npz")
                 require(set(actual_selection) == set(selected) and all(np.array_equal(actual_selection[k], v)
                         and actual_selection[k].dtype == v.dtype for k, v in selected.items()), "Fixed inputs changed")
-                result.update(status="completed", reason="fixed_horizon_diagnostic_verified",
-                              completed_horizons=worker["completed_horizons"])
+                result.update(status="completed", reason="repeatability_and_fixed_horizon_diagnostic_verified",
+                              completed_branches=worker["completed_branches"])
             except Exception as error:
                 result.update(reason="diagnostic_evidence_failed", detail=f"{type(error).__name__}:{error}")
             result["terminal_artifacts_sha256"] = {name: sha256(directory / name) for name in

@@ -29,7 +29,7 @@ def run_worker(directory):
     directory = Path(directory).resolve()
     reg = claim_parent(directory)
     began = time.monotonic()
-    result = {"status": "failed", "registration_id": reg["registration_id"], "completed_horizons": [],
+    result = {"status": "failed", "registration_id": reg["registration_id"], "completed_branches": [],
               "optimizer_updates": 0}
     sampler = None
 
@@ -48,7 +48,8 @@ def run_worker(directory):
         from .mps_policy import MPSPolicy
         from .mps_state import restore, boundary_arrays
         from .mps_memory import MPSMemorySampler
-        from .gradient_probe_evidence import load_anchor, validate_registration, comparisons, PROTOCOL
+        from .gradient_probe_evidence import (load_anchor, load_r1, validate_registration, branch_comparisons,
+                                              classify_repeatability, BRANCHES)
         from .gradient_probe_math import compute_branch, logit_loss_check
 
         torch.set_num_threads(4)
@@ -66,11 +67,13 @@ def run_worker(directory):
         result["raw_counts_sha256_before"] = raw_counts_digest(policy.brain.graph)
         require(result["raw_counts_sha256_before"] == anchor["raw_counts_sha256"], "Actual complete graph digest differs")
         np.savez(directory / "selection.npz", **selected)
-        baseline = None
-        for horizon in PROTOCOL["horizons"]:
-            branch = directory / f"horizon-{horizon}"
+        r1_values, r1_report, _ = load_r1()
+        baseline = baseline_report = None
+        reference_reports = []
+        for name, horizon, observed in BRANCHES:
+            branch = directory / name
             branch.mkdir(exist_ok=False)
-            phase("restore_all_state", horizon=horizon)
+            phase("restore_all_state", branch=name, horizon=horizon)
             bridge, state, restored = restore(policy, previous)
             # Restore verifies all 18 arrays including dormant CPU Adam state;
             # neither the bridge nor any other optimizer is stepped by this probe.
@@ -80,24 +83,31 @@ def run_worker(directory):
                            "exact": True, "arrays_sha256": sha256(directory / "resume.npz"),
                            "source_state": previous["metadata"]["state"]})
             del restored
-            values, report = compute_branch(policy, state, selected, horizon, phase=phase)
+            values, report = compute_branch(policy, state, selected, horizon, observed=observed,
+                                            phase=lambda phase_name, **details: phase(phase_name, branch=name, **details))
             # Only parameter/Adam comparison here: branch state is separately saved
             # and the source state was never mutated by pure checkpoint closures.
             actual = boundary_arrays(policy, bridge, state)
             require(all(np.array_equal(actual[k], v) for k, v in previous["arrays"].items()),
                     "Diagnostic changed initial state, parameters or Adam")
-            report["comparison"] = comparisons(values, report, old, final, event, baseline)
+            report["comparisons"] = branch_comparisons(values, report, old, final, event, r1_values, r1_report,
+                                                       baseline=baseline, baseline_report=baseline_report)
             np.savez(branch / "values.npz", **values)
             write_json(branch / "report.json", report)
             require(all(np.isfinite(v).all() for v in values.values()), "Nonfinite branch value/gradient")
-            require(report["comparison"]["passed"], "Bitwise baseline/branch mismatch; evidence retained, no tolerance relaxation")
+            require(all(c["passed"] for c in report["comparisons"].values()),
+                    "Replay comparison failed; evidence retained under registered r2 criteria")
             require(all(item.get("finite", True) for b in report["boundaries"] for item in b["adjoints"].values()),
                     "Nonfinite boundary adjoint")
-            result["completed_horizons"].append(horizon)
+            result["completed_branches"].append(name)
+            if not observed:
+                reference_reports.append(report)
             if baseline is None:
-                baseline = values
+                baseline, baseline_report = values, report
+            if name == "reference-2":
+                write_json(directory / "repeatability.json", classify_repeatability(*reference_reports))
             del values, report, state, bridge, actual
-            phase("branch_sealed", horizon=horizon)
+            phase("branch_sealed", branch=name, horizon=horizon)
         phase("logit_loss_fixed_features")
         values, report = logit_loss_check(policy, old["features_mv"], selected)
         np.savez(directory / "logit_loss.npz", **values)
@@ -106,10 +116,10 @@ def run_worker(directory):
         require(report["trial_logit_loss"] < report["loss"], "Controlled logit descent did not reduce loss")
         result["raw_counts_sha256_after"] = raw_counts_digest(policy.brain.graph)
         require(result["raw_counts_sha256_after"] == result["raw_counts_sha256_before"], "Graph mutated")
-        names = ["selection.npz", "resume.npz", "resume.json", "logit_loss.npz", "logit_loss.json"]
-        names += [f"horizon-{h}/{name}" for h in PROTOCOL["horizons"] for name in ("values.npz", "report.json")]
+        names = ["selection.npz", "resume.npz", "resume.json", "logit_loss.npz", "logit_loss.json", "repeatability.json"]
+        names += [f"{name}/{file}" for name, _, _ in BRANCHES for file in ("values.npz", "report.json")]
         result["artifacts_sha256"] = {name: sha256(directory / name) for name in names}
-        result.update(status="completed", reason="fixed_horizon_diagnostic_sealed", sealed_monotonic=time.monotonic())
+        result.update(status="completed", reason="repeatability_and_fixed_horizon_diagnostic_sealed", sealed_monotonic=time.monotonic())
     except BaseException as error:
         result.update(reason=f"{type(error).__name__}:{error}")
         traceback.print_exc()

@@ -96,19 +96,23 @@ def clock():
     return time.monotonic()
 
 
-def compute_branch(policy, state, selection, horizon, *, phase=lambda *a, **k: None):
+def compute_branch(policy, state, selection, horizon, *, observed=True, phase=lambda *a, **k: None):
     """Identical two-frame MSE + gain regularization for every branch."""
     require(selection["valid"].all() and len(selection["frames"]) == 2, "Two valid frames required")
     policy.zero_grad(set_to_none=True)
     start_state = state_digest(state)
-    observer = BoundaryObserver()
+    require(observed or horizon == 2 * policy.frame_steps, "Unobserved replay must use full credit")
+    observer = BoundaryObserver() if observed else None
     began = clock()
     reg = 1e-4 * (policy.brain.gains - 1).square().mean()
     outputs = []
     for index, frame in enumerate(selection["frames"]):
         phase("forward", horizon=horizon, window_frame=index)
-        output = observed_frame(policy, frame, state, horizon=horizon,
-                                frame_offset=index * policy.frame_steps, observer=observer)
+        if observed:
+            output = observed_frame(policy, frame, state, horizon=horizon,
+                                    frame_offset=index * policy.frame_steps, observer=observer)
+        else:
+            output = policy.forward_tensor(frame, state)
         state = output.state
         state_digest(state)
         outputs.append(output)
@@ -137,9 +141,10 @@ def compute_branch(policy, state, selection, horizon, *, phase=lambda *a, **k: N
     require(state_digest(state) == end_state, "Checkpoint recomputation mutated the final state")
     record = {"horizon_steps": horizon, "forward_steps": 2 * policy.frame_steps,
               "losses": losses, "start_state": start_state, "end_state": end_state,
-              "gradients": gradient_metrics, "boundaries": observer.rows,
+              "gradients": gradient_metrics, "boundaries": observer.rows if observed else [],
+              "observed": observed, "forward_path": "observed_frame" if observed else "policy.forward_tensor",
               "durations": {"forward_seconds": forward_end - began,
-                            "backward_with_observers_seconds": backward_end - began_backward,
+                            "backward_seconds": backward_end - began_backward,
                             "total_seconds": clock() - began},
               "interpretation": "State-only gradient cuts; all DN running sums retain gradient; no optimizer."}
     policy.zero_grad(set_to_none=True)
