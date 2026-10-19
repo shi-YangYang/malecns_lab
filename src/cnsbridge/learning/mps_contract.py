@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from ..brain.metadata import canonical_hash
-from ..brain.mps_identity import policy_identity
+from ..brain.mps_identity import ACTIVATION_CHECKPOINT, policy_identity
 from .training_contract import (SOURCE_FILES, PROTOCOL, PILOT, SCENES, bound, bytes_sha, read_arrays, read_json,
                                require, runtime as cpu_runtime, sha256, validate_run as validate_cpu_run)
 from .training_evidence import scan_run as scan_cpu_run
@@ -14,9 +14,11 @@ from .training_archive import STATE_KEYS, checkpoint_state_digest
 SCHEMA = "cnsbridge.mps_continuation.v1"
 NEW_SOURCES = ("brain/mps_identity.py", "brain/mps_trainable.py", "learning/mps_policy.py", "learning/mps_optimizer.py",
                "learning/mps_archive.py", "learning/mps_contract.py", "learning/mps_evidence.py", "learning/mps_state.py",
-               "learning/mps_window.py", "learning/mps_memory.py", "learning/mps_worker.py", "learning/train_mps.py")
+               "learning/mps_window.py", "learning/mps_memory.py", "learning/mps_worker.py", "learning/train_mps.py",
+               "learning/mps_recompute.py")
 PROTOCOL_MPS = {**PROTOCOL, "schema": SCHEMA, "backend": "mps_forward_backward_cpu_adam",
                 "policy_id": "derived_from_actual_cpu_source_and_mps_sources",
+                "activation_checkpoint": ACTIVATION_CHECKPOINT,
                 "numerics": "Decision014: accept disclosed CPU/MPS differences; retain own finite/clip/Adam checks",
                 "migration": "exact parameter/Adam/recurrent state transfer; inherit CPU completed-window budget"}
 NUMERIC_PRECEDENT = {"decision": ".ai/decisions/014-resume-on-mps-with-recorded-numerics.md",

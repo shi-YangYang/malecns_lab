@@ -3,6 +3,14 @@ from copy import deepcopy
 from pathlib import Path
 from .metadata import canonical_hash, file_hashes
 
+ACTIVATION_CHECKPOINT = {
+    "strategy": "fixed_neural_step_blocks", "neural_steps_per_block": 50,
+    "use_reentrant": False, "preserve_rng_state": False, "determinism_check": "default", "early_stop": True,
+    "sensory_replay": "immutable block snapshot; private SpatialDrive; original float64 phase/events",
+    "gradient_boundary": "no detach between blocks or frames; full v/g/pending/refractory",
+    "dn_accumulation": "original per-step addition order; running sums passed between blocks",
+}
+
 
 def model_identity(graph, config, inputs, tonic, reference):
     value = {"schema": "cnsbridge.mps_lamina_lif.v1", "graph": deepcopy(graph), "config": deepcopy(config),
@@ -24,8 +32,9 @@ def policy_identity(cpu):
     value.pop("policy_id")
     value.update(schema="cnsbridge.mps_neural_policy.v1", backend="mps_forward_backward_cpu_adam",
                  cpu_source_policy_id=cpu["policy_id"],
+                 activation_checkpoint=deepcopy(ACTIVATION_CHECKPOINT),
                  model=model_identity(model["graph"], model["config"], model["input_body_ids"], model["tonic"], model["reference"]))
     package = Path(__file__).resolve().parents[1]
     value["implementation_sha256"].update({name: file_hashes(package / name)["sha256"]
-        for name in ("brain/mps_trainable.py", "brain/mps_identity.py", "learning/mps_policy.py")})
+        for name in ("brain/mps_trainable.py", "brain/mps_identity.py", "learning/mps_policy.py", "learning/mps_recompute.py")})
     return {**value, "policy_id": canonical_hash(value)}

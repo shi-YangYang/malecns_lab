@@ -50,7 +50,10 @@ def selection(start):
 
 @pytest.fixture(scope="module")
 def resumed():
-    cpu = policy()
+    return _migrated(policy())
+
+
+def _migrated(cpu):
     optimizer = make_training_optimizer(cpu, "joint")
     state, _, _ = compute_window(cpu, optimizer, cpu.initial_state(), selection(0), mode="joint", before_steps=0)
     params = {k: dict(cpu.named_parameters())[n].detach().numpy().copy() for k, n in PARAMETERS.items()}
@@ -65,6 +68,66 @@ def resumed():
     assert all(np.array_equal(actual[k], v) for k, v in arrays.items())
     previous["state"] = state_digest(migrated)
     return cpu, gpu, bridge, migrated, previous
+
+
+def test_checkpoint_matches_direct_multiple_blocks_two_frames_and_raw_gradients():
+    from cnsbridge.brain.mps_identity import ACTIVATION_CHECKPOINT
+    from cnsbridge.learning.neural_policy import NeuralPolicy
+    from cnsbridge.learning.mps_contract import PROTOCOL_MPS
+    source = policy()
+    cpu = NeuralPolicy.for_numerical_test(
+        source.brain, source.mapping, background=source.background, camera=source.camera,
+        config=replace(source.config, frame_ms=12), drive_config=source.drive_config)
+    _, gpu, _, migrated, _ = _migrated(cpu)
+    assert gpu.frame_steps == 120  # 50 + 50 + 20; the half-frame boundary is inside a block.
+    assert gpu.identity["activation_checkpoint"] == PROTOCOL_MPS["activation_checkpoint"] == ACTIVATION_CHECKPOINT
+    assert "learning/mps_recompute.py" in gpu.identity["implementation_sha256"]
+    assert "learning/mps_recompute.py" in source_hashes()
+    brain = replace(migrated.brain,
+                    v=torch.tensor([-47.1, -46.8, -45.5, -48.2, -49.], device="mps"),
+                    g=torch.tensor([.5, .4, 1.5, 2., .2], device="mps"),
+                    pending=tuple(torch.full((5,), .03 + i * .01, device="mps") for i in range(gpu.brain.delay_steps)),
+                    refractory_until=torch.tensor([0, 0, migrated.brain.step + 15, 0, 0], device="mps"))
+    initial = replace(migrated, brain=brain)
+    original = state_arrays(initial)
+    assert np.count_nonzero(original["brain.pending"]) and np.count_nonzero(original["brain.g"])
+    assert np.count_nonzero(original["drive.event_counts"]) and np.count_nonzero(original["drive.phase"])
+    results = []
+    for forward in (gpu.forward_direct_for_numerical_test, gpu.forward_tensor):
+        gpu.zero_grad(set_to_none=True)
+        leaves = [v.detach().clone().requires_grad_() for v in (brain.v, brain.g, *brain.pending)]
+        state = replace(initial, brain=replace(brain, v=leaves[0], g=leaves[1], pending=tuple(leaves[2:])))
+        first = forward(frame(), state)
+        first.state.brain.v.retain_grad()
+        second = forward(frame(red=False), first.state)
+        before_backward = state_arrays(second.state)
+        actions = torch.stack([first.action, second.action])
+        target = torch.tensor([[.2, -.1, .3], [-.2, .1, -.3]], device="mps")
+        loss = ((actions - target) / gpu.action_scales).square().mean() + 1e-4 * (gpu.brain.gains - 1).square().mean()
+        loss.backward()
+        assert first.state.brain.v.grad is not None and torch.count_nonzero(first.state.brain.v.grad)
+        raw = {name: p.grad.detach().cpu().numpy().copy() for name, p in gpu.named_parameters()}
+        assert np.count_nonzero(raw["brain.theta"]) and all(np.isfinite(v).all() for v in raw.values())
+        for index, value in enumerate(leaves):
+            assert value.grad is not None and torch.isfinite(value.grad).all()
+            raw[f"initial.{index}"] = value.grad.detach().cpu().numpy().copy()
+        assert np.count_nonzero(raw["initial.2"])  # Pending-arrival gradients remain connected.
+        after_backward = state_arrays(second.state)
+        assert all(np.array_equal(after_backward[k], v) for k, v in before_backward.items())
+        assert all(np.array_equal(state_arrays(initial)[k], v) for k, v in original.items())
+        assert second.state.brain.step == second.state.drive.step == brain.step + 240
+        results.append((actions.detach().cpu().numpy().copy(),
+                        torch.stack([first.features_mv, second.features_mv]).detach().cpu().numpy().copy(),
+                        after_backward, raw))
+    a, b = results
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+    for key in a[2]:
+        np.testing.assert_array_equal(a[2][key], b[2][key])
+    for key in a[3]:
+        np.testing.assert_allclose(a[3][key], b[3][key], rtol=1e-5, atol=1e-7, err_msg=key)
+    print({"direct_checkpoint_actions_dn_state_exact": True,
+           "raw_gradient_max_abs_difference": {key: float(np.max(np.abs(a[3][key] - b[3][key]))) for key in a[3]}})
 
 
 def numeric_run(gpu):

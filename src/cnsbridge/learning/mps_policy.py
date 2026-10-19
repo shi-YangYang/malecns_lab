@@ -11,6 +11,7 @@ from ..brain.trainable_graph import load_training_graph
 from ..senses.spatial_drive import MASK_SHAPE, SpatialDrive, SpatialDriveConfig, build_spatial_input_map
 from ..senses.target import TargetCamera, target_mask
 from .neural_policy import NeuralPolicy, NeuralPolicyConfig, PolicyState, NeuralPolicyOutput, ACTION_SCALES, _bound_identity
+from .mps_recompute import checkpoint_frame
 
 
 class MPSPolicy(NeuralPolicy):
@@ -89,18 +90,31 @@ class MPSPolicy(NeuralPolicy):
         return PolicyState(brain, drive.export_state(), 0, self.policy_id)
 
     def forward_tensor(self, frame, state):
+        return self._forward_tensor(frame, state, direct_numerical_fixture=False)
+
+    def forward_direct_for_numerical_test(self, frame, state):
+        """Explicit fixture reference; the production graph cannot bypass recomputation."""
+        return self._forward_tensor(frame, state, direct_numerical_fixture=True)
+
+    def _forward_tensor(self, frame, state, *, direct_numerical_fixture):
+        if direct_numerical_fixture and self.brain.graph.identity["role"] != "numerical_test_only":
+            raise ValueError("Direct MPS frame execution is only available for explicit numerical fixtures")
         mask = target_mask(frame, self.camera, MASK_SHAPE)
         self._validate_parameters()
         drive = self._drive_for(state)
         brain, half_steps = state.brain, self.frame_steps // 2
         sums = [brain.v.new_zeros(len(self.mapping.outputs.indices)) for _ in range(2)]
-        for step in range(self.frame_steps):
-            increment = drive.step(mask).to_torch(dtype=torch.float32).to("mps")
-            _, brain = self.brain.step(increment, brain)
-            half = step // half_steps
-            sums[half] = sums[half] + brain.v[self.dn_indices]
+        if direct_numerical_fixture:
+            for step in range(self.frame_steps):
+                increment = drive.step(mask).to_torch(dtype=torch.float32).to("mps")
+                _, brain = self.brain.step(increment, brain)
+                half = step // half_steps
+                sums[half] = sums[half] + brain.v[self.dn_indices]
+            drive_state = drive.export_state()
+        else:
+            brain, drive_state, sums = checkpoint_frame(self, mask, brain, drive.export_state(), sums)
         features = torch.cat(sums) / half_steps
         cfg = self.brain.config
         normalized = (features - cfg.v_rest_mv) / (cfg.v_threshold_mv - cfg.v_rest_mv)
         action = torch.tanh(self.readout(normalized)) * self.action_scales
-        return NeuralPolicyOutput(action, features, PolicyState(brain, drive.export_state(), state.frame_index + 1, self.policy_id))
+        return NeuralPolicyOutput(action, features, PolicyState(brain, drive_state, state.frame_index + 1, self.policy_id))
