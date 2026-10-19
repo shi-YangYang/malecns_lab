@@ -1,6 +1,6 @@
 # GPU稳定性修复实施计划
 
-对应[gpu-recovery.md](gpu-recovery.md)。当前只A具备实施条件；B/C在诊断后登记，不提前启动训练。
+对应[gpu-recovery.md](gpu-recovery.md)。A完成r2实测；B/C现按[gpu-recovery-integration.md](gpu-recovery-integration.md)冻结并实施，独立验收和实际门槛通过前不启动长训练。
 
 ## A实施
 

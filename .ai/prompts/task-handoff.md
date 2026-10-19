@@ -2,11 +2,11 @@
 
 ## 当前任务：诊断饱和/大梯度并全GPU修复续训（2026-10-19）
 
-用户明确要求“先排查前进输出饱和、方向错误和梯度过大的原因，找到问题后修复，再继续训练；训练全部GPU”，并要求解释模型功能。已说明当前是标记目标跟随的监督模仿学习（像素→目标掩码→完整SNN→vx/vz/wz），非任意物体识别或已证明控制。见[Decision015](../decisions/015-diagnose-repair-and-all-gpu-training.md)、[修复Spec](../../specs/spec-008-trainable-snn/gpu-recovery.md)和[Plan](../../specs/spec-008-trainable-snn/gpu-recovery-plan.md)。A诊断Ready；B1独立[GPU基础模块](../../specs/spec-008-trainable-snn/gpu-residency-foundations.md)Ready；训练数学和C执行门槛待A实测后冻结。
+用户明确要求“先排查前进输出饱和、方向错误和梯度过大的原因，找到问题后修复，再继续训练；训练全部GPU”，并要求解释模型功能。已说明当前是标记目标跟随的监督模仿学习（像素→目标掩码→完整SNN→vx/vz/wz），非任意物体识别或已证明控制。见[Decision015](../decisions/015-diagnose-repair-and-all-gpu-training.md)、[修复Spec](../../specs/spec-008-trainable-snn/gpu-recovery.md)和[Plan](../../specs/spec-008-trainable-snn/gpu-recovery-plan.md)。A完整图诊断已完成；B/C现按[集成规格](../../specs/spec-008-trainable-snn/gpu-recovery-integration.md)实施。
 
-两份只读审计已全文处理：[原因](../../specs/spec-008-trainable-snn/saturation-cause-audit.md)、[GPU边界](../../specs/spec-008-trainable-snn/gpu-training-scope-audit.md)。115/160窗vx梯度精确零，43–60已在CPU出现；没有符号接反证据。动作MSE的tanh导数使饱和输出不能纠正，大DN尺度/Adam动量提供推入饱和的保存证据。theta约1e30在vx无梯度时仍出现，递归伴随放大待完整图配对定位。
+根因与证据汇总见[gpu-recovery-causes.md](../../specs/spec-008-trainable-snn/gpu-recovery-causes.md)。115/160窗vx梯度精确零，43–60已在CPU出现；没有符号接反证据。r1严格theta逐位检查失败保留；r2原路径两次重放有普通末位变化，但登记数值/支持/符号约束通过。session23042 exit0，147.345秒，五支完整前向/读出/末态exact；h1000/500/250/100的theta L2分别9.76024e29/3.66161e11/410.734/.00662055。新的[实际独立PASS](../../specs/spec-008-trainable-snn/acceptance-gradient-probe-r2-actual.md)已全文处理，未更新参数。GPU基础模块初验发现满增量phase边界，已局部修复、新独立[PASS](../../specs/spec-008-trainable-snn/acceptance-gpu-foundations-r1.md)，不重复已通过检查。
 
-单一诊断实施者仅在learning新增训练梯度诊断并复用旧数值源；另一实施者仅新增GPU感觉与优化器，文件/接口独立。所有GPU检查与模型运行必须workspace_lock串行，旧42/G29/R13源保持。不得提前运行正式训练。独立软件验收后才运行完整图诊断，随后登记最小修复、独立验收、短窗恢复门槛及最多一轮续训。当前1GiB预留和Noria/Docker不动。既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
+当前单一实施者整合新GPU策略/状态/存档/监督入口，复用旧脑核与数据，旧42源不变。冻结horizon100（完整1000步前向保持）、logit损失、raw theta稳定L2停止上限1000、继承旧160参数但Adam清零、新epoch场景重置。initialize→可丢弃固定负标签gate→正式1窗→另一进程1窗，独立实际通过后每段最多4窗完成新增160预算。全部训练数值在MPS；CPU只资产/调度/I/O/独立证据。所有GPU检查与模型运行必须workspace_lock串行，当前没有活动完整图进程。1GiB预留和Noria/Docker不动；既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
 
 ## 当前任务：GPU剩余98窗完成并通过独立验收（2026-10-19）
 
