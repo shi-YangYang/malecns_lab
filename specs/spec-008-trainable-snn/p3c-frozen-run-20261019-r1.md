@@ -58,3 +58,18 @@ session20537和99503均已收取exit0；两个段的父复核均为`completed / 
 首档`5141e8a40af41127d2035a8b07558466f1e9b52821029c54b24e5dfe3b723edd`；末档`48d2a7c54810f606a3ccab3a44e3c970960c34bc0dfcd24f5fa19fb3e8fecd55`，路径`segments/000002/windows/000002/checkpoint`。前缀SHA为`d49c3340211cefbf0bae1fcad307b0b1b6ee9fd18a53dfbc4e459f98ca535b8b`，游标combined next_frame4、completed_windows=2、optimizer_steps=2、epoch_complete=false。
 
 已完成4帧/2窗，冻结脑还余158窗。首两窗已获新的[独立实际PASS](acceptance-p3c-frozen-run-r1.md)，完整报告已读取处理，无返工项；可以显式续同run最多四窗；不以两帧损失变化声称学习成功、不将本对照替代joint内部训练。完整joint/frozen终档、闭环、拓扑比较与部署/实飞仍未完成，AC3–AC6保持开放。
+
+## Segment 3：首次四窗续段，累计6/160窗
+
+首两窗独立实际验收后，同run执行`--windows 4`，session88439已收取exit0，父复核`completed / registered_windows_verified`。combined帧4→12，脑/感觉step2600→6600，Adam2→6；原始计数摘要前后不变，没有重新预处理或复跑首窗。
+
+| 窗口 | 更新前动作MSE | theta改变数 | 读出权重/偏置改变数 | 两帧前向s | 反向/裁剪s |
+| --- | --- | --- | --- | --- | --- |
+| 3 | 0.0070391741 | 0 | 7884 / 3 | 20.149808 | 0.021304 |
+| 4 | 0.1196910701 | 0 | 7884 / 3 | 20.036021 | 0.000641 |
+| 5 | 0.1364671090 | 0 | 7884 / 3 | 20.910243 | 0.000571 |
+| 6 | 0.0412392190 | 0 | 7884 / 3 | 20.257425 | 0.000580 |
+
+启动available=3,243,327,488 bytes，额外预留1,073,741,824 bytes，有效RSS上限2,169,585,664 bytes。823个资源样本，峰值RSS1,566,949,376 bytes、最低available2,685,353,984 bytes；监督87.800171s、worker85.952157s。未触发资源停止，未并行模型/数值检查，Noria/Docker保持。
+
+段ID`a7bf4d40956e707802e340e61e97a3e595a6cd77af476606840df9d0816d4c7f`；末档`d4b68da4308e2bb03438bb05787a330067a58b68d461611a23875ce086ec3f66`，路径`segments/000003/windows/000006/checkpoint`，前缀`497abacf552cac6638f07b735acc13c4378b5a7677a9cdbbeaf4cb658e2812f2`。累计12帧/6更新，余154窗；本段使用既有父数值/来源校验，未重复首两窗的独立检查。不以本前缀的损失变化或与joint不同场景的成本直接声称学习优劣。

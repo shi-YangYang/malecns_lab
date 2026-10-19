@@ -230,3 +230,18 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
 启动available=4,172,431,360 bytes，额外预留1,073,741,824 bytes，实际RSS上限3,098,689,536 bytes。3953个资源样本，采样峰值2,668,707,840 bytes（约2.49GiB），最低available=2,552,365,056 bytes；监督420.380251s、worker419.113327s。未触发资源停止，Noria/Docker保持。第56窗vx仍约+0.300000012m/s，教师约+0.04208至+0.05428m/s，不能称为跟随成功。
 
 段ID `39656cf0fb6beacda76eae15b0f62ba10df5746b5c5f807f9f99e2608fd265ac`；末档 `d055897e887fa880fca267178d6ddb38c24a816b63adde0eef547093fc2dc337`，路径`segments/000016/windows/000056/checkpoint`，前缀 `bbf0792059f1e4651f4438ff28cfca2919dff1468e24544fc8bec24c57dd86ed`。joint余104窗；独立frozen_brain随后从共同初值另起run，未拷贝joint训练参数。本段未重复旧测试，按已独立验收的父数值/来源检查续接，完整训练与闭环结论仍待完成。
+
+## Segment 17：窗口57–60
+
+同run显式四窗，session49580已收取exit0，父复核`registered_windows_verified`。累计120帧/60更新，forward帧32→40，脑/感觉step16600→20600；原始计数摘要前后保持。冻结脑第3段退出后才启动本段，仅与文档/静态成本审查并行。
+
+| 窗口 | 更新前动作MSE | 本窗theta改变数 | 原始theta梯度L2 | 两帧前向s | 反向/裁剪s |
+| --- | --- | --- | --- | --- | --- |
+| 57 | 0.2972292582 | 5,159 | 3.37240e30 | 21.775225 | 84.972225 |
+| 58 | 0.3119780632 | 5,161 | 5.56601e29 | 20.586305 | 87.353838 |
+| 59 | 0.3470446212 | 5,163 | 4.48501e30 | 21.296047 | 85.018663 |
+| 60 | 0.3922152524 | 5,163 | 2.86199e30 | 23.078462 | 85.924454 |
+
+启动available=3,440,525,312 bytes，额外预留1,073,741,824 bytes，实际RSS上限2,366,783,488 bytes。4050个资源样本，采样峰值1,784,725,504 bytes，最低available=2,644,459,520 bytes；监督437.415638s、worker436.027995s。没有触发资源停止。RSS受当前系统驻留/压缩状态影响，不能据较低RSS推断模型内存需求降低。Noria/Docker保持；末窗vx仍+0.300000012m/s，教师约−0.01920至−0.01224m/s，保留该不匹配结果。
+
+段ID `e6f607619b575d2d27c02657f3bb389e0f0ab93925c481a626ea1cfe34ae0bd9`；末档`edc31649f0bf21a956233aa376d56f0b04864efdb5596f41099e4ee17517430c`，路径`segments/000017/windows/000060/checkpoint`，前缀`b0efaa92c7613b94074df6298582d16bf37b40c94f74c3a97d2754b896fa701e`。joint余100窗，独立frozen已到6/160窗；未改变已登记模型或线程。用户指出CPU/GPU利用率后，下一步优先按[反向内核协议](backward-kernel-benchmark.md)做隔离成本对照；不从利用率直接宣称原因或加速。
