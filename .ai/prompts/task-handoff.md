@@ -1,5 +1,11 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前任务：保留60窗状态，建立GPU续训分支（2026-10-19）
+
+用户在收到GPU核级速度与浮点差异说明后，明确要求“改成GPU，继续训练，还是重新训练？”。按 [Decision014](../decisions/014-resume-on-mps-with-recorded-numerics.md)继续现有完整joint状态，不从零开始；它取代下文Decision013的后续自动数值门槛，但原A FAIL不改。[MPS续训规格](../../specs/spec-008-trainable-snn/mps-continuation.md)已Ready，单一实施Agent负责隔离新模块，独立软件验收/提交后再实际运行新分支的两窗。
+
+核心神经/读出前反向MPS，少量CPU主参数仍按原float64裁剪和CPU Adam规则更新；新后端、新ID、新run关联CPU第60窗的参数、Adam、完整神经与感觉状态和前缀。不得回写原G29/R13/已封存MPS20来源。新入口每次1–4窗，当前阶段先实际第61窗，再独立进程恢复第62窗；以实际合法链为准。完整图、两帧窗口、160窗总预算、额外1GiB预留、Noria/Docker不动；不启动实飞。旧CPU前缀和GPU后缀混合，不宣称CPU轨迹等价或学会控制。软件实现与实际训练均尚待本阶段证据。
+
 ## 当前任务：完整图 GPU 测试与条件迁移（2026-10-19）
 
 用户明确授权先用完整连接组测 GPU 内存/速度/CPU 差异，通过后切换训练，见 [Decision 013](../decisions/013-mps-validation-before-migration.md)与 [MPS 协议](../../specs/spec-008-trainable-snn/mps-fullgraph-probe.md)。A 工具4个不同定向检查及新独立软件PASS，提交 b4b06de；一次[完整图实测](../../specs/spec-008-trainable-snn/mps-fullgraph-run-20261019-r1.md) session95416已收取exit0，父completed/worker protocol_complete。当前生产训练仍 CPU；没有进行 GPU 训练迁移。SciPy 反向接入审计仍 Draft。
