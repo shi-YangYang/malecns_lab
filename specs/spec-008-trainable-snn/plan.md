@@ -26,9 +26,9 @@ P2c已独立验收并提交 `d9d79a5`。[P2d](p2d-observability-tools.md)将配�
 
 [P3d神经闭环评估](p3d-closed-loop-evaluation.md)已独立协议PASS并完成新的[软件返工验收PASS](acceptance-p3d-rework-r1.md)：最终joint/独立frozen父终态准入、实际参数身份、任意帧完整状态、环境重放及全val后test规则实现，失败终局不算正式证据完成。新增模块保留已绑定训练源码；两份完整epoch参数具备后才运行首次1+1帧实际门槛。训练继续与工具准备不等于闭环结果。
 
-[P3e0完整规模重连成本探针](p3e-generation-run-20261019-r1.md)实际独立PASS：100000提案、51847交换，生成与重载约19.46秒，保持全部节点/边和计数；仅为成本样本，不进入训练。[P3e1可续段生成器协议](p3e1-bounded-rewiring-draft.md)已独立PASS并Ready，先实施与软件验收，再执行正式R的两个100000提案段实际门槛。正式G/R神经研究入口与比较另行冻结，AC6仍未完成。
+[P3e0完整规模重连成本探针](p3e-generation-run-20261019-r1.md)实际独立PASS：100000提案、51847交换，生成与重载约19.46秒，保持全部节点/边和计数；仅为成本样本，不进入训练。[P3e1可续段生成器](p3e1-bounded-rewiring-draft.md)已独立软件PASS并提交bcb0afc；正式R的两个100000提案段也获新的[实际PASS](acceptance-p3e1-run-r1.md)，累计200000提案/103830交换，跨进程状态精确恢复。可从唯一前缀显式推进每段最多1000000提案；中间图不得进入研究模型。正式G/R神经研究入口与比较另行冻结，AC6仍未完成。
 
-[P3b r2联合更新实测](p3b-run-20261019-r2.md)及独立[实际PASS](acceptance-p3b-run-r2.md)已完成：完整图两帧动作损失更新内部参数和读出，恢复内部参数会改变动作，但本步内部影响使动作误差相对急性恢复增加0.00700335，未证明正向收益。五分支总238.29s、采样RSS2.757GiB。[P3c1](p3c-resumable-state.md)完整状态/Adam/游标续训存档已软件PASS，51项检查通过；[P3c2连续训练](p3c-training-runner.md)27项检查及首两窗跨进程/首次四窗实际续段均已独立PASS，后续同协议累计40/160窗。继续同一冻结run完成训练和独立frozen，再做未见场景与拓扑比较，不能用短前缀的数值效应关闭AC3–AC6。
+[P3b r2联合更新实测](p3b-run-20261019-r2.md)及独立[实际PASS](acceptance-p3b-run-r2.md)已完成：完整图两帧动作损失更新内部参数和读出，恢复内部参数会改变动作，但本步内部影响使动作误差相对急性恢复增加0.00700335，未证明正向收益。五分支总238.29s、采样RSS2.757GiB。[P3c1](p3c-resumable-state.md)完整状态/Adam/游标续训存档已软件PASS，51项检查通过；[P3c2连续训练](p3c-training-runner.md)27项检查及首两窗跨进程/首次四窗实际续段均已独立PASS，后续同协议累计48/160窗。继续同一冻结run完成训练和独立frozen，再做未见场景与拓扑比较，不能用短前缀的数值效应关闭AC3–AC6。
 
 [P2e有状态策略](p2e-neural-policy.md)已完成新的独立[软件PASS](acceptance-p2e.md)：28项定向数值检查证明跨帧完整状态、全部DN两半窗电位读出、内部theta动作损失梯度及controller边界。该接口仅有数值fixture证据，实际完整图动作更新、独立策略checkpoint及场景训练仍待下一批；旧gain-only持久化不能保存新策略。
 

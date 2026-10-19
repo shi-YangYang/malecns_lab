@@ -1,6 +1,14 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前断点：joint40/160窗，首场景已结束，无运行中模型（2026-10-19）
+## 当前执行：joint48窗与P3e1首两段实际PASS（2026-10-19）
+
+本轮有实际进展：session10217/46895均已收取exit0、父registered_windows_verified；同joint run新增windows41–48，累计96帧/48更新，forward next_frame16，脑/感觉step8600。末档 `adca4b067ecf0a77942d9b584c7db4c650512777364604eb9cbc444dff6694c5`、前缀 `c65b7b2ca7cde61cddbc28e6b8b37260e05255ae704f23bc1e3e33b629eb5191`；最新四窗监督410.227291s、采样峰值3512188928 bytes、最低available3351592960 bytes。第13/14段已写入[续段实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)，不重复模型前缀。1GiB额外预留及Noria/Docker限制保持；G29个绑定源码冻结。
+
+P3e1实施/独立软件PASS及37个不同定向检查已bcb0afc提交；正式run `data/topology_generation_main_20261019_r1` 的首两段各100000提案也获新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3e1-run-r1.md)，全文读取处理、无返工项。session46686/46185均exit0且父completed，累计200000提案/103830交换；第二段真实CSC/完整PCG64与首段父状态精确恢复，首段图/全部计数与历史锚点精确。末档ab4783de23b8b98aeb27d67057f3096c3ab15f33ae547992aad82cf90da4714e，前缀d4a9c03c5042f49e04d2fa4e0df49469a100d3f52b93555c258792afd3a05212。见[实际报告](../../specs/spec-008-trainable-snn/p3e1-run-20261019-r1.md)。terminal=false，尚非最终R。
+
+当前无运行中的完整图作业，实际验收者已完成。阶段提交后可显式运行同R run的下一段1000000提案，先收取终态再决定后续段，不自动循环科学预算；不与G训练/全矩阵或模型数值检查并行。R13个绑定源码冻结。只读规划Agent `research_policy_boundary_audit` 正审查后续P3e2研究工厂/状态边界，只可写Draft分析，不实施、不测试、不加载矩阵/Torch。报告返回后全文读取处理。整体goal仍active，joint余112窗、独立frozen及完整闭环/拓扑/时延证据仍待完成，AC3–AC6未关闭。
+
+## 前置：joint40/160窗，首场景已结束（2026-10-19）
 
 本目标轮有实际进展。session53960/1973/51425/19423均已收取exit0，同一冻结joint r1新增窗口27–40、累计80帧/40更新；最后脑/感觉step40600，checkpoint `e1c656b913d9c1f51d8cada6214342623afc0dd7de7e66f4b5f2240229154096`，prefix `973724345d79154e1bb33970f3fcef00c8ee7dc0e5971d24b8e9e18ff8321b20`。游标仍为combined、next_frame80，下一窗口才进入forward场景并重置神经/感觉状态，参数与Adam延续。1GiB额外预留保持、Noria/Docker未操作；最新两窗段监督206.878887s、采样峰值3217833984 bytes、最低available4022337536 bytes。各段父数值/来源复核为registered_windows_verified，记录见[续段实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)。所有29个绑定训练源码保持，不重复已验证前缀。
 
