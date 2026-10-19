@@ -6,7 +6,7 @@
 
 两份只读审计已全文处理：[原因](../../specs/spec-008-trainable-snn/saturation-cause-audit.md)、[GPU边界](../../specs/spec-008-trainable-snn/gpu-training-scope-audit.md)。115/160窗vx梯度精确零，43–60已在CPU出现；没有符号接反证据。动作MSE的tanh导数使饱和输出不能纠正，大DN尺度/Adam动量提供推入饱和的保存证据。theta约1e30在vx无梯度时仍出现，递归伴随放大待完整图配对定位。
 
-单一诊断实施者仅新增diagnostics并复用旧数值源；另一实施者仅新增GPU感觉与优化器，文件/接口独立。所有GPU检查与模型运行必须workspace_lock串行，旧42/G29/R13源保持。不得提前运行正式训练。独立软件验收后才运行完整图诊断，随后登记最小修复、独立验收、短窗恢复门槛及最多一轮续训。当前1GiB预留和Noria/Docker不动。既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
+单一诊断实施者仅在learning新增训练梯度诊断并复用旧数值源；另一实施者仅新增GPU感觉与优化器，文件/接口独立。所有GPU检查与模型运行必须workspace_lock串行，旧42/G29/R13源保持。不得提前运行正式训练。独立软件验收后才运行完整图诊断，随后登记最小修复、独立验收、短窗恢复门槛及最多一轮续训。当前1GiB预留和Noria/Docker不动。既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
 
 ## 当前任务：GPU剩余98窗完成并通过独立验收（2026-10-19）
 
