@@ -2,7 +2,9 @@
 
 ## 当前断点：joint60窗、frozen6窗，优先测反向内核成本（2026-10-19）
 
-用户最新指出CPU/GPU利用率偏低。实际训练worker反向阶段3秒采样约266.4% CPU（约2.7核），机器10核、登记Torch4线程/interop1、CPUfloat32，当前代码未用GPU。G最新四窗前向20.59–23.08s、反向/裁剪84.97–87.35s；该后者包含损失构造/梯度复制/裁剪，不能直接等同孤立SpMV。新的[反向成本审计](../../specs/spec-008-trainable-snn/backward-cost-audit.md)全文读取处理，[内核/线程协议](../../specs/spec-008-trainable-snn/backward-kernel-benchmark.md)独立PASS/Ready并提交457db06。单一实施者正在做新隔离脚本；软件验收和提交后由root在新目录`data/adjoint_kernel_20261019_r1`运行一次，再独立实际验收。旧训练源码/线程保持，核级结果不代表端到端训练加速。
+用户最新指出CPU/GPU利用率偏低。实际训练worker反向阶段3秒采样约266.4% CPU（约2.7核），机器10核、登记Torch4线程/interop1、CPUfloat32，当前代码未用GPU。G最新四窗前向20.59–23.08s、反向/裁剪84.97–87.35s；该后者包含损失构造/梯度复制/裁剪，不能直接等同孤立SpMV。新的[反向成本审计](../../specs/spec-008-trainable-snn/backward-cost-audit.md)全文读取处理，[内核/线程协议](../../specs/spec-008-trainable-snn/backward-kernel-benchmark.md)独立PASS/Ready并提交457db06，工具4个不同定向检查及独立软件PASS后提交404b62c。
+
+新目录`data/adjoint_kernel_20261019_r1`仅运行一次，session79451已收取exit0、父completed/worker protocol_complete；[实际报告](../../specs/spec-008-trainable-snn/backward-kernel-run-20261019-r1.md)及新[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-backward-kernel-run-r1.md)均全文读取处理，无返工项。全部180次输出、270组比较精确相同，原始图/输入/共享缓存保持；Torch4约72ms/次，8/10约57–59ms，SciPy约16ms，核级吞吐4.56–4.59倍。监督13.376379s、采样RSS1481129984 bytes、最低available3770482688 bytes。旧训练源码/线程保持，核级结果不代表端到端加速；下一步单列真实autograd/全细胞梯度与完整两帧更新/Adam/末态等价及来源迁移，不直接改已绑定G29、R13或本次基准源码。
 
 G第17段session49580已收取exit0，父registered_windows_verified，同joint run累计60/160窗、120帧/60更新，forward next_frame40，脑/感觉step20600。末档`edc31649f0bf21a956233aa376d56f0b04864efdb5596f41099e4ee17517430c`，前缀`b0efaa92c7613b94074df6298582d16bf37b40c94f74c3a97d2754b896fa701e`。监督437.415638s、采样峰值1784725504 bytes、最低available2644459520 bytes；[续段报告](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)记录负结果：末窗vx仍+0.3，而教师已为负。joint余100窗，未学会控制。
 
@@ -10,7 +12,7 @@ frozen第3段session88439已收取exit0，父registered_windows_verified；累�
 
 R仍为7段/5200000提案/2705909成功、terminal=false（下文身份不变），本轮未运行生成器。[研究训练边界审计](../../specs/spec-008-trainable-snn/p3e3-training-boundary-audit.md)已全文处理并c45e5c3提交，仅Draft设计，尚未实现研究参数/Adam/状态档。等性能诊断后续接这部分，仍需真实G首窗数值对齐才进入R训练。
 
-当前两个完整训练终端均已退出，没有模型作业；新性能脚本实施者持有最小软件数值检查独占时段，root不并行运行任何完整图。1GiB额外预留、Noria/Docker保留及G29/R13绑定源字节不变。整体goal active，AC3–AC6保持开放，不因阶段进展结束完整任务。
+当前两个完整训练及基准终端均已退出，所有本批Agent已完成、全部报告已读取处理，没有活动模型或数值检查。1GiB额外预留、Noria/Docker保留及G29/R13绑定源字节不变。整体goal active，AC3–AC6保持开放，不因阶段进展结束完整任务。
 
 本批七份进展文档已获新独立[S0 PASS](../../specs/spec-008-trainable-snn/acceptance-progress60.md)，报告全文读取处理，无返工项；仅以JSON/CSV核对记录，未重复既有首窗/续段数值验收。
 
