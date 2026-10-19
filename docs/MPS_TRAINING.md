@@ -1,6 +1,34 @@
-# 从 CPU 完整状态迁到 GPU 续训
+# GPU训练与状态恢复
 
-入口为 `cnsbridge.learning.train_mps`。神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后端名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
+## 当前全GPU修复入口
+
+新入口为 `cnsbridge.learning.train_gpu`。感觉掩码与事件、完整脑、读出、损失、反向、稳定裁剪及Adam参数/m/v/step均使用MPS；CPU负责资产准备、调度、I/O和独立证据校验。完整图/原始边保持，训练内部群组增益与动作读出。当前任务是合成标记目标数据的监督模仿学习，预期学习前进/后退、升降与转向，不等于已经完成闭环控制。
+
+[根因报告](../specs/spec-008-trainable-snn/gpu-recovery-causes.md)与[集成规格](../specs/spec-008-trainable-snn/gpu-recovery-integration.md)解释本次数值变化：稳定logit损失、100步递归反向范围、全部1000步前向、原始theta L2上限1000。新协议继承旧160窗的模型参数，Adam清零，新场景使用float32 GPU感觉；旧160窗原样保留，不称同协议第161窗。
+
+软件已独立验收，完整图实际门槛按以下顺序执行。新目录必须不存在；示例目录不要与正在运行的实验共用：
+
+```bash
+cd /Users/yang/project/FlyDrones
+PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
+  -m cnsbridge.learning.train_gpu --initialize \
+  --parent-run data/neural_training_mps_20261019_r3 \
+  --out data/neural_training_gpu_new --credit-horizon 100 --theta-norm-limit 1000
+
+PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
+  -m cnsbridge.learning.train_gpu --gate --run data/neural_training_gpu_new
+
+PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
+  -m cnsbridge.learning.train_gpu --run data/neural_training_gpu_new --windows 1
+```
+
+gate是可丢弃的一次负标签联合更新，检查真实内部梯度、参数变化和固定特征纠错，不污染正式初始参数。首次训练一窗后，用最后一条命令另起进程恢复第二窗；实际验收通过后，每次最多 `--windows 4`，总预算新增160窗。失败保留现场并阻断继续，不自动调高门槛或绕过历史来源。`progress.json`记录新epoch窗数与实际Adam步数；`initialization/`、`gate/`、`segments/`分别保存完整来源、状态、损失/梯度/驻留、更新、恢复和资源证据。设备值只在边界下载，验算不回写GPU优化器。
+
+资源仍申请6GiB、额外预留1GiB、每段600秒，实际上限受当前可用内存约束；不操作Docker/Noria、不控制无人机。不能在同一工作区并行加载模型。即使软件、算术和恢复通过，实际学习、闭环泛化及实飞仍须单独验证。
+
+## 历史：从CPU完整状态迁到MPS前反向
+
+历史入口为 `cnsbridge.learning.train_mps`，以下内容用于解释和恢复既有来源，当前修复训练使用上面的新入口。历史神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后端名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
 
 当前 `data/neural_training_mps_20261019_r3` 已完成既定160/160窗（CPU继承60＋GPU累计100）。本批从62续至160，新增98窗用时50分46.55秒，每窗计算均值26.97秒；见[完整轮次实测](../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新增98窗的[独立保存证据验收](../specs/spec-008-trainable-snn/acceptance-mps-finish98-actual.md)已通过。最初迁移及两次失败记录保留在[迁移实测](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。本轮预算已耗尽，不再对该run执行续训命令；新增epoch或实验需另行登记。
 
