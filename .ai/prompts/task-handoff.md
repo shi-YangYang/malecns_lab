@@ -1,12 +1,16 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前执行：joint48窗与P3e1首两段实际PASS（2026-10-19）
+## 当前断点：joint52窗、R320万提案、P3e2协议Ready（2026-10-19）
 
-本轮有实际进展：session10217/46895均已收取exit0、父registered_windows_verified；同joint run新增windows41–48，累计96帧/48更新，forward next_frame16，脑/感觉step8600。末档 `adca4b067ecf0a77942d9b584c7db4c650512777364604eb9cbc444dff6694c5`、前缀 `c65b7b2ca7cde61cddbc28e6b8b37260e05255ae704f23bc1e3e33b629eb5191`；最新四窗监督410.227291s、采样峰值3512188928 bytes、最低available3351592960 bytes。第13/14段已写入[续段实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)，不重复模型前缀。1GiB额外预留及Noria/Docker限制保持；G29个绑定源码冻结。
+本目标轮有实际进展，不是连续阻塞。P3e1生成器软件/37项不同检查及独立软件PASS已bcb0afc提交；首两段实际门槛PASS及G48窗记录已5410687提交。所有报告全文读取处理，无返工项。1GiB额外预留、Noria/Docker限制及完整母图不变；未重复旧模型前缀。
 
-P3e1实施/独立软件PASS及37个不同定向检查已bcb0afc提交；正式run `data/topology_generation_main_20261019_r1` 的首两段各100000提案也获新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3e1-run-r1.md)，全文读取处理、无返工项。session46686/46185均exit0且父completed，累计200000提案/103830交换；第二段真实CSC/完整PCG64与首段父状态精确恢复，首段图/全部计数与历史锚点精确。末档ab4783de23b8b98aeb27d67057f3096c3ab15f33ae547992aad82cf90da4714e，前缀d4a9c03c5042f49e04d2fa4e0df49469a100d3f52b93555c258792afd3a05212。见[实际报告](../../specs/spec-008-trainable-snn/p3e1-run-20261019-r1.md)。terminal=false，尚非最终R。
+G同joint run `data/neural_training_joint_20261019_r1` 的session10217/46895/89107均收取exit0、父registered_windows_verified，实际完成windows41–52，累计104帧/52更新；forward next_frame24，脑/感觉step12600。末档 `6bf2ba97d7c7cfa8a73325370c1bbbaefa7be5b2021850da0e11d27bbd0348c3`，前缀 `27e90dc86f28f40988198e51057787b0007bd48bfc0a30280e5e85bfc37dde0c`。第15段监督418.324132s、采样峰值2697019392 bytes、最低available2809659392 bytes；见[续训实测](../../specs/spec-008-trainable-snn/p3c-continuation-20261019.md)。前进仍约+0.3而末窗教师约+.127..+.139，不称已学会跟随。G29个绑定源码保持，joint余108窗，独立frozen尚未开始。
 
-当前无运行中的完整图作业，实际验收者已完成。阶段提交后可显式运行同R run的下一段1000000提案，先收取终态再决定后续段，不自动循环科学预算；不与G训练/全矩阵或模型数值检查并行。R13个绑定源码冻结。只读规划Agent `research_policy_boundary_audit` 正审查后续P3e2研究工厂/状态边界，只可写Draft分析，不实施、不测试、不加载矩阵/Torch。报告返回后全文读取处理。整体goal仍active，joint余112窗、独立frozen及完整闭环/拓扑/时延证据仍待完成，AC3–AC6未关闭。
+R正式run `data/topology_generation_main_20261019_r1` 的两段各100000提案获[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-p3e1-run-r1.md)后，已显式串行完成三个1000000提案段；session36212/82164/37731均exit0、父completed。累计3200000提案/1666368成功，末档 `3f1cb7730fbe4c6264af30521d1f84fc133c07c5e3c8e4018185bab45afa3332`，前缀 `4655b22f42b1361542eae32bd9552024ecac014365ac412f589b91e977c6ff55`；详见[续段实测](../../specs/spec-008-trainable-snn/p3e1-continuation-20261019.md)。terminal=false，没有最终candidate；R13绑定源码保持，不能将中间状态接入研究模型。
+
+新的[P3e2研究工厂Spec](../../specs/spec-008-trainable-snn/p3e2-research-factory.md)及[Plan](../../specs/spec-008-trainable-snn/p3e2-factory-plan.md)已获新的[独立协议PASS](../../specs/spec-008-trainable-snn/acceptance-p3e2-factory-protocol.md)，全文读取处理并Ready，无返工项。[只读边界审计](../../specs/spec-008-trainable-snn/p3e2-boundary-audit.md)也已全文处理。下一步单一实施者仅新增严格终局准入、真实R counts/正向/伴随/SciPy共享缓存及graph/model/map/policy身份、共同数值契约和相关小图检查；不改29/13绑定源，不实现参数/Adam/训练档或runner，不运行完整R神经计算。软件后新独立验收与提交。既有NeuralController只检查类型，不能误报为研究角色隔离器；本批无硬件接线。
+
+当前无运行中的完整图作业，全部本轮Agent已完成且报告均处理。可交替显式推进G下一四窗及R下一1000000提案；始终串行、不自动循环科学预算，遇具体失败保留证据后分析。编码/静态审查可与完整图作业并行，数值检查须等完整图退出。整体goal仍active，AC3–AC6及完整训练/独立冻结脑/未见场景/拓扑比较/时延/条件实飞仍未完成，不标记complete或blocked。
 
 ## 前置：joint40/160窗，首场景已结束（2026-10-19）
 
