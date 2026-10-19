@@ -1,5 +1,9 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前任务：GPU继续剩余98窗（2026-10-19）
+
+用户已明确要求把剩余98窗跑完。按[续训执行规格](../../specs/spec-008-trainable-snn/mps-epoch-completion.md)从r3合法62窗边界串行调用现有CLI，每段最多4窗，直到160；不重置或重复既有前缀、不改42份绑定源码、数据或预算。当前父档 `ad6e520f4d29cd91f32cf707ceca5f56afee9a81b050d10db1cc3c6aed03052a`。本批数值任务由单一执行Agent负责；协调者监看并维护文档，之后新的独立验收只读复核新增证据。1GiB额外预留、Noria/Docker不动，CPU/frozen/R不并行推进。实际尚未启动或完成的窗口不能预报为成功。
+
 ## 当前任务：保留60窗状态，建立GPU续训分支（2026-10-19）
 
 用户在收到GPU核级速度与浮点差异说明后，明确要求“改成GPU，继续训练，还是重新训练？”。按 [Decision014](../decisions/014-resume-on-mps-with-recorded-numerics.md)继续现有完整joint状态，不从零开始；它取代下文Decision013的后续自动数值门槛，但原A FAIL不改。[MPS续训子批](../../specs/spec-008-trainable-snn/mps-continuation.md)现已Done，新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-mps-continuation-actual.md)全文读取处理，无返工项。只完成迁移与两窗有界续训，不能将整体训练或学习任务标为完成。
