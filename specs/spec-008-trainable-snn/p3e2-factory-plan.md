@@ -1,6 +1,6 @@
 # Plan — P3e2 研究策略构造
 
-状态：Ready，与[p3e2-research-factory](p3e2-research-factory.md)已获新的[独立协议PASS](acceptance-p3e2-factory-protocol.md)，完整报告已读取处理，无返工项；尚未实施。
+状态：本软件计划已完成，37个不同相关检查通过并获新的[独立软件PASS](acceptance-p3e2-factory.md)；实施/验收报告已全文读取处理，无返工项。正式R终局、完整图实际构造与研究训练边界另批。
 
 1. 核对工作区、当前G29/R13源码；保持所有绑定文件。新增轻量研究准入模块，从正式生成run重新验证唯一父批准终局，封存严格准入及自身来源。
 2. 新增离线研究工厂，复用现有真实G初始化、完整R loader、图/映射构建和精确LaminaTonicLIF/NeuralPolicy类型。依序释放G传播引用、安装真实R三种传播表示、完整分块检查并重绑身份。实际数值方法保持原实现。
