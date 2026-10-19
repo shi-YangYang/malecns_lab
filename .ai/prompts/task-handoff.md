@@ -2,7 +2,9 @@
 
 ## 当前任务：完整图 GPU 测试与条件迁移（2026-10-19）
 
-用户明确授权先用完整连接组测 GPU 内存/速度/CPU 差异，通过后切换训练，见 [Decision 013](../decisions/013-mps-validation-before-migration.md)与 [MPS 协议](../../specs/spec-008-trainable-snn/mps-fullgraph-probe.md)。A 阶段 Ready，隔离完整 COO 双向算子与自定义输入梯度；B/C 仅在前置门槛通过后实施。当前生产训练仍 CPU；没有进行 GPU 训练迁移。SciPy 反向接入审计仍 Draft。
+用户明确授权先用完整连接组测 GPU 内存/速度/CPU 差异，通过后切换训练，见 [Decision 013](../decisions/013-mps-validation-before-migration.md)与 [MPS 协议](../../specs/spec-008-trainable-snn/mps-fullgraph-probe.md)。A 工具4个不同定向检查及新独立软件PASS，提交 b4b06de；一次[完整图实测](../../specs/spec-008-trainable-snn/mps-fullgraph-run-20261019-r1.md) session95416已收取exit0，父completed/worker protocol_complete。当前生产训练仍 CPU；没有进行 GPU 训练迁移。SciPy 反向接入审计仍 Draft。
+
+本次`data/mps_fullgraph_20261019_r1`保留72次核输出和完整N维输入autograd；全部完整性通过，GPU核级总吞吐约6.08–8.11倍，RSS采样峰值1.659GiB、MPS driver1.382GiB（不同口径不相加）。但dense前向3个/伴随6个元素每次超出原登记逐元素容差，整体相对L2约1.4e-7，numeric_pass=false、mps_kernel_candidate=false。因此B/C不启动；不放宽容差，不用小整体误差代替神经阈值和训练影响证据。新MPS探针20份来源同样已封存，后续不能改源后冒充旧运行。独立保存数组复核在`data/mps_fullgraph_review_20261019_r1`，没有重跑完整图；新的[实际记录验收 PASS](../../specs/spec-008-trainable-snn/acceptance-mps-fullgraph-run-r1.md)已全文读取处理，无返工项。所有本批进程和Agent已终态，报告均已处理，当前无活动数值任务。
 
 此前 tiny 诊断 `data/mps_compatibility_20261019_r1.json`：Torch2.14.1、MPS available，fallback=0；dense/COO 2×2前反向通过、CSR报不支持。不能作为完整图或训练证明。新探针沿用完整166700节点/25582938边与1GiB额外预留，Noria/Docker不操作，旧G29/R13和性能脚本不改。
 
