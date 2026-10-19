@@ -1,5 +1,13 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前任务：完整图 GPU 测试与条件迁移（2026-10-19）
+
+用户明确授权先用完整连接组测 GPU 内存/速度/CPU 差异，通过后切换训练，见 [Decision 013](../decisions/013-mps-validation-before-migration.md)与 [MPS 协议](../../specs/spec-008-trainable-snn/mps-fullgraph-probe.md)。A 阶段 Ready，隔离完整 COO 双向算子与自定义输入梯度；B/C 仅在前置门槛通过后实施。当前生产训练仍 CPU；没有进行 GPU 训练迁移。SciPy 反向接入审计仍 Draft。
+
+此前 tiny 诊断 `data/mps_compatibility_20261019_r1.json`：Torch2.14.1、MPS available，fallback=0；dense/COO 2×2前反向通过、CSR报不支持。不能作为完整图或训练证明。新探针沿用完整166700节点/25582938边与1GiB额外预留，Noria/Docker不操作，旧G29/R13和性能脚本不改。
+
+补记已结束的 frozen 第4段（session20077 exit0）：`data/neural_training_frozen_20261019_r1/segments/000004/result.json` 父复核 completed/registered_windows_verified，累计10/160窗、combined next_frame20、optimizer_steps10。末档 `cea58e304f32ea5ad2e2edade29901323be54ca2c57ffb189f451de16fca5af9`，前缀 `9ff86d99951f505f93e71b042450fc33b1325a8c7f56d17eba54a832782a172f`。监督82.631139s、RSS峰值1658191872 bytes、原始图摘要前后保持。这里只读实际结果登记当前恢复位置，未重复数值验证。joint仍60/160，R仍520万提案。GPU测试期间不并行续训/生成。
+
 ## 当前断点：joint60窗、frozen6窗，优先测反向内核成本（2026-10-19）
 
 用户最新指出CPU/GPU利用率偏低。实际训练worker反向阶段3秒采样约266.4% CPU（约2.7核），机器10核、登记Torch4线程/interop1、CPUfloat32，当前代码未用GPU。G最新四窗前向20.59–23.08s、反向/裁剪84.97–87.35s；该后者包含损失构造/梯度复制/裁剪，不能直接等同孤立SpMV。新的[反向成本审计](../../specs/spec-008-trainable-snn/backward-cost-audit.md)全文读取处理，[内核/线程协议](../../specs/spec-008-trainable-snn/backward-kernel-benchmark.md)独立PASS/Ready并提交457db06，工具4个不同定向检查及独立软件PASS后提交404b62c。
