@@ -32,4 +32,4 @@ Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写�
 - [spec-005-remove-minifly](spec-005-remove-minifly/spec.md)：移除合成飞行网络，所有脑入口统一真实连接组。
 - [spec-006-malecns-audit](spec-006-malecns-audit/spec.md)：原始数据过滤、输入输出通路与群组覆盖审计；用户报告见 [MaleCNS 审计](../docs/MALECNS_AUDIT.md)。
 - [spec-007-model-v2](spec-007-model-v2/spec.md)：第二版 MaleCNS 模型设计及完整图诊断、学习与对照工具；[P0–P3 离线实施](spec-007-model-v2/execution-plan.md)已独立验收完成，M4 真实动作研究待数据。设计见 [MODEL_V2](../docs/MODEL_V2.md)。
-- [spec-008-trainable-snn](spec-008-trainable-snn/spec.md)：训练完整MaleCNS网络内部参数，实现指定目标跟随的前进、升降和转向；当前仅Mac，已授权逐步实施/提交。完整图数值更新、优化、目标环境、神经策略、参数/状态存档、连续训练与闭环评估软件已验收，实际joint完成[62/160窗](spec-008-trainable-snn/mps-continuation-run-20261019.md)（CPU60＋GPU2），独立冻结脑CPU10/160窗；完整训练、独立冻结脑及闭环/拓扑比较、实飞仍待推进，不声称已学会控制。
+- [spec-008-trainable-snn](spec-008-trainable-snn/spec.md)：训练完整MaleCNS网络内部参数，实现指定目标跟随的前进、升降和转向；当前仅Mac，已授权逐步实施/提交。完整图数值更新、优化、目标环境、神经策略、参数/状态存档、连续训练与闭环评估软件已验收，实际joint既定[160/160窗](spec-008-trainable-snn/implementation-mps-finish98.md)已完成（CPU60＋GPU100），独立冻结脑仍CPU10/160窗；独立冻结脑完整训练及闭环/拓扑比较、实飞仍待推进，不声称已学会控制。

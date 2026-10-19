@@ -2,7 +2,7 @@
 
 入口为 `cnsbridge.learning.train_mps`。神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后端名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
 
-当前已从CPU60窗迁移，在 `data/neural_training_mps_20261019_r3` 实际完成61/62窗；两个进程的恢复校验通过。当前进度62/160，完整窗口约27秒，运行与失败记录见[实测报告](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。日常继续已有GPU进度时，使用下方第二条 `--run` 命令。
+当前 `data/neural_training_mps_20261019_r3` 已完成既定160/160窗（CPU继承60＋GPU累计100）。本批从62续至160，新增98窗用时50分46.55秒，每窗计算均值26.97秒；见[完整轮次实测](../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新增98窗的[独立保存证据验收](../specs/spec-008-trainable-snn/acceptance-mps-finish98-actual.md)已通过。最初迁移及两次失败记录保留在[迁移实测](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。本轮预算已耗尽，不再对该run执行续训命令；新增epoch或实验需另行登记。
 
 仅在另建实验时，从旧joint完整存档迁移（输出目录必须不存在）：
 
@@ -14,15 +14,15 @@ PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
   --out data/neural_training_mps_new --windows 1
 ```
 
-继续已有GPU进度，另起进程恢复：
+仅对尚未达到登记预算的GPU运行，另起进程恢复（以下为通用示例，需替换路径）：
 
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
   -m cnsbridge.learning.train_mps \
-  --run data/neural_training_mps_20261019_r3 --windows 4
+  --run /path/to/incomplete_registered_mps_run --windows 4
 ```
 
-`--out` 必须不存在；每次只允许1–4窗，执行后退出。启动时读取真实CPU末档和全部合法前缀，继承其已完成窗口数与总共160窗的预算。不会重放前60窗、清空Adam或重新预热当前场景。进入新场景时才按原规则重置神经/感觉状态，训练参数和Adam保留。当前GPU运行绑定CPU60末档，后续沿用 `--run` 续接，不推进旧joint分支以改变它绑定的来源边界。
+`--out` 必须不存在；每次只允许1–4窗，执行后退出。启动时读取真实CPU末档和全部合法前缀，继承其已完成窗口数与总共160窗的预算。不会重放前60窗、清空Adam或重新预热当前场景。进入新场景时才按原规则重置神经/感觉状态，训练参数和Adam保留。当前已完成GPU运行绑定CPU60末档，保留旧joint分支边界以维持来源链；未完成的运行可用 `--run` 续接。
 
 为降低完整1000步训练的中间张量内存，生产策略固定每50神经步分段重算。跨块/跨帧不截断梯度，DN仍逐步累加；感觉驱动在重算时从私有快照恢复，不推进外部时钟。直接执行仅供明确数值fixture对照，完整图不提供绕过入口。
 

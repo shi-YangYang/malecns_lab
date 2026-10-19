@@ -1,8 +1,12 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
-## 当前任务：GPU继续剩余98窗（2026-10-19）
+## 当前任务：GPU剩余98窗完成并通过独立验收（2026-10-19）
 
-用户已明确要求把剩余98窗跑完。按[续训执行规格](../../specs/spec-008-trainable-snn/mps-epoch-completion.md)从r3合法62窗边界串行调用现有CLI，每段最多4窗，直到160；不重置或重复既有前缀、不改42份绑定源码、数据或预算。当前父档 `ad6e520f4d29cd91f32cf707ceca5f56afee9a81b050d10db1cc3c6aed03052a`。本批数值任务由单一执行Agent负责；协调者监看并维护文档，之后新的独立验收只读复核新增证据。1GiB额外预留、Noria/Docker不动，CPU/frozen/R不并行推进。实际尚未启动或完成的窗口不能预报为成功。
+按[续训执行规格](../../specs/spec-008-trainable-snn/mps-epoch-completion.md)，同一r3已从62续至160：新增98窗，CPU继承60＋GPU累计100。25段（segments3–27）全部退出0、父`registered_mps_windows_verified`；调度session95614已收取exit0，没有活动训练进程或额外epoch。墙钟3046.550231秒，平均compute26.971301秒/窗。完整图、42绑定源、1GiB预留保持，Noria/Docker未操作；CPU/frozen/R未推进。执行报告已全文读取：[implementation-mps-finish98.md](../../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新的[独立实际验收PASS](../../specs/spec-008-trainable-snn/acceptance-mps-finish98-actual.md)只读复核新增98窗保存数组、25段×18数组恢复、两次场景重置、来源和最终封存链；没有重训或返工项。审查产物在 `data/mps_finish98_review_20261019`。
+
+最终档 `data/neural_training_mps_20261019_r3/segments/000027/windows/000160/checkpoint`；ID `fd3019989892f86bac44faefd5230ffff91891dbde9e813956c0945eb7b1e8b1`；prefix `1964b500ead62bceec06bf763b75c3e4992433bebb8b66f0d2fdea75d00c13a0`。run仍 `b7807f8e1997da44e46e83f39155e21bdce84aba020314a1ed68a145851413b7`。最终yaw frame80、brain/drive40600、Adam160、epoch_complete=true。保留CPU60父边界和旧GPU失败现场；本run预算已用完，不再执行续训CLI。执行证据及元数据汇总在 `data/mps_finish98_20261019`。
+
+这次完成的是既定160窗训练预算；新98窗前进末18窗仍vx约+0.3而教师均为负，theta原始梯度极大且裁剪下溢仍有记录。不能宣称已学会跟随、CPU/GPU轨迹等价或可实飞。独立冻结脑仍CPU10/160，R仍520万提案；固定策略闭环和对照未完成，Spec008整体保持未完成。本轮只核对结果并提交，不扩展到这些后续实验。以下旧断点保留为历史。
 
 ## 当前任务：保留60窗状态，建立GPU续训分支（2026-10-19）
 
