@@ -1,6 +1,6 @@
 # MPS 完整连接组状态迁移与有界续训
 
-状态：Ready。2026-10-19；用户最新授权和旧数值门槛的处置见 [Decision014](../../.ai/decisions/014-resume-on-mps-with-recorded-numerics.md)。本批不是旧A数值FAIL的返写，也不把GPU训练称为CPU轨迹等价。
+状态：Done（仅本批迁移与两窗续训）。2026-10-19；[实际报告](mps-continuation-run-20261019.md)与[新独立实际PASS](acceptance-mps-continuation-actual.md)已处理。用户最新授权和旧数值门槛的处置见 [Decision014](../../.ai/decisions/014-resume-on-mps-with-recorded-numerics.md)。本批不是旧A数值FAIL的返写，也不把GPU训练称为CPU轨迹等价；Spec008整体训练和学习目标未完成。
 
 ## 目标和非目标
 
@@ -45,10 +45,10 @@
 
 ## 验收标准
 
-- [x] M1：隔离MPS核心/策略及CPU Adam桥定向检查和[独立软件验收](acceptance-mps-continuation-software.md)通过。实际完整图结果仍待M2/M3。
-- [ ] M2：完整图真实CPU→MPS状态精确迁移，第61窗（以实际父边界为准）完成内部更新并保存合法新checkpoint。
-- [ ] M3：独立进程准确恢复所有参数/Adam/递归状态与游标，实际下一窗成功；保留旧源与预算。
-- [ ] M4：文档列明GPU前后向/CPU优化器、数值差异接受范围、实际速度/内存、当前进度和续训命令；阶段中文commit。
+- [x] M1：隔离MPS核心/策略及CPU Adam桥定向检查和[独立软件验收](acceptance-mps-continuation-software.md)通过；后续内存修正亦分别验收，实际完整图证据见M2/M3。
+- [x] M2：r3完整图真实CPU→MPS状态精确迁移，第61窗完成内部更新并保存合法新checkpoint，独立实际PASS。
+- [x] M3：r3第二独立进程准确恢复所有参数/Adam/递归状态与游标，实际第62窗成功；保留旧源与预算，独立实际PASS。
+- [x] M4：实测报告、GPU前后向/CPU优化器边界、实际速度/内存、62/160进度和续训命令经独立S0核对；随本状态更新创建阶段中文commit。
 
 无待用户决定事项。重新开始不是本批方案；用户将来明确要求从零纯GPU研究对照时另建run，不删除现有进度。
 

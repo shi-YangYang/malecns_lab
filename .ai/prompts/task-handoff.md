@@ -2,11 +2,15 @@
 
 ## 当前任务：保留60窗状态，建立GPU续训分支（2026-10-19）
 
-用户在收到GPU核级速度与浮点差异说明后，明确要求“改成GPU，继续训练，还是重新训练？”。按 [Decision014](../decisions/014-resume-on-mps-with-recorded-numerics.md)继续现有完整joint状态，不从零开始；它取代下文Decision013的后续自动数值门槛，但原A FAIL不改。[MPS续训规格](../../specs/spec-008-trainable-snn/mps-continuation.md)已Ready，单一实施Agent负责隔离新模块，独立软件验收/提交后再实际运行新分支的两窗。
+用户在收到GPU核级速度与浮点差异说明后，明确要求“改成GPU，继续训练，还是重新训练？”。按 [Decision014](../decisions/014-resume-on-mps-with-recorded-numerics.md)继续现有完整joint状态，不从零开始；它取代下文Decision013的后续自动数值门槛，但原A FAIL不改。[MPS续训子批](../../specs/spec-008-trainable-snn/mps-continuation.md)现已Done，新的[独立实际PASS](../../specs/spec-008-trainable-snn/acceptance-mps-continuation-actual.md)全文读取处理，无返工项。只完成迁移与两窗有界续训，不能将整体训练或学习任务标为完成。
 
 核心神经/读出前反向MPS，少量CPU主参数仍按原float64裁剪和CPU Adam规则更新；新后端、新ID、新run关联CPU第60窗的参数、Adam、完整神经与感觉状态和前缀。不得回写原G29/R13/已封存MPS20来源。新入口每次1–4窗，当前阶段先实际第61窗，再独立进程恢复第62窗；以实际合法链为准。完整图、两帧窗口、160窗总预算、额外1GiB预留、Noria/Docker不动；不启动实飞。旧CPU前缀和GPU后缀混合，不宣称CPU轨迹等价或学会控制。
 
-M1已由新独立软件验收PASS并542f50e提交。实际r1 session49235 exit1，加载时RSS上限；缓存构造S1修正由新实施者/新验收者通过并984dfc2提交。实际r2 session76638 exit1，完整图已加载、全部CPU→MPS状态精确恢复，但首帧前向MPS分配OOM，合法进度仍60。失败目录各留原源tar，旧CPU60未改。按Spec新增固定50步activation checkpointing，新的单一实施者正在处理，保持完整1000步反向及逐步DN累加顺序；独立软件验收/提交后用新r3再实际首窗，成功后才另起进程下一窗。当前无活动数值任务，不重复同样不足预算的r2。
+M1软件542f50e；实际r1 session49235 exit1，加载时RSS上限；缓存构造S1修正984dfc2；实际r2 session76638 exit1，完整图加载和精确恢复成功，但前向MPS分配OOM。失败目录各留原源tar，旧CPU60未改。固定50步activation checkpointing经两个实际MPS定向检查与新独立软件PASS，提交e4908ac；保留完整1000步反向及逐步DN累加顺序。
+
+成功分支 `data/neural_training_mps_20261019_r3`：session92710/87360均exit0，两个独立进程完成61/62窗，父结果 `registered_mps_windows_verified`；当前62/160（CPU继承60＋GPU实际2），余98窗。每次恢复18个完整数组精确一致，theta更新5163/5164项，clock20600→21600→22600，forward场景next_frame44，Adam62。末档 `ad6e520f4d29cd91f32cf707ceca5f56afee9a81b050d10db1cc3c6aed03052a`，前缀 `23e371e0232411dfa06e2874fd324bb9a3394603126d3c6663c4d4ce5d87fe2a`；run ID `b7807f8e1997da44e46e83f39155e21bdce84aba020314a1ed68a145851413b7`。新42来源与旧G29/R13/MPS20哈希均匹配；不得修改这些绑定业务源后冒充同run续接。
+
+[实测报告](../../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)：compute26.91/26.65s，监督33.30/32.95s，RSS采样1.42/1.58GiB、MPS driver1.48GiB（不相加）。独立保存数组审查在 `data/mps_continuation_review_20261019_r3`，没有重跑训练。theta raw梯度极大、强裁剪和少量下溢仍存在，vx仍+0.3而教师为负，不是学会控制的证据。下一次沿 `python -m cnsbridge.learning.train_mps --run data/neural_training_mps_20261019_r3 --windows 4` 有界续接（环境与完整命令见MPS文档），不要重新从CPU60启动，也不要推进已绑定CPU父run。冻结脑保留CPU10/160、R仍520万提案，本批未迁移它们。两个worker及本批Agent均已终态，报告全部读取；没有活动数值任务。整个Spec008仍未完成。
 
 ## 当前任务：完整图 GPU 测试与条件迁移（2026-10-19）
 

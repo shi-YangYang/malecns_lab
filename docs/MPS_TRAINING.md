@@ -1,26 +1,30 @@
 # 从 CPU 完整状态迁到 GPU 续训
 
-入口为 `cnsbridge.learning.train_mps`。神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后台名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
+入口为 `cnsbridge.learning.train_mps`。神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后端名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
 
-首次从旧 joint 完整存档迁移：
+当前已从CPU60窗迁移，在 `data/neural_training_mps_20261019_r3` 实际完成61/62窗；两个进程的恢复校验通过。当前进度62/160，完整窗口约27秒，运行与失败记录见[实测报告](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。日常继续已有GPU进度时，使用下方第二条 `--run` 命令。
+
+仅在另建实验时，从旧joint完整存档迁移（输出目录必须不存在）：
 
 ```bash
 cd /Users/yang/project/FlyDrones
 PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
   -m cnsbridge.learning.train_mps \
   --cpu-run data/neural_training_joint_20261019_r1 \
-  --out data/neural_training_mps_20261019_r1 --windows 1
+  --out data/neural_training_mps_new --windows 1
 ```
 
-后续另起进程恢复：
+继续已有GPU进度，另起进程恢复：
 
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=0 PYTHONPATH=src .venv-train/bin/python \
   -m cnsbridge.learning.train_mps \
-  --run data/neural_training_mps_20261019_r1 --windows 1
+  --run data/neural_training_mps_20261019_r3 --windows 4
 ```
 
-`--out` 必须不存在；每次只允许 1–4 窗。启动时读取真实 CPU 末档和全部合法前缀，继承其已完成窗口数与总共 160 窗的预算。当前计划从 CPU 60/160 接续；具体数字以运行记录为准。不会重放前 60 窗、清空 Adam 或重新预热当前场景。进入新场景时才按原规则重置神经/感觉状态，训练参数和 Adam 保留。
+`--out` 必须不存在；每次只允许1–4窗，执行后退出。启动时读取真实CPU末档和全部合法前缀，继承其已完成窗口数与总共160窗的预算。不会重放前60窗、清空Adam或重新预热当前场景。进入新场景时才按原规则重置神经/感觉状态，训练参数和Adam保留。当前GPU运行绑定CPU60末档，后续沿用 `--run` 续接，不推进旧joint分支以改变它绑定的来源边界。
+
+为降低完整1000步训练的中间张量内存，生产策略固定每50神经步分段重算。跨块/跨帧不截断梯度，DN仍逐步累加；感觉驱动在重算时从私有快照恢复，不推进外部时钟。直接执行仅供明确数值fixture对照，完整图不提供绕过入口。
 
 运行使用共享数值锁、6 GiB 请求、额外 1 GiB 系统预留、600 秒单段监督。实际 RSS 上限为 `min(6 GiB, 可用内存−1 GiB)`；MPS allocator 上限不高于该数值。RSS 与 MPS current/driver 都记录，不能相加当成总物理内存。工具不会操作 Docker/Noria，也不控制无人机。
 

@@ -10,7 +10,7 @@
 | 构建与安装 | setuptools >= 68、wheel，构建后端 `setuptools.build_meta`；pip 与 venv |
 | 核心依赖 | NumPy >= 1.24、SciPy >= 1.10、PyYAML >= 6.0 |
 | 可选依赖 | `vision`：OpenCV；`analysis`：OpenCV、Matplotlib；`data`：pandas、pyarrow；`tello`：DJITelloPy、OpenCV；`dev`：pytest、Ruff |
-| 独立训练环境 | `.venv-train`；`train` 可选依赖为 PyTorch 2.14.1、psutil；P0 核心仅支持 CPU 稀疏计算，尚不承诺 MPS 或实时性 |
+| 独立训练环境 | `.venv-train`；`train` 可选依赖为 PyTorch 2.14.1、psutil；原CPU稀疏核心保留，新增完整MPS前后向＋CPU主参数Adam的[有状态续训](../docs/MPS_TRAINING.md)，固定50步分段重算；不承诺实时性 |
 | CLI | `cnsbridge` → `cnsbridge.cli:main`；download、build-brain、inspect、calibrate、bench |
 | 测试与检查 | pytest，测试目录 `tests/`；Ruff 配置在 `pyproject.toml`，目标 Python 3.11，行长 130 |
 | 数据与持久化 | 本地连接组、NPZ、JSON、CSV 和视频；没有数据库服务 |

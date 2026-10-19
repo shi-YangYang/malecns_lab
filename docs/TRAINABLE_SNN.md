@@ -14,7 +14,7 @@ python3 -m venv .venv-train
 .venv-train/bin/python -m pytest tests/test_trainable_core.py -q
 ```
 
-`train` 固定 PyTorch 2.14.1；核心只允许 CPU float32/float64。具体安装版本和定向检查记录见 `specs/spec-008-trainable-snn/implementation-p0.md`。尚未验证 MPS 稀疏计算，没有设备回退逻辑。
+`train` 固定 PyTorch 2.14.1；下文原核心允许CPU float32/float64，P0记录见 `specs/spec-008-trainable-snn/implementation-p0.md`。另有独立MPS float32核心及[GPU续训入口](MPS_TRAINING.md)，已经从完整CPU状态实际接续两窗；GPU前后向配合CPU主参数Adam和固定50步分段重算。两条实现使用不同身份，MPS明确禁用CPU算子fallback，不保证CPU/GPU训练轨迹逐位一致。
 
 ```python
 import torch
