@@ -1,5 +1,13 @@
 # Task Handoff — spec-008-trainable-snn / Implementation
 
+## 当前任务：诊断饱和/大梯度并全GPU修复续训（2026-10-19）
+
+用户明确要求“先排查前进输出饱和、方向错误和梯度过大的原因，找到问题后修复，再继续训练；训练全部GPU”，并要求解释模型功能。已说明当前是标记目标跟随的监督模仿学习（像素→目标掩码→完整SNN→vx/vz/wz），非任意物体识别或已证明控制。见[Decision015](../decisions/015-diagnose-repair-and-all-gpu-training.md)、[修复Spec](../../specs/spec-008-trainable-snn/gpu-recovery.md)和[Plan](../../specs/spec-008-trainable-snn/gpu-recovery-plan.md)。A诊断Ready；B1独立[GPU基础模块](../../specs/spec-008-trainable-snn/gpu-residency-foundations.md)Ready；训练数学和C执行门槛待A实测后冻结。
+
+两份只读审计已全文处理：[原因](../../specs/spec-008-trainable-snn/saturation-cause-audit.md)、[GPU边界](../../specs/spec-008-trainable-snn/gpu-training-scope-audit.md)。115/160窗vx梯度精确零，43–60已在CPU出现；没有符号接反证据。动作MSE的tanh导数使饱和输出不能纠正，大DN尺度/Adam动量提供推入饱和的保存证据。theta约1e30在vx无梯度时仍出现，递归伴随放大待完整图配对定位。
+
+单一诊断实施者仅新增diagnostics并复用旧数值源；另一实施者仅新增GPU感觉与优化器，文件/接口独立。所有GPU检查与模型运行必须workspace_lock串行，旧42/G29/R13源保持。不得提前运行正式训练。独立软件验收后才运行完整图诊断，随后登记最小修复、独立验收、短窗恢复门槛及最多一轮续训。当前1GiB预留和Noria/Docker不动。既有未跟踪scipy-backward-boundary-audit.md保留，不提交。以下160窗记录是历史父证据。
+
 ## 当前任务：GPU剩余98窗完成并通过独立验收（2026-10-19）
 
 按[续训执行规格](../../specs/spec-008-trainable-snn/mps-epoch-completion.md)，同一r3已从62续至160：新增98窗，CPU继承60＋GPU累计100。25段（segments3–27）全部退出0、父`registered_mps_windows_verified`；调度session95614已收取exit0，没有活动训练进程或额外epoch。墙钟3046.550231秒，平均compute26.971301秒/窗。完整图、42绑定源、1GiB预留保持，Noria/Docker未操作；CPU/frozen/R未推进。执行报告已全文读取：[implementation-mps-finish98.md](../../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新的[独立实际验收PASS](../../specs/spec-008-trainable-snn/acceptance-mps-finish98-actual.md)只读复核新增98窗保存数组、25段×18数组恢复、两次场景重置、来源和最终封存链；没有重训或返工项。审查产物在 `data/mps_finish98_review_20261019`。
