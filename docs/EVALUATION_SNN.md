@@ -1,5 +1,7 @@
 # 完整连接组神经闭环评估
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 P3d 工具让神经输出改变模拟相机的位置与下一帧。它使用已登记的红色方形标记跟随环境，不能代表任意物体识别、真实飞行、避障或拓扑优势。正式协议见 [P3d](../specs/spec-008-trainable-snn/p3d-closed-loop-evaluation.md)。当前实现检查只使用明确的微型数值电路；完整图实际评估需满足下列准入。
 
 ## 前置
@@ -12,7 +14,7 @@ P3d 工具让神经输出改变模拟相机的位置与下一帧。它使用已�
 以下命令在项目根目录使用 `.venv-train`；路径为示例，须替换为确实完成训练的目录。
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn register \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.evaluate_snn register \
   --joint-run data/neural_training_joint_20261019_r1 \
   --frozen-run data/neural_training_frozen_20261019_r1 \
   --out data/neural_evaluation_r1
@@ -25,9 +27,9 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn registe
 首个条件和场景固定为 joint / val-triangle-forward，先运行一帧，再以第二次命令启动新进程恢复一帧：
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn run \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.evaluate_snn run \
   --suite data/neural_evaluation_r1 --condition joint --scene val-triangle-forward --frames 1
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn run \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.evaluate_snn run \
   --suite data/neural_evaluation_r1 --condition joint --scene val-triangle-forward --frames 1
 ```
 
@@ -38,7 +40,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn run \
 每个条件完成 val 的 forward、yaw、vertical、combined 四场景，再进入下一个条件。所有五个条件全部 val 终局后执行：
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.evaluate_snn summary \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.evaluate_snn summary \
   --suite data/neural_evaluation_r1
 ```
 

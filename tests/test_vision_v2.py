@@ -5,8 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from cnsbridge.senses import vision_v2
-from cnsbridge.senses.vision_v2 import CHANNELS, VisionV2Config, VisionV2Encoder
+from malecns_lab.senses import vision_v2
+from malecns_lab.senses.vision_v2 import CHANNELS, VisionV2Config, VisionV2Encoder
 
 
 def image(dx=0.0, dy=0.0, scale=1.0, width=96, height=72):

@@ -7,11 +7,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash, file_hashes
-from cnsbridge.learning.checkpoint import read_checkpoint, save_checkpoint
-from cnsbridge.learning import policy_checkpoint as checkpoint
-from cnsbridge.learning.neural_policy import NeuralPolicyConfig
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.metadata import canonical_hash, file_hashes
+from malecns_lab.learning.checkpoint import read_checkpoint, save_checkpoint
+from malecns_lab.learning import policy_checkpoint as checkpoint
+from malecns_lab.learning.neural_policy import NeuralPolicyConfig
+from malecns_lab.senses.target import TargetCamera
 from test_neural_policy import frame, policy
 
 

@@ -18,7 +18,7 @@ def test_lightweight_entry_and_complete_new_source_closure():
         "paths = {str(p.relative_to(b.ROOT)) for p in b.source_paths()}; "
         "assert {'examples/fullgraph_mps_benchmark.py', 'examples/mps_benchmark_worker.py', "
         "'examples/mps_benchmark_kernel.py', 'examples/mps_benchmark_memory.py', "
-        "'src/cnsbridge/brain/trainable.py', 'src/cnsbridge/learning/resource_guard.py'} <= paths"
+        "'src/malecns_lab/brain/trainable.py', 'src/malecns_lab/learning/resource_guard.py'} <= paths"
     )], cwd=ROOT, check=True)
     result = subprocess.run([sys.executable, str(ROOT / "examples/fullgraph_mps_benchmark.py"), "--help"],
                             capture_output=True, text=True, check=True)

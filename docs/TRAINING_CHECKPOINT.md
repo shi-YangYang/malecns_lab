@@ -1,5 +1,7 @@
 # 神经训练续跑存档
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 `learning.training_checkpoint` 保存一个已经完成更新的两帧 TBPTT 边界，包含全部模型参数、实际 Adam 状态、全部神经活动状态和下一帧游标。它为[有界连续训练 runner](TRAINING_RUNNER.md)提供存档能力；本页记录的 P3c1 验证没有新增完整图训练或学习收益结论。
 
 它与 [部署参数存档](POLICY_CHECKPOINT.md) 的用途分开。已有 P3b `adam_state.npz` 仅为单次 Adam 的证据，缺少隐藏状态、感觉相位和游标，不能直接作为续训档；部署参数档也会被续训读取入口拒绝。
@@ -7,8 +9,8 @@
 ## 固定 API
 
 ```python
-from cnsbridge.learning.training_optimizer import make_training_optimizer
-from cnsbridge.learning.training_checkpoint import (
+from malecns_lab.learning.training_optimizer import make_training_optimizer
+from malecns_lab.learning.training_checkpoint import (
     save_training_checkpoint,
     read_training_checkpoint,
     restore_training_checkpoint,

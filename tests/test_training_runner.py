@@ -13,16 +13,16 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash
-from cnsbridge.learning import training_checkpoint as checkpoint
-from cnsbridge.learning import training_contract as contract
-from cnsbridge.learning import training_evidence as evidence
-from cnsbridge.learning import train_snn
-from cnsbridge.learning.training_math import adam_moments, adam_parameters, clipping, compare_r2, moment_check
-from cnsbridge.learning.training_optimizer import make_training_optimizer
-from cnsbridge.learning.training_window import compute_window
-from cnsbridge.learning.training_worker import execute_windows
-from cnsbridge.learning.resource_guard import GIB, write_json
+from malecns_lab.brain.metadata import canonical_hash
+from malecns_lab.learning import training_checkpoint as checkpoint
+from malecns_lab.learning import training_contract as contract
+from malecns_lab.learning import training_evidence as evidence
+from malecns_lab.learning import train_snn
+from malecns_lab.learning.training_math import adam_moments, adam_parameters, clipping, compare_r2, moment_check
+from malecns_lab.learning.training_optimizer import make_training_optimizer
+from malecns_lab.learning.training_window import compute_window
+from malecns_lab.learning.training_worker import execute_windows
+from malecns_lab.learning.resource_guard import GIB, write_json
 from test_training_checkpoint import policy
 from test_neural_policy import frame, assert_same_state
 
@@ -264,7 +264,7 @@ def test_failed_segment_keeps_verified_prefix_and_ignores_unsealed_tail(sealed, 
     child, reg = train_snn.register_segment(fresh, run, empty, 2)
     real_save = checkpoint.save_training_checkpoint
     calls = []
-    import cnsbridge.learning.training_worker as worker
+    import malecns_lab.learning.training_worker as worker
     def interrupted(*args, **kwargs):
         calls.append(1)
         if len(calls) == 2:
@@ -313,7 +313,7 @@ def test_r2_first_window_mismatch_is_not_relaxed(tmp_path):
 
 
 def test_parent_import_and_cli_validation_are_torch_free():
-    script = "import sys; from cnsbridge.learning import train_snn; assert 'torch' not in sys.modules; assert 'cnsbridge.learning.training_checkpoint' not in sys.modules"
+    script = "import sys; from malecns_lab.learning import train_snn; assert 'torch' not in sys.modules; assert 'malecns_lab.learning.training_checkpoint' not in sys.modules"
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     for args in (["--run", "/does-not-exist", "--out", "/tmp/unwanted", "--windows", "1"],

@@ -9,7 +9,7 @@
 已有 `data/malecns_v2/full_reference.npz` 时直接使用。需要从已下载的完整官方发布重新构建时，必须指定新的输出目录：
 
 ```sh
-.venv/bin/python -m cnsbridge.brain.reference \
+.venv/bin/python -m malecns_lab.brain.reference \
   --data-dir data/malecns_v1 \
   --identity-dir data/audits/malecns_v2_identity \
   --out-dir data/malecns_v2_rebuild
@@ -22,7 +22,7 @@
 短探针包含 2 s 固定预热和 0.1 s 观察；重复两次可检查显式重置后的确定性：
 
 ```sh
-.venv/bin/python -m cnsbridge.diagnostics.replay_v2 \
+.venv/bin/python -m malecns_lab.diagnostics.replay_v2 \
   --stimulus static --repeat 2 --observation-seconds 0.1 \
   --run-seed 0 --budget-seconds 120 \
   --out data/diagnostics_v2/my_static_probe
@@ -31,7 +31,7 @@
 比较静态纹理、左/右/上/下平移、膨胀六种刺激：
 
 ```sh
-.venv/bin/python -m cnsbridge.diagnostics.replay_v2 \
+.venv/bin/python -m malecns_lab.diagnostics.replay_v2 \
   --stimulus all --observation-seconds 0.5 \
   --run-seed 0 --texture-seed 7 --budget-seconds 180 \
   --out data/diagnostics_v2/my_standard_stimuli
@@ -46,7 +46,7 @@
 已有项目地面采集目录包含 `session.json`、`video.avi`、`frames.csv` 时：
 
 ```sh
-.venv/bin/python -m cnsbridge.diagnostics.replay_v2 \
+.venv/bin/python -m malecns_lab.diagnostics.replay_v2 \
   --recording logs/my_recording \
   --family-id room_a_phone_sequence \
   --stimulus-kind object_motion \
@@ -59,7 +59,7 @@
 普通视频需要显式身份：
 
 ```sh
-.venv/bin/python -m cnsbridge.diagnostics.replay_v2 \
+.venv/bin/python -m malecns_lab.diagnostics.replay_v2 \
   --video /absolute/path/clip.avi \
   --scene-id room_a_scene_01 --session-id capture_01 \
   --family-id room_a_phone_sequence --stimulus-kind object_motion \
@@ -143,7 +143,7 @@ with np.load(run / "source_00_repeat_00_segment_000/rows.npz") as rows:
 对任意已有 V2 run 执行：
 
 ```sh
-.venv/bin/python -m cnsbridge.diagnostics.report_v2 \
+.venv/bin/python -m malecns_lab.diagnostics.report_v2 \
   data/diagnostics_v2/my_standard_stimuli \
   --out data/diagnostics_v2/my_standard_stimuli_report
 ```

@@ -5,7 +5,7 @@
 入口：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.train_v2 --help
+.venv/bin/python -m malecns_lab.learning.train_v2 --help
 ```
 
 先录制真实视频、登记素材族，完成 V2 重放，再按独立任务规则标动作。标签不参与脑重放，也不能从旧 RC、实测速度或神经输出自动生成。视觉特征在脑外计算；读出学习不代表全脑端到端训练。
@@ -81,11 +81,11 @@
 ## 3. 先校验，再训练
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.train_v2 \
+.venv/bin/python -m malecns_lab.learning.train_v2 \
   --protocol /absolute/path/protocol.json \
   --out logs/learning_v2_prepare --prepare-only
 
-.venv/bin/python -m cnsbridge.learning.train_v2 \
+.venv/bin/python -m malecns_lab.learning.train_v2 \
   --protocol /absolute/path/protocol.json \
   --out logs/learning_v2_fit
 ```

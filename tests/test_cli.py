@@ -1,6 +1,6 @@
 import pytest
 
-from cnsbridge.cli import build_parser, main
+from malecns_lab.cli import build_parser, main
 
 
 def test_cli_bench_uses_real_graph(capsys, malecns_path):
@@ -15,7 +15,7 @@ def test_cli_help_lists_offline_tools(capsys):
         main(["--help"])
     assert exc.value.code == 0
     output = capsys.readouterr().out
-    assert "cnsbridge" in output
+    assert "malecns_lab" in output
     assert "{download,build-brain,inspect,calibrate,bench}" in output
 
 

@@ -14,20 +14,20 @@ import pytest
 from scipy import sparse
 import torch
 
-from cnsbridge.brain.policy_groups import numerical_test_policy_map
-from cnsbridge.brain.tonic import LaminaTonicLIF
-from cnsbridge.brain.trainable import TrainableLIF
-from cnsbridge.brain.trainable_graph import numerical_test_graph
-from cnsbridge.senses.spatial_drive import build_spatial_input_map
-from cnsbridge.diagnostics import observability as cli
-from cnsbridge.diagnostics.observability_collect import collect_mode, selections, state_digest
-from cnsbridge.diagnostics.observability_evidence import (BINDINGS, SAMPLE_KEYS, STATE_KEYS, arrays,
+from malecns_lab.brain.policy_groups import numerical_test_policy_map
+from malecns_lab.brain.tonic import LaminaTonicLIF
+from malecns_lab.brain.trainable import TrainableLIF
+from malecns_lab.brain.trainable_graph import numerical_test_graph
+from malecns_lab.senses.spatial_drive import build_spatial_input_map
+from malecns_lab.diagnostics import observability as cli
+from malecns_lab.diagnostics.observability_collect import collect_mode, selections, state_digest
+from malecns_lab.diagnostics.observability_evidence import (BINDINGS, SAMPLE_KEYS, STATE_KEYS, arrays,
     validate_evidence, validate_mode_identity, validate_samples, validate_selections, validate_supervision)
-from cnsbridge.diagnostics.observability_evidence import validate_mode_artifacts, validate_summary_files
-from cnsbridge.diagnostics.observability_protocol import (CONDITIONS, LAMINA, MODES, GIB, canonical_hash,
+from malecns_lab.diagnostics.observability_evidence import validate_mode_artifacts, validate_summary_files
+from malecns_lab.diagnostics.observability_protocol import (CONDITIONS, LAMINA, MODES, GIB, canonical_hash,
     implementation_hashes, ledger, masks, read_json, template, validate_protocol, validate_registration)
-from cnsbridge.diagnostics.observability_summary import (PAIRS, report_text, summaries_from_files, summarize_arrays, write_summaries)
-from cnsbridge.learning.resource_guard import write_json
+from malecns_lab.diagnostics.observability_summary import (PAIRS, report_text, summaries_from_files, summarize_arrays, write_summaries)
+from malecns_lab.learning.resource_guard import write_json
 
 
 @pytest.fixture(scope="module")
@@ -171,8 +171,8 @@ def test_registration_rejects_source_changes(tmp_path, monkeypatch):
 
 
 def test_parent_and_validator_import_without_torch():
-    result = subprocess.run([sys.executable, "-c", "import sys; import cnsbridge.diagnostics.observability; "
-                             "assert 'torch' not in sys.modules; assert 'cnsbridge.brain.trainable_graph' not in sys.modules"],
+    result = subprocess.run([sys.executable, "-c", "import sys; import malecns_lab.diagnostics.observability; "
+                             "assert 'torch' not in sys.modules; assert 'malecns_lab.brain.trainable_graph' not in sys.modules"],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
@@ -313,8 +313,8 @@ def test_supervision_checks_original_samples_and_terminal_state(tmp_path):
 
 
 def test_completed_branch_hash_survives_later_interruption(numerical_records, tmp_path):
-    from cnsbridge.diagnostics.observability_protocol import file_hash
-    from cnsbridge.diagnostics.observability_evidence import _manifest, MODE_FILES
+    from malecns_lab.diagnostics.observability_protocol import file_hash
+    from malecns_lab.diagnostics.observability_evidence import _manifest, MODE_FILES
     f = numerical_records
     for mode in MODES:
         folder = f.directory / mode
@@ -355,7 +355,7 @@ def test_complete_numerical_artifact_contract_and_zero_summary(numerical_records
 
 @pytest.mark.parametrize("damage", ["missing_branch", "base_digest", "parameters", "identity"])
 def test_invalid_persisted_mode_cannot_validate(numerical_records, tmp_path, damage):
-    from cnsbridge.diagnostics.observability_protocol import file_hash
+    from malecns_lab.diagnostics.observability_protocol import file_hash
     f, mode = numerical_records, MODES[0]
     folder = tmp_path / mode
     shutil.copytree(f.directory / mode, folder)

@@ -18,7 +18,7 @@ python3 -m venv .venv-train
 
 ```python
 import torch
-from cnsbridge.brain.trainable import TrainableLIF
+from malecns_lab.brain.trainable import TrainableLIF
 
 # 必须事先明确感觉编码对应的原始 body ID；此处空集合仅演示零输入接口。
 model = TrainableLIF.from_reference(
@@ -110,7 +110,7 @@ integrated_v += (1-exp(-dt/tau_m)) * offset
 工具仅做数值可行性验证，不连接设备、不解释飞行动作。固定协议来自 [P1 子规格](../specs/spec-008-trainable-snn/p1-fullgraph-probe.md)：全部原始 `R1-R6` 每 67 步接受 68.75 mV 增量，dt=0.1 ms，共 200 步；固定 `L1` 最终膜电位对 -50 mV 求 MSE，Adam lr=0.01 仅更新一次内部类型 theta。没有可学习输入或动作读出。相同初态输入分别重放更新前、更新后、恢复零 theta 和重新加载 checkpoint；同时复核原始完整图整数计数摘要。
 
 ```sh
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.probe \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.probe \
   --graph data/malecns_v2/full_reference.npz \
   --out data/trainable_probe_NEW_RUN
 ```

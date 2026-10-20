@@ -8,11 +8,11 @@ from tempfile import TemporaryDirectory
 import numpy as np
 import pytest
 
-from cnsbridge.control.body import BodyVelocity
-from cnsbridge.drones.follow_env import FollowEnvironment, limit_follow_action
-from cnsbridge.drones.follow_scenes import FollowScene, scene_registry
-from cnsbridge.learning.follow_task import FollowPolicyInput, rollout, truth_teacher, visual_teacher, zero_policy
-from cnsbridge.senses.target import TargetCamera, detect_target, target_mask
+from malecns_lab.control.body import BodyVelocity
+from malecns_lab.drones.follow_env import FollowEnvironment, limit_follow_action
+from malecns_lab.drones.follow_scenes import FollowScene, scene_registry
+from malecns_lab.learning.follow_task import FollowPolicyInput, rollout, truth_teacher, visual_teacher, zero_policy
+from malecns_lab.senses.target import TargetCamera, detect_target, target_mask
 
 
 def static_scene(**kwargs):

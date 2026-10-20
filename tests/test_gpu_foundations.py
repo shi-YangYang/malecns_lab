@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 import torch
 
-from cnsbridge.brain.metadata import canonical_hash
-from cnsbridge.learning.gpu_optimizer import GPUAdam, NAMES
-from cnsbridge.learning.train_snn import workspace_lock
-from cnsbridge.senses.gpu_drive import GPUDrive
-from cnsbridge.senses.spatial_drive import MASK_SHAPE, SpatialDrive, SpatialDriveConfig, SpatialInputMap
-from cnsbridge.senses.target import TargetCamera, target_mask
+from malecns_lab.brain.metadata import canonical_hash
+from malecns_lab.learning.gpu_optimizer import GPUAdam, NAMES
+from malecns_lab.learning.train_snn import workspace_lock
+from malecns_lab.senses.gpu_drive import GPUDrive
+from malecns_lab.senses.spatial_drive import MASK_SHAPE, SpatialDrive, SpatialDriveConfig, SpatialInputMap
+from malecns_lab.senses.target import TargetCamera, target_mask
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def test_gpu_drive_pixels_state_replay_and_float64_difference(mps_lock):
     near["phase"].fill(np.float32(.985 - 1e-9))
     gpu_increment, _ = drive.step(torch.ones(MASK_SHAPE, device="mps"), drive.restore(near))
     old_state = old.reset()
-    from cnsbridge.senses.spatial_drive import SpatialDriveState
+    from malecns_lab.senses.spatial_drive import SpatialDriveState
     old.restore_state(SpatialDriveState(old.drive_id, old.mapping.map_id, old.config.dt_ms, 0,
                                        np.full(192, .985 - 1e-9), old_state.event_counts))
     cpu_increment = old.step(np.ones(MASK_SHAPE, np.float32)).to_dense()

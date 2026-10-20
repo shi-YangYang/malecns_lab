@@ -11,7 +11,7 @@
 生产 `Brain` 与默认完整图重放器拒绝 `research_control`。研究图必须提供独立母图，经专用加载器校验后进入离线运行器：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.research_replay_v2 \
+.venv/bin/python -m malecns_lab.learning.research_replay_v2 \
   --parent data/malecns_v2/full_reference.npz \
   --control data/malecns_v2/controls/W_seed201_toolcheck.npz \
   --out logs/v2-W-static-new-run \
@@ -40,7 +40,7 @@
 生成模板不会创建数据或填入假定的容差：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.experiment_v2 template \
+.venv/bin/python -m malecns_lab.learning.experiment_v2 template \
   --out logs/experiment-protocol.template.json
 ```
 
@@ -98,11 +98,11 @@
 登记与只读检查分开：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.experiment_v2 register \
+.venv/bin/python -m malecns_lab.learning.experiment_v2 register \
   --protocol logs/experiment-protocol.json \
   --out logs/experiment-registration.json
 
-.venv/bin/python -m cnsbridge.learning.experiment_v2 validate \
+.venv/bin/python -m malecns_lab.learning.experiment_v2 validate \
   --registration logs/experiment-registration.json
 ```
 
@@ -113,7 +113,7 @@
 有真实数据并完成登记后运行：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.experiment_v2 execute \
+.venv/bin/python -m malecns_lab.learning.experiment_v2 execute \
   --registration logs/experiment-registration.json \
   --out logs/experiment-run-new
 ```

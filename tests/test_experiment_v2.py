@@ -8,12 +8,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from cnsbridge.learning import experiment_protocol_v2 as registry
-from cnsbridge.learning import experiment_v2 as experiment
-from cnsbridge.learning import research_replay_v2 as replay
-from cnsbridge.learning.contracts_v2 import OUTPUT_SPEC, FeatureSchemaV2, RIDGE_CANDIDATES, digest, file_digest
-from cnsbridge.learning.dataset_v2 import DatasetV2, load_dataset
-from cnsbridge.learning.train_v2 import fit_readouts
+from malecns_lab.learning import experiment_protocol_v2 as registry
+from malecns_lab.learning import experiment_v2 as experiment
+from malecns_lab.learning import research_replay_v2 as replay
+from malecns_lab.learning.contracts_v2 import OUTPUT_SPEC, FeatureSchemaV2, RIDGE_CANDIDATES, digest, file_digest
+from malecns_lab.learning.dataset_v2 import DatasetV2, load_dataset
+from malecns_lab.learning.train_v2 import fit_readouts
 from test_learning_v2 import contract_fixture
 from test_replay_v2 import contract_engine
 

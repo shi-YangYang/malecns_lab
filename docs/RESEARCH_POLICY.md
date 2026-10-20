@@ -1,5 +1,7 @@
 # 正式 R 研究策略工厂
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 `learning.research_policy.from_terminal_research_run` 只用于离线拓扑对照。它构造精确现有 `NeuralPolicy` / `LaminaTonicLIF`，以真正的 R 整数图构建正向 CSR、全细胞伴随 CSR 和共享正向存储的 SciPy 缓存。它不训练、不生成参数档、不执行神经前向，也没有设备入口。
 
 本批只有软件夹具证据；正式 R 仍须达到已登记终局。完整图的构造内存、前向及学习效果尚未实测，不得根据软件测试直接运行正式 R。实际构造须先完成新的受监督协议和 G/R 比较登记，参见 [P3e2](../specs/spec-008-trainable-snn/p3e2-research-factory.md)。
@@ -7,7 +9,7 @@
 ## 轻量父进程
 
 ```python
-from cnsbridge.learning.research_admission import admit_research_graph
+from malecns_lab.learning.research_admission import admit_research_graph
 
 snapshot = admit_research_graph("data/<正式R生成run>")
 ```
@@ -21,11 +23,11 @@ snapshot = admit_research_graph("data/<正式R生成run>")
 以下说明接口，不是已批准的完整图运行命令。只能在另行登记的串行资源监督 worker 中使用：
 
 ```python
-from cnsbridge.brain.trainable import TrainableLIFConfig
-from cnsbridge.learning.neural_policy import NeuralPolicyConfig
-from cnsbridge.learning.research_policy import from_terminal_research_run
-from cnsbridge.senses.spatial_drive import SpatialDriveConfig
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.trainable import TrainableLIFConfig
+from malecns_lab.learning.neural_policy import NeuralPolicyConfig
+from malecns_lab.learning.research_policy import from_terminal_research_run
+from malecns_lab.senses.spatial_drive import SpatialDriveConfig
+from malecns_lab.senses.target import TargetCamera
 
 policy = from_terminal_research_run(
     generation_directory,

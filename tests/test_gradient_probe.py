@@ -9,13 +9,13 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-from cnsbridge.learning.gradient_probe_math import compute_branch, stable_metrics, logit_loss_check
-from cnsbridge.learning.gradient_probe_evidence import compare_arrays, PROTOCOL, source_hashes
-from cnsbridge.learning.mps_state import restore, state_digest
-from cnsbridge.learning.mps_window import compute_window
-from cnsbridge.learning.neural_policy import NeuralPolicy
-from cnsbridge.learning.train_snn import workspace_lock
-from cnsbridge.learning.training_contract import PARAMETERS
+from malecns_lab.learning.gradient_probe_math import compute_branch, stable_metrics, logit_loss_check
+from malecns_lab.learning.gradient_probe_evidence import compare_arrays, PROTOCOL, source_hashes
+from malecns_lab.learning.mps_state import restore, state_digest
+from malecns_lab.learning.mps_window import compute_window
+from malecns_lab.learning.neural_policy import NeuralPolicy
+from malecns_lab.learning.train_snn import workspace_lock
+from malecns_lab.learning.training_contract import PARAMETERS
 from test_training_checkpoint import policy
 from test_mps_continuation import _migrated, selection
 
@@ -32,10 +32,10 @@ def numerical_slot():
 
 
 def test_parent_imports_lightweight_and_direct_worker_rejected(tmp_path):
-    subprocess.run([sys.executable, "-c", "import sys; import cnsbridge.learning.gradient_probe; "
-                    "import cnsbridge.learning.gradient_probe_worker; assert 'torch' not in sys.modules"], check=True)
+    subprocess.run([sys.executable, "-c", "import sys; import malecns_lab.learning.gradient_probe; "
+                    "import malecns_lab.learning.gradient_probe_worker; assert 'torch' not in sys.modules"], check=True)
     (tmp_path / "registration.json").write_text(json.dumps({"parent_pid": -1}))
-    script = ("import sys; from pathlib import Path; from cnsbridge.learning.gradient_probe_worker import claim_parent; "
+    script = ("import sys; from pathlib import Path; from malecns_lab.learning.gradient_probe_worker import claim_parent; "
               "\ntry: claim_parent(Path(sys.argv[1]))\nexcept ValueError as e: "
               "assert 'supervising parent' in str(e); assert 'torch' not in sys.modules\nelse: raise AssertionError('accepted')")
     subprocess.run([sys.executable, "-c", script, str(tmp_path)], check=True)

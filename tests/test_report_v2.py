@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from cnsbridge.diagnostics.report_v2 import summarize_run
+from malecns_lab.diagnostics.report_v2 import summarize_run
 
 
 def test_single_recording_with_zero_eligible_windows_preserves_coverage(tmp_path):

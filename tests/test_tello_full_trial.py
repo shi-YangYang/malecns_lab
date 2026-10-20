@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 from test_tello_cruise_trial import CruiseWorker
 from test_tello_yaw_trial import FakeClock, FakeTello, trial
 
-from cnsbridge.experiments.tello import policy
+from malecns_lab.experiments.tello import policy
 
 
 class FullWorker(CruiseWorker):
@@ -103,11 +103,11 @@ class FullTrialTests(unittest.TestCase):
                 readout.write_text(readout_text, encoding="utf-8")
                 missing.unlink()
                 with (patch.object(trial, "PROJECT", project),
-                      patch("cnsbridge.paths.source_project_root", return_value=project),
+                      patch("malecns_lab.paths.source_project_root", return_value=project),
                       self.assertRaises((FileNotFoundError, ValueError))):
                     trial.trial_config("full")
                 with (patch.object(trial, "PROJECT", project),
-                      patch("cnsbridge.paths.source_project_root", return_value=project),
+                      patch("malecns_lab.paths.source_project_root", return_value=project),
                       patch.dict(sys.modules, {"djitellopy": None}),
                       patch.object(trial, "BrainProcess", side_effect=AssertionError("Must not start")),
                       self.assertRaises(SystemExit) as raised):

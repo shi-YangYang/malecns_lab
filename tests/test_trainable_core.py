@@ -11,13 +11,13 @@ from scipy.linalg import expm
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.trainable import (  # noqa: E402
+from malecns_lab.brain.trainable import (  # noqa: E402
     TrainableLIF,
     TrainableLIFConfig,
     fixed_sparse_matvec,
     surrogate_spike,
 )
-from cnsbridge.brain.trainable_graph import group_by_type  # noqa: E402
+from malecns_lab.brain.trainable_graph import group_by_type  # noqa: E402
 
 
 def circuit(counts, inputs=(), **kwargs):
@@ -282,7 +282,7 @@ def test_invalid_input_state_and_parameter_values_fail_explicitly():
 
 
 def test_production_entry_rejects_filtered_or_research_asset_without_fallback(tmp_path):
-    from cnsbridge.brain.connectome import Connectome
+    from malecns_lab.brain.connectome import Connectome
     for role in ("filtered", "research_control"):
         graph = Connectome("not-full", sparse.csc_matrix(np.array([[1]], dtype=np.int64)),
                             np.array(["type"]), np.array(["L"]), body_ids=np.array([1]),

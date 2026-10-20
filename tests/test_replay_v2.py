@@ -7,15 +7,15 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from cnsbridge.brain.connectome import Connectome
-from cnsbridge.brain.input_events import bernoulli_events
-from cnsbridge.brain.lif import LIFNetwork, LIFParams
-from cnsbridge.diagnostics.history_v2 import CausalHistoryV2
-from cnsbridge.diagnostics.replay_storage_v2 import run_segment, source_coverage
-from cnsbridge.diagnostics.runtime_v2 import NeuralReplayV2
-from cnsbridge.diagnostics.sources_v2 import GeneratedSourceV2, segment_ranges
-from cnsbridge.senses.encoding_v2 import INPUT_GROUPS, MAX_RATES, GroupInputV2
-from cnsbridge.senses.vision_v2 import VisionV2Encoder
+from malecns_lab.brain.connectome import Connectome
+from malecns_lab.brain.input_events import bernoulli_events
+from malecns_lab.brain.lif import LIFNetwork, LIFParams
+from malecns_lab.diagnostics.history_v2 import CausalHistoryV2
+from malecns_lab.diagnostics.replay_storage_v2 import run_segment, source_coverage
+from malecns_lab.diagnostics.runtime_v2 import NeuralReplayV2
+from malecns_lab.diagnostics.sources_v2 import GeneratedSourceV2, segment_ranges
+from malecns_lab.senses.encoding_v2 import INPUT_GROUPS, MAX_RATES, GroupInputV2
+from malecns_lab.senses.vision_v2 import VisionV2Encoder
 
 
 def contract_engine(seed=11):

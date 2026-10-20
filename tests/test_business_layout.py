@@ -11,15 +11,22 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY_MODULES = (
-    "cnsbridge.experiments.tello.check",
-    "cnsbridge.experiments.tello.hover",
-    "cnsbridge.experiments.tello.shadow",
-    "cnsbridge.experiments.tello.trial",
-    "cnsbridge.experiments.tello.record",
-    "cnsbridge.diagnostics.replay_v2",
-    "cnsbridge.diagnostics.report_v2",
-    "cnsbridge.learning.train_v2",
-    "cnsbridge.learning.experiment_v2",
+    "malecns_lab.experiments.tello.check",
+    "malecns_lab.experiments.tello.hover",
+    "malecns_lab.experiments.tello.shadow",
+    "malecns_lab.experiments.tello.trial",
+    "malecns_lab.experiments.tello.record",
+    "malecns_lab.diagnostics.replay_v2",
+    "malecns_lab.diagnostics.report_v2",
+    "malecns_lab.learning.train_v2",
+    "malecns_lab.learning.experiment_v2",
+    "malecns_lab.learning.train_snn",
+    "malecns_lab.learning.train_mps",
+    "malecns_lab.learning.train_gpu",
+    "malecns_lab.learning.evaluate_snn",
+    "malecns_lab.learning.gradient_probe",
+    "malecns_lab.learning.generate_rewiring",
+    "malecns_lab.diagnostics.observability",
 )
 
 
@@ -31,7 +38,7 @@ def offline_environment(tmp_path):
         "import sys\n"
         "class RejectHardwareImports:\n"
         "    def find_spec(self, fullname, path=None, target=None):\n"
-        "        if fullname.split('.')[0] in ('djitellopy', 'cv2'):\n"
+        "        if fullname.split('.')[0] in ('djitellopy', 'cv2', 'torch'):\n"
         "            raise AssertionError('Unexpected optional dependency: ' + fullname)\n"
         "sys.meta_path.insert(0, RejectHardwareImports())\n",
         encoding="utf-8",
@@ -57,7 +64,7 @@ def test_module_help_from_another_cwd(module, offline_environment):
 
 
 @pytest.mark.parametrize("module", (
-    "cnsbridge.experiments.tello.hover", "cnsbridge.experiments.tello.trial",
+    "malecns_lab.experiments.tello.hover", "malecns_lab.experiments.tello.trial",
 ))
 def test_flight_entry_requires_takeoff_before_sdk_import(module, offline_environment):
     output = run_offline(["-m", module], offline_environment)
@@ -65,10 +72,10 @@ def test_flight_entry_requires_takeoff_before_sdk_import(module, offline_environ
 
 
 def test_cli_and_low_level_imports_stay_offline(offline_environment):
-    assert "build-brain" in run_offline(["-m", "cnsbridge", "--help"], offline_environment)
+    assert "build-brain" in run_offline(["-m", "malecns_lab", "--help"], offline_environment)
     run_offline(["-c", (
-        "import cnsbridge.control, cnsbridge.learning; "
-        "import cnsbridge.control.safety, cnsbridge.control.calibration"
+        "import malecns_lab.control, malecns_lab.learning; "
+        "import malecns_lab.control.safety, malecns_lab.control.calibration"
     )], offline_environment)
 
 
@@ -76,8 +83,8 @@ def test_source_assets_use_real_workspace_from_another_cwd(offline_environment):
     output = run_offline(["-c", """
 import json
 from unittest.mock import patch
-from cnsbridge.experiments.tello import record, shadow, trial
-from cnsbridge.paths import source_project_root
+from malecns_lab.experiments.tello import record, shadow, trial
+from malecns_lab.paths import source_project_root
 with patch.object(trial.Path, 'is_file', return_value=True):
     cfg = trial.trial_config('full')
     cruise_cfg = trial.trial_config('cruise')

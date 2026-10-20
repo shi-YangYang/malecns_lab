@@ -6,18 +6,18 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from cnsbridge.brain.brain import load_connectome
-from cnsbridge.brain.connectome import Connectome
-from cnsbridge.brain.metadata import annotation_hash, canonical_hash, resolve_reference_groups
-from cnsbridge.brain.reference import graph_hash, load_reference
-from cnsbridge.learning.graph_controls import (
+from malecns_lab.brain.brain import load_connectome
+from malecns_lab.brain.connectome import Connectome
+from malecns_lab.brain.metadata import annotation_hash, canonical_hash, resolve_reference_groups
+from malecns_lab.brain.reference import graph_hash, load_reference
+from malecns_lab.learning.graph_controls import (
     _rewire,
     _shuffle,
     create_intervention_pair,
     create_research_control,
     load_research_control,
 )
-from cnsbridge.learning.graph_diagnostics import edge_overlap, input_output_paths, validate_rw
+from malecns_lab.learning.graph_diagnostics import edge_overlap, input_output_paths, validate_rw
 
 
 def _fixture_graph(offset=0):

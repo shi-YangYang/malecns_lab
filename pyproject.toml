@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cnsbridge"
+name = "malecns_lab"
 version = "0.1.0"
 description = "Trainable neural motion decoding from connectome models to device-independent control targets."
 readme = "README.md"
@@ -32,13 +32,13 @@ train = ["torch==2.14.1", "psutil>=5.9"]
 all = ["opencv-python>=4.8", "matplotlib>=3.7", "pyarrow>=14", "pandas>=2.0", "djitellopy>=2.5"]
 
 [project.scripts]
-cnsbridge = "cnsbridge.cli:main"
+malecns_lab = "malecns_lab.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-cnsbridge = ["defaults.yaml"]
+malecns_lab = ["defaults.yaml"]
 
 [tool.ruff]
 line-length = 130

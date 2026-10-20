@@ -6,11 +6,11 @@ import json
 import numpy as np
 import pytest
 
-from cnsbridge.learning.contracts_v2 import OUTPUT_SPEC, FeatureSchemaV2, digest
-from cnsbridge.learning.dataset_v2 import assert_paired_rows, load_dataset
-from cnsbridge.learning.decoder_v2 import MaskedRidgeV2
-from cnsbridge.learning.evaluation_v2 import paired_scene_comparison, score_predictions
-from cnsbridge.learning.train_v2 import fit_readouts, main
+from malecns_lab.learning.contracts_v2 import OUTPUT_SPEC, FeatureSchemaV2, digest
+from malecns_lab.learning.dataset_v2 import assert_paired_rows, load_dataset
+from malecns_lab.learning.decoder_v2 import MaskedRidgeV2
+from malecns_lab.learning.evaluation_v2 import paired_scene_comparison, score_predictions
+from malecns_lab.learning.train_v2 import fit_readouts, main
 
 
 def write(path, data):

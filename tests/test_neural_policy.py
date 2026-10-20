@@ -10,16 +10,16 @@ from scipy import sparse
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash  # noqa: E402
-from cnsbridge.brain.policy_groups import numerical_test_policy_map  # noqa: E402
-from cnsbridge.brain.tonic import LaminaTonicLIF  # noqa: E402
-from cnsbridge.brain.trainable import TrainableLIF, TrainableLIFConfig  # noqa: E402
-from cnsbridge.learning.follow_task import FollowPolicyInput  # noqa: E402
-from cnsbridge.learning.neural_policy import (  # noqa: E402
+from malecns_lab.brain.metadata import canonical_hash  # noqa: E402
+from malecns_lab.brain.policy_groups import numerical_test_policy_map  # noqa: E402
+from malecns_lab.brain.tonic import LaminaTonicLIF  # noqa: E402
+from malecns_lab.brain.trainable import TrainableLIF, TrainableLIFConfig  # noqa: E402
+from malecns_lab.learning.follow_task import FollowPolicyInput  # noqa: E402
+from malecns_lab.learning.neural_policy import (  # noqa: E402
     ACTION_SCALES, NeuralController, NeuralPolicy, NeuralPolicyConfig,
 )
-from cnsbridge.senses.spatial_drive import SpatialDrive, SpatialDriveConfig  # noqa: E402
-from cnsbridge.senses.target import TargetCamera, TargetObservation, target_mask  # noqa: E402
+from malecns_lab.senses.spatial_drive import SpatialDrive, SpatialDriveConfig  # noqa: E402
+from malecns_lab.senses.target import TargetCamera, TargetObservation, target_mask  # noqa: E402
 
 
 def circuit(*, dtype=torch.float64, tonic_mode=None):
@@ -228,7 +228,7 @@ def test_invalid_frame_rejected_without_advancing_state(invalid):
 
 
 def test_role_mapping_background_and_dtype_boundaries_are_strict(monkeypatch, tmp_path):
-    import cnsbridge.learning.neural_policy as module
+    import malecns_lab.learning.neural_policy as module
 
     brain, mapping = circuit()
     kwargs = dict(background="zero_background", config=NeuralPolicyConfig(8, 2, 0.1, 123),

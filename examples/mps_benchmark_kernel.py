@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from adjoint_benchmark_kernel import array_sha256
-from cnsbridge.learning.resource_guard import write_json
+from malecns_lab.learning.resource_guard import write_json
 
 
 def verify_cache(cpu_coo, gpu_coo, chunk):

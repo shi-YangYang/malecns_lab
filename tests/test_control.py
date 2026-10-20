@@ -1,8 +1,8 @@
 import json
 
-from cnsbridge.config import load_config
-from cnsbridge.control import FlightCommand, MotorDecoder
-from cnsbridge.control.safety import SafetyGovernor, Telemetry
+from malecns_lab.config import load_config
+from malecns_lab.control import FlightCommand, MotorDecoder
+from malecns_lab.control.safety import SafetyGovernor, Telemetry
 
 
 def test_decoder_settles_then_decodes():

@@ -11,11 +11,11 @@ from scipy import sparse
 pa = pytest.importorskip("pyarrow")
 import pyarrow.feather as feather  # noqa: E402
 
-from cnsbridge.brain.brain import Brain, load_connectome  # noqa: E402
-from cnsbridge.brain.connectome import MALECNS_BASE, MALECNS_FILES, Connectome  # noqa: E402
-from cnsbridge.brain.metadata import ANNOTATION_FIELDS, SOURCE_USES, file_hashes  # noqa: E402
-from cnsbridge.brain.reference import build_reference, load_reference, validate_reference  # noqa: E402
-from cnsbridge.config import load_config  # noqa: E402
+from malecns_lab.brain.brain import Brain, load_connectome  # noqa: E402
+from malecns_lab.brain.connectome import MALECNS_BASE, MALECNS_FILES, Connectome  # noqa: E402
+from malecns_lab.brain.metadata import ANNOTATION_FIELDS, SOURCE_USES, file_hashes  # noqa: E402
+from malecns_lab.brain.reference import build_reference, load_reference, validate_reference  # noqa: E402
+from malecns_lab.config import load_config  # noqa: E402
 
 
 def source_fixture(tmp_path):

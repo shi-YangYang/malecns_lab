@@ -8,14 +8,14 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from cnsbridge.brain.metadata import annotation_hash, canonical_hash
-from cnsbridge.brain.policy_groups import (
+from malecns_lab.brain.metadata import annotation_hash, canonical_hash
+from malecns_lab.brain.policy_groups import (
     _read_bound_metadata,
     load_policy_neuron_map,
     numerical_test_policy_map,
 )
-from cnsbridge.brain.trainable_graph import numerical_test_graph
-from cnsbridge.senses.spatial_drive import (
+from malecns_lab.brain.trainable_graph import numerical_test_graph
+from malecns_lab.senses.spatial_drive import (
     SpatialDrive,
     SpatialDriveConfig,
     build_spatial_input_map,

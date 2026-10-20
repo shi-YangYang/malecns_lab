@@ -12,22 +12,22 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from test_neural_policy import policy as circuit_policy, frame  # noqa: E402
-from cnsbridge.brain.metadata import canonical_hash  # noqa: E402
-from cnsbridge.learning.joint_probe import finalize_run, run_registered  # noqa: E402
-from cnsbridge.learning.joint_probe_contract import (  # noqa: E402
+from malecns_lab.brain.metadata import canonical_hash  # noqa: E402
+from malecns_lab.learning.joint_probe import finalize_run, run_registered  # noqa: E402
+from malecns_lab.learning.joint_probe_contract import (  # noqa: E402
     ADAM_FIELDS, BRANCHES, CLIP_GROUPS, FINAL_SCHEMA, PARAMETERS, PROTOCOL, RESULT_SCHEMA, SCHEMA,
     array_digest, select_data, sha256, sources, validate_registration,
 )
-from cnsbridge.learning.joint_probe_evidence import (  # noqa: E402
+from malecns_lab.learning.joint_probe_evidence import (  # noqa: E402
     arrays, validate_joint_evidence, validate_numeric_evidence, validate_resources,
 )
-from cnsbridge.learning.joint_probe_identity import validate_policy_identity  # noqa: E402
-from cnsbridge.learning.joint_probe_worker import (  # noqa: E402
+from malecns_lab.learning.joint_probe_identity import validate_policy_identity  # noqa: E402
+from malecns_lab.learning.joint_probe_worker import (  # noqa: E402
     clip_gradients, optimizer_for, response, snapshot, state_digest, update_and_intervene,
 )
-from cnsbridge.learning.joint_probe_optimizer import adam_first_step, validate_optimizer_update  # noqa: E402
-from cnsbridge.learning.policy_checkpoint import restore_policy_checkpoint  # noqa: E402
-from cnsbridge.learning.resource_guard import GIB, resource_budget, write_json  # noqa: E402
+from malecns_lab.learning.joint_probe_optimizer import adam_first_step, validate_optimizer_update  # noqa: E402
+from malecns_lab.learning.policy_checkpoint import restore_policy_checkpoint  # noqa: E402
+from malecns_lab.learning.resource_guard import GIB, resource_budget, write_json  # noqa: E402
 
 
 def make_policy():
@@ -284,9 +284,9 @@ def test_production_identity_rejects_numerical_fixture(evidence):
 def test_parent_import_and_help_never_import_torch_or_worker():
     code = """
 import sys
-import cnsbridge.learning.joint_probe as module
+import malecns_lab.learning.joint_probe as module
 assert 'torch' not in sys.modules
-assert 'cnsbridge.learning.joint_probe_worker' not in sys.modules
+assert 'malecns_lab.learning.joint_probe_worker' not in sys.modules
 sys.argv = ['joint_probe', '--help']
 try: module.main()
 except SystemExit as exc: assert exc.code == 0
@@ -308,7 +308,7 @@ def registration_fixture():
 
 def history_fixture(evidence, tmp_path, monkeypatch):
     """Explicit fake history anchors for tests, never a production r1 fallback."""
-    from cnsbridge.learning import joint_probe_history as history
+    from malecns_lab.learning import joint_probe_history as history
     source, policy, _shapes, identity, _worker = evidence
     current, previous = tmp_path / "current", tmp_path / "previous"
     shutil.copytree(source, current)
@@ -348,7 +348,7 @@ def history_fixture(evidence, tmp_path, monkeypatch):
 
 
 def test_r2_registration_binds_old_version_without_requiring_old_optimization_sources(evidence, tmp_path, monkeypatch):
-    from cnsbridge.learning import joint_probe_history as history
+    from malecns_lab.learning import joint_probe_history as history
     current, previous, identity, registration = history_fixture(evidence, tmp_path, monkeypatch)
     assert validate_registration(registration)["protocol_id"] == canonical_hash(PROTOCOL)
     assert history.compare_r1(current, registration["prior_run"], identity)["passed"]
@@ -362,7 +362,7 @@ def test_r2_registration_binds_old_version_without_requiring_old_optimization_so
 
 @pytest.mark.parametrize("mutation", ["frozen_npz", "old_registration", "old_terminal", "terminal_file", "id", "graph"])
 def test_r1_frozen_anchors_and_terminal_sources_cannot_be_rebound(evidence, tmp_path, monkeypatch, mutation):
-    from cnsbridge.learning import joint_probe_history as history
+    from malecns_lab.learning import joint_probe_history as history
     _current, previous, _identity, registration = history_fixture(evidence, tmp_path, monkeypatch)
     if mutation in ("frozen_npz", "old_registration", "old_terminal", "terminal_file"):
         filename = {"frozen_npz": "baseline.npz", "old_registration": "registration.json", "old_terminal": "result.json",
@@ -379,7 +379,7 @@ def test_r1_frozen_anchors_and_terminal_sources_cannot_be_rebound(evidence, tmp_
 
 @pytest.mark.parametrize("mutation", ["initial", "gradient", "features", "actions", "selection", "policy"])
 def test_r1_baseline_mismatch_is_saved_and_invalidates_protocol(evidence, tmp_path, monkeypatch, mutation):
-    from cnsbridge.learning import joint_probe_history as history
+    from malecns_lab.learning import joint_probe_history as history
     current, _previous, identity, registration = history_fixture(evidence, tmp_path, monkeypatch)
     if mutation == "policy":
         value = json.loads((current / "policy_identity.json").read_text())
@@ -404,7 +404,7 @@ def test_r1_baseline_mismatch_is_saved_and_invalidates_protocol(evidence, tmp_pa
 
 
 def test_r2_versions_and_negative_classification_are_explicit(evidence, tmp_path, monkeypatch):
-    import cnsbridge.learning.joint_probe as module
+    import malecns_lab.learning.joint_probe as module
     assert SCHEMA.endswith(".v2") and RESULT_SCHEMA.endswith(".v2") and PROTOCOL["schema"].endswith(".v2")
     monkeypatch.setattr(module, "validate_joint_evidence", lambda *_: {
         "protocol_complete": True, "joint_numeric_update": False, "internal_action_effect": False})
@@ -433,7 +433,7 @@ def test_registration_rejects_rehashed_changes(mutation):
 
 
 def test_invalid_dataset_never_launches_worker_and_retains_failure(tmp_path, monkeypatch):
-    import cnsbridge.learning.joint_probe as module
+    import malecns_lab.learning.joint_probe as module
     def forbidden(*_a, **_k):
         raise AssertionError("worker launched")
     monkeypatch.setattr(module, "supervise", forbidden)
@@ -445,8 +445,8 @@ def test_invalid_dataset_never_launches_worker_and_retains_failure(tmp_path, mon
 
 
 def test_exact_teacher_selection_does_not_take_executed_or_next_frame(monkeypatch, tmp_path):
-    from cnsbridge.learning import joint_probe_contract as contract
-    from cnsbridge.learning import neural_data
+    from malecns_lab.learning import joint_probe_contract as contract
+    from malecns_lab.learning import neural_data
     from types import SimpleNamespace
     manifest = tmp_path / "manifest.json"
     manifest.write_text("fixture")
@@ -476,7 +476,7 @@ def test_supervision_failure_and_invalid_worker_artifacts_are_never_promoted(tmp
 
 
 def test_parent_launch_binds_exact_guarded_worker_arguments(tmp_path, monkeypatch):
-    import cnsbridge.learning.joint_probe as module
+    import malecns_lab.learning.joint_probe as module
     registration = registration_fixture()
     calls = []
     def register(_g, _d, directory):
@@ -491,7 +491,7 @@ def test_parent_launch_binds_exact_guarded_worker_arguments(tmp_path, monkeypatc
     result = run_registered(tmp_path / "graph", tmp_path / "data", tmp_path / "run")
     assert result["reason"] == "wall_limit"
     command, kwargs = calls[0]
-    assert command == [sys.executable, "-m", "cnsbridge.learning.joint_probe", "--worker", str(tmp_path / "run")]
+    assert command == [sys.executable, "-m", "malecns_lab.learning.joint_probe", "--worker", str(tmp_path / "run")]
     assert kwargs == {"rss_limit_bytes": 4 * GIB, "wall_seconds": 600, "reserve_bytes": GIB, "poll_seconds": 0.1}
 
 

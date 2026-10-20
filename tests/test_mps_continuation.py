@@ -10,23 +10,23 @@ import pytest
 from scipy import sparse
 
 torch = pytest.importorskip("torch")
-from cnsbridge.brain.metadata import canonical_hash
-from cnsbridge.brain.mps_trainable import MPSLIF, fixed_mps_matvec, checked_coo
-from cnsbridge.brain.trainable import TrainableLIFConfig
-from cnsbridge.learning.mps_policy import MPSPolicy
-from cnsbridge.learning.mps_optimizer import snapshot
-from cnsbridge.learning.mps_state import restore, boundary_arrays, state_arrays, state_digest
-from cnsbridge.learning.mps_archive import write_checkpoint, inspect_checkpoint, verify_resume
-from cnsbridge.learning.mps_contract import source_hashes, runtime, validate_run, initial_prefix
-from cnsbridge.learning.mps_evidence import scan_run
-from cnsbridge.learning.mps_window import compute_window as mps_window
-from cnsbridge.learning.training_checkpoint import _state_metadata
-from cnsbridge.learning.training_contract import PARAMETERS, IDENTITIES, cursor, bytes_sha
-from cnsbridge.learning.training_optimizer import make_training_optimizer
-from cnsbridge.learning.training_window import compute_window, optimizer_snapshot
-from cnsbridge.learning.resource_guard import GIB, resource_budget, write_json
-from cnsbridge.learning.train_snn import workspace_lock
-from cnsbridge.learning.train_mps import run_segment
+from malecns_lab.brain.metadata import canonical_hash
+from malecns_lab.brain.mps_trainable import MPSLIF, fixed_mps_matvec, checked_coo
+from malecns_lab.brain.trainable import TrainableLIFConfig
+from malecns_lab.learning.mps_policy import MPSPolicy
+from malecns_lab.learning.mps_optimizer import snapshot
+from malecns_lab.learning.mps_state import restore, boundary_arrays, state_arrays, state_digest
+from malecns_lab.learning.mps_archive import write_checkpoint, inspect_checkpoint, verify_resume
+from malecns_lab.learning.mps_contract import source_hashes, runtime, validate_run, initial_prefix
+from malecns_lab.learning.mps_evidence import scan_run
+from malecns_lab.learning.mps_window import compute_window as mps_window
+from malecns_lab.learning.training_checkpoint import _state_metadata
+from malecns_lab.learning.training_contract import PARAMETERS, IDENTITIES, cursor, bytes_sha
+from malecns_lab.learning.training_optimizer import make_training_optimizer
+from malecns_lab.learning.training_window import compute_window, optimizer_snapshot
+from malecns_lab.learning.resource_guard import GIB, resource_budget, write_json
+from malecns_lab.learning.train_snn import workspace_lock
+from malecns_lab.learning.train_mps import run_segment
 from test_training_checkpoint import policy
 from test_neural_policy import frame
 
@@ -71,9 +71,9 @@ def _migrated(cpu):
 
 
 def test_checkpoint_matches_direct_multiple_blocks_two_frames_and_raw_gradients():
-    from cnsbridge.brain.mps_identity import ACTIVATION_CHECKPOINT
-    from cnsbridge.learning.neural_policy import NeuralPolicy
-    from cnsbridge.learning.mps_contract import PROTOCOL_MPS
+    from malecns_lab.brain.mps_identity import ACTIVATION_CHECKPOINT
+    from malecns_lab.learning.neural_policy import NeuralPolicy
+    from malecns_lab.learning.mps_contract import PROTOCOL_MPS
     source = policy()
     cpu = NeuralPolicy.for_numerical_test(
         source.brain, source.mapping, background=source.background, camera=source.camera,
@@ -138,8 +138,8 @@ def numeric_run(gpu):
 
 
 def test_parent_is_lightweight_and_source_mode_guards():
-    subprocess.run([sys.executable, "-c", "import sys; import cnsbridge.learning.train_mps; import cnsbridge.learning.mps_worker; assert 'torch' not in sys.modules"], check=True)
-    import cnsbridge.learning.mps_contract as contract
+    subprocess.run([sys.executable, "-c", "import sys; import malecns_lab.learning.train_mps; import malecns_lab.learning.mps_worker; assert 'torch' not in sys.modules"], check=True)
+    import malecns_lab.learning.mps_contract as contract
     paths = contract.source_hashes()
     assert set(contract.NEW_SOURCES) <= set(paths)
     for field, bad in (("mode", "frozen_brain"), ("implementation_sha256", {})):
@@ -196,7 +196,7 @@ def test_actual_mps_window_cpu_adam_exact_archive_restore_and_scene_reset(resume
     run = numeric_run(gpu)
     reg = {"segment_id": "4" * 64}
     np.savez(tmp_path / "resume.npz", **boundary_arrays(gpu, bridge, state))
-    from cnsbridge.learning.training_contract import sha256
+    from malecns_lab.learning.training_contract import sha256
     write_json(tmp_path / "resume.json", {"schema": "cnsbridge.mps_restore.v1", "segment_id": reg["segment_id"],
         "parent_checkpoint_id": previous["checkpoint_id"], "source_state": previous["metadata"]["state"],
         "restored_state": _state_metadata(state), "arrays_sha256": sha256(tmp_path / "resume.npz"), "exact": True})
@@ -280,11 +280,11 @@ def test_cli_rejects_invalid_budget_and_existing_output_without_worker(tmp_path,
     existing.mkdir()
     with pytest.raises(ValueError, match="between"):
         run_segment(directory=existing, windows=0, cpu_run=tmp_path / "absent")
-    result = subprocess.run([sys.executable, "-m", "cnsbridge.learning.train_mps", "--cpu-run", str(tmp_path / "absent"),
+    result = subprocess.run([sys.executable, "-m", "malecns_lab.learning.train_mps", "--cpu-run", str(tmp_path / "absent"),
                              "--out", str(existing), "--windows", "1"], text=True, capture_output=True)
     assert result.returncode == 1 and "owns the workspace lock" in result.stdout and not list(existing.iterdir())
     from contextlib import nullcontext
-    import cnsbridge.learning.train_mps as runner
+    import malecns_lab.learning.train_mps as runner
     # Isolate the subsequent preflight branch; the module fixture still owns the real numerical lock.
     monkeypatch.setattr(runner, "workspace_lock", nullcontext)
     with pytest.raises(ValueError, match="already exists"):

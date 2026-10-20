@@ -9,13 +9,13 @@
 在仓库根目录使用已安装的项目环境：
 
 ```bash
-.venv/bin/python -m cnsbridge.learning.follow_task --list-scenes
+.venv/bin/python -m malecns_lab.learning.follow_task --list-scenes
 
-.venv/bin/python -m cnsbridge.learning.follow_task \
+.venv/bin/python -m malecns_lab.learning.follow_task \
   --scene train-sine-combined --policy visual \
   --out data/follow_task_example/visual
 
-.venv/bin/python -m cnsbridge.learning.follow_task \
+.venv/bin/python -m malecns_lab.learning.follow_task \
   --scene train-sine-combined --policy zero \
   --out data/follow_task_example/zero
 ```

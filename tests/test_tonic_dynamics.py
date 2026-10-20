@@ -9,8 +9,8 @@ from scipy import sparse
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.tonic import LAMINA_TYPES, TONIC_SCHEMA, LaminaTonicLIF  # noqa: E402
-from cnsbridge.brain.trainable import TrainableLIF  # noqa: E402
+from malecns_lab.brain.tonic import LAMINA_TYPES, TONIC_SCHEMA, LaminaTonicLIF  # noqa: E402
+from malecns_lab.brain.trainable import TrainableLIF  # noqa: E402
 
 
 def tonic(types=("L1", "other"), *, tonic_types=("L1",), dtype=torch.float64, **kwargs):

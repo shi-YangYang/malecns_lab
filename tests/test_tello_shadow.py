@@ -11,7 +11,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from cnsbridge.experiments.tello import shadow as shadow
+from malecns_lab.experiments.tello import shadow as shadow
 
 AXES = ("throttle", "yaw", "forward", "lateral")
 

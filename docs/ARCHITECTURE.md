@@ -1,6 +1,6 @@
 # 架构与接口
 
-CNSBridge 将神经活动产生、动作学习和设备转换分开。当前可用的 V2 离线基线冻结连接组与神经元动力学，只训练输出读出；[Spec 008](../specs/spec-008-trainable-snn/spec.md) 正在实现完整 MaleCNS 网络内部训练，不能把该计划当作已训练成功的模型。
+MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。当前可用的 V2 离线基线冻结连接组与神经元动力学，只训练输出读出；[Spec 008](../specs/spec-008-trainable-snn/spec.md) 正在实现完整 MaleCNS 网络内部训练，不能把该计划当作已训练成功的模型。
 
 ## 信号诊断与控制链路
 
@@ -15,9 +15,9 @@ CNSBridge 将神经活动产生、动作学习和设备转换分开。当前可�
                                               FlightCommand             WheelSpeeds
 ```
 
-`python -m cnsbridge.diagnostics.replay_v2` 记录输入、模拟神经活动、时间身份、覆盖和失败，不读取动作标签、不实例化旧读出、不连接硬件。`report_v2` 只读取已保存记录生成报告，不重复模拟脑。输入驱动 Hz 与实际放电 Hz 分开，缺失群组不作为静默群组统计。详见 [V2 完整脑诊断](MODEL_V2_USAGE.md)。
+`python -m malecns_lab.diagnostics.replay_v2` 记录输入、模拟神经活动、时间身份、覆盖和失败，不读取动作标签、不实例化旧读出、不连接硬件。`report_v2` 只读取已保存记录生成报告，不重复模拟脑。输入驱动 Hz 与实际放电 Hz 分开，缺失群组不作为静默群组统计。详见 [V2 完整脑诊断](MODEL_V2_USAGE.md)。
 
-`python -m cnsbridge.learning.train_v2` 根据独立期望动作和掩码拟合读出；基线神经活动缓存不能用于假装网络内部已经学习。适配器只转换数值，不发送硬件指令；这些学习产物尚未接入 Tello 实飞。V1 重复离线诊断和读出入口已移除，历史产物与来源标识仍保留。
+`python -m malecns_lab.learning.train_v2` 根据独立期望动作和掩码拟合读出；基线神经活动缓存不能用于假装网络内部已经学习。适配器只转换数值，不发送硬件指令；这些学习产物尚未接入 Tello 实飞。V1 重复离线诊断和读出入口已移除，历史产物与来源标识仍保留。
 
 Tello 地面观察和既有飞行试验仍使用旧链路：视觉输入 → `Brain` → `MotorDecoder` → 限幅与试验监督 → Tello。`MotorDecoder` 包含人工设计的权重、基线、巡航与逃逸行为，是实验基线。`experiments.tello.shadow` 也观察这条旧链路，不能加载新候选模型。
 
@@ -44,7 +44,7 @@ Tello 地面观察和既有飞行试验仍使用旧链路：视觉输入 → `Br
 
 依赖方向为 `learning → control`；控制契约不依赖学习流程。诊断复用自身 `sources_v2` 与 `brain`、`senses`，不执行动作解码。包内实现直接导入所属模块，实验、诊断与学习命令通过 `python -m` 运行。
 
-这些模块位于 `src/cnsbridge/`。路径解析验证源码 `pyproject.toml` 和包布局；从其他目录以 editable 安装环境启动不会改变工作区资产位置。完整参考工具默认读取 `data/malecns_v2/full_reference.npz`；旧设备链按 `configs/malecns.yaml` 读取旧图及校准文件。缺少所需资产时停止，不生成替代网络；不能把旧过滤图当作完整图实验。
+这些模块位于 `src/malecns_lab/`。路径解析验证源码 `pyproject.toml` 和包布局；从其他目录以 editable 安装环境启动不会改变工作区资产位置。完整参考工具默认读取 `data/malecns_v2/full_reference.npz`；旧设备链按 `configs/malecns.yaml` 读取旧图及校准文件。缺少所需资产时停止，不生成替代网络；不能把旧过滤图当作完整图实验。
 
 ## 统一运动表示
 
@@ -62,8 +62,8 @@ Tello 地面观察和既有飞行试验仍使用旧链路：视觉输入 → `Br
 下面仅演示同一运动目标的数值转换，不训练网络、不连接设备，比例和底盘几何也不是实测标定：
 
 ```python
-from cnsbridge.control.body import BodyVelocity
-from cnsbridge.control.adapters import DifferentialDriveAdapter, FlightCommandAdapter
+from malecns_lab.control.body import BodyVelocity
+from malecns_lab.control.adapters import DifferentialDriveAdapter, FlightCommandAdapter
 
 motion = BodyVelocity(vx=0.1, wz=0.2)
 aircraft = FlightCommandAdapter(

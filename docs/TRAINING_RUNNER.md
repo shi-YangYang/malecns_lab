@@ -1,21 +1,23 @@
 # 完整连接组的有界连续训练
 
-`python -m cnsbridge.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；[首两个完整图跨进程窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已独立验收，尚无完整epoch、神经闭环跟随、收益或实飞结论。
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
+`python -m malecns_lab.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；[首两个完整图跨进程窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已独立验收，尚无完整epoch、神经闭环跟随、收益或实飞结论。
 
 规格：[P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)。完整状态格式：[训练存档](TRAINING_CHECKPOINT.md)。父入口、登记与证据复核不导入 Torch；脑计算全部在受监督子进程内。
 
 ## 首两个实际窗口
 
-以下命令已在独立软件验收并提交后执行，两段实际证据已获[独立PASS](../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)。它们是已完成的首段与续段记录，不应重复创建此目录；继续同一run从frame4开始。新实验输出目录必须不存在，不覆盖历史或失败记录。
+以下保留已完成首段与续段的参数示例，模块名已更新；原命令和两段[独立验收证据](../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)以对应历史提交为准。不要在新源码下重建或续跑这些目录。新实验输出目录必须不存在，不覆盖历史或失败记录。
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.train_snn \
   --graph data/malecns_v2/full_reference.npz \
   --dataset data/neural_teacher_20261019_r1 \
   --out data/neural_training_joint_20261019_r1 \
   --mode joint --windows 1
 
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.train_snn \
   --run data/neural_training_joint_20261019_r1 --windows 1
 ```
 

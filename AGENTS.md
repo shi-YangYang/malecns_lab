@@ -1,10 +1,10 @@
-# CNSBridge 项目配置与阅读入口
+# MaleCNS Lab 项目配置与阅读入口
 
 本仓库按已有项目接入通用 Agent 规范；以下显式配置覆盖原规范中的 AUTO 默认值：
 
 ```yaml
 project_mode: EXISTING
-business_code_dir: src/cnsbridge
+business_code_dir: src/malecns_lab
 multi_agent: AUTO
 ```
 
@@ -16,6 +16,8 @@ multi_agent: AUTO
 4. 按角色阅读[实施流程](.ai/workflows/implementation.md)或[独立验收流程](.ai/workflows/acceptance.md)。
 
 当前研究阶段见[路线与证据](constitution/roadmap.md)。仓库中的完整规范已自包含，无需访问原始附件。
+
+当前包名与 CLI 为 `malecns_lab`。2026-10-20 用户授权的命名迁移见 [Decision 016](.ai/decisions/016-malecns-lab-repository.md) 与 [Spec 009](specs/spec-009-malecns-lab/spec.md)；历史报告及持久化 schema 中的旧名称保持，不作为当前导入入口。
 
 ---
 

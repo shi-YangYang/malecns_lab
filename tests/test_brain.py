@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-import cnsbridge.brain as brain_package
-from cnsbridge.brain import Brain, Connectome, load_connectome
+import malecns_lab.brain as brain_package
+from malecns_lab.brain import Brain, Connectome, load_connectome
 
 
 def test_real_malecns_load_groups_and_short_step(malecns_graph, malecns_config):

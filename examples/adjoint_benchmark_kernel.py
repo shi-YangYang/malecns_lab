@@ -12,7 +12,7 @@ import numpy as np
 from scipy import sparse
 import torch
 
-from cnsbridge.learning.resource_guard import write_json
+from malecns_lab.learning.resource_guard import write_json
 
 
 def array_sha256(array):

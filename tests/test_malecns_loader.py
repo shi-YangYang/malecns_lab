@@ -6,9 +6,9 @@ import pytest
 pa = pytest.importorskip("pyarrow")
 import pyarrow.feather as feather  # noqa: E402
 
-from cnsbridge.brain import Brain, build_malecns  # noqa: E402
-from cnsbridge.brain.connectome import MALECNS_FILES  # noqa: E402
-from cnsbridge.config import load_config  # noqa: E402
+from malecns_lab.brain import Brain, build_malecns  # noqa: E402
+from malecns_lab.brain.connectome import MALECNS_FILES  # noqa: E402
+from malecns_lab.config import load_config  # noqa: E402
 
 
 def make_fake(tmp_path):

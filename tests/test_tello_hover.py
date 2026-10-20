@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from cnsbridge.experiments.tello import hover as hover
+from malecns_lab.experiments.tello import hover as hover
 
 
 class FakeTello:

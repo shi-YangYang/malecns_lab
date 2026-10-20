@@ -1,4 +1,26 @@
-# Task Handoff — spec-008-trainable-snn / Implementation
+# Task Handoff — spec-009-malecns-lab / Done
+
+## GitHub 发布授权与范围（2026-10-20）
+
+用户提供空仓库 `https://github.com/shi-YangYang/malecns_lab.git`，明确授权提交并推送。本轮将已验收的命名迁移、入口/文档整理和外层路径迁移记录提交到现有 `main`，保留全部本地提交历史；不重新初始化 Git，不覆盖 README，不改写历史。`data/`、`logs/`、虚拟环境和模型仍为本地忽略资产；原有无关未跟踪文件 `specs/spec-008-trainable-snn/scipy-backward-boundary-audit.md` 不纳入。以下各阶段的“未提交/未推送”是当时记录，不表示本轮未获授权。
+
+## 外层目录迁移已完成（2026-10-20）
+
+用户已把实际目录及 Codex 同一项目的名称/路径改为 `/Users/yang/project/malecns_lab`；项目 ID 仍为 `31e9ef4d-4a8e-48a9-801b-6420a1060925`，旧目录不存在。后续在新路径工作。当前聊天底层的默认执行 cwd 仍可能保存旧路径：本轮不带 workdir 的命令报目录不存在，所有工具命令须显式指定新 workdir；不要重建旧目录或旧路径链接。
+
+已按 S2 环境路径范围完成收尾：精确修复 `.venv/bin` 的 18 个文本脚本和 `.venv-train/bin` 的 15 个文本脚本，保留权限；两个环境均执行 `python -m pip install --no-deps --no-build-isolation --no-index --disable-pip-version-check -e .`，仅重装本项目，未下载/升级依赖。一次定向检查从 `/tmp`、不依赖 PYTHONPATH 验证两环境的 import、默认资源、源码根、editable 元数据、直接 CLI、zsh 激活均通过；运行脚本及 editable 路径无旧根残留。`pyvenv.cfg` 的 `command` 是原创建命令的历史记录，保留，不是当前执行入口。Git 根已为新目录，HEAD 保持 `732ddc04da87a0d07c511cdaca40f2f9a9fa9120`；未提交或推送，历史数据/日志/模型未改写，未训练或操作硬件。当前使用文档同步新路径，旧实验来源限制仍适用。
+
+用户最新 AGENTS.md 明确替换此前全部 AGENTS 指令，当前仅要求按风险匹配验证并在足够后停止；不机械追加旧流程的 Spec/全量测试或重复检查。
+
+## 当前任务：仓库统一命名与入口整理（2026-10-20）
+
+用户要求先整理仓库，明确项目和 Python 包名一起改为 `malecns_lab`。按 [Decision 016](../decisions/016-malecns-lab-repository.md)、[Spec 009](../../specs/spec-009-malecns-lab/spec.md)和 [Plan](../../specs/spec-009-malecns-lab/plan.md)实施：展示名 MaleCNS Lab，分发包/CLI 同 Python 包；src layout 内只迁移包目录、导入/worker/示例/测试/当前文档，整理 README/文档索引及智元资料。完整图、数值算法、schema/format、数据、日志、历史报告和上游版权保留。
+
+本批不实现三维前端、LLM 或机器人驱动，不训练、不连接硬件、不创建远端、不推送、不移动 checkout 根目录。源码更名自然改变身份，禁止放松原 run 的来源 hash 校验。旧 run 恢复需原 commit/环境；现有 GPU160窗结果仍是训练期统计，非固定策略闭环或机器人效果。
+
+已完成实施并通过新的[独立验收 PASS](../../specs/spec-009-malecns-lab/acceptance.md)，[实施报告](../../specs/spec-009-malecns-lab/implementation.md)已全文处理。138 个包内文件完成命名迁移；761 项测试收集、32 个不同定向测试、两个 venv 的新安装/入口/资源、普通 wheel 检查通过。既有 PyTorch interop fixture 同进程冲突仅独立执行受影响节点通过，未修改无关测试。无返工项，不追加检查或训练。
+
+工作区开始时只有未跟踪 `specs/spec-008-trainable-snn/scipy-backward-boundary-audit.md`，现仍保持原字节，不纳入本批。Git HEAD 仍为 `732ddc0`，remote 为空；本批没有 commit/push。下文为历史记录，旧 cnsbridge 命令/路径仅反映当时状态。
 
 ## 当前任务：全GPU修复及新160窗已完成（2026-10-19）
 

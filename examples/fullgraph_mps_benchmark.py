@@ -14,7 +14,7 @@ import psutil
 
 from fullgraph_adjoint_benchmark import workspace_lock, runtime, observed_source_files
 from fullgraph_matvec_benchmark import canonical_hash, file_sha256
-from cnsbridge.learning.resource_guard import GIB, resource_budget, supervise, write_json
+from malecns_lab.learning.resource_guard import GIB, resource_budget, supervise, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "cnsbridge.mps_benchmark_registration.v1"
@@ -48,11 +48,11 @@ def source_paths():
     pending, found = [Path(__file__).resolve()], set()
 
     def resolve(module):
-        base = ROOT / "src" / module.replace(".", "/") if module.startswith("cnsbridge") else ROOT / "examples" / module
+        base = ROOT / "src" / module.replace(".", "/") if module.startswith("malecns_lab") else ROOT / "examples" / module
         for path in (base.with_suffix(".py"), base / "__init__.py"):
             if path.is_file():
                 pending.append(path)
-                if module.startswith("cnsbridge"):
+                if module.startswith("malecns_lab"):
                     for directory in path.parents:
                         if directory == ROOT / "src":
                             break

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from cnsbridge.brain import load_connectome
-from cnsbridge.config import load_config
+from malecns_lab.brain import load_connectome
+from malecns_lab.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 

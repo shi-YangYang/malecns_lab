@@ -7,13 +7,13 @@ import sys
 import numpy as np
 import pytest
 
-from cnsbridge.brain.metadata import canonical_hash, file_hashes
-from cnsbridge.control.body import BodyVelocity
-from cnsbridge.drones.follow_env import limit_follow_action
-from cnsbridge.drones.follow_scenes import scene_registry
-from cnsbridge.learning.follow_task import rollout, visual_teacher
-from cnsbridge.learning import neural_data as data
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.metadata import canonical_hash, file_hashes
+from malecns_lab.control.body import BodyVelocity
+from malecns_lab.drones.follow_env import limit_follow_action
+from malecns_lab.drones.follow_scenes import scene_registry
+from malecns_lab.learning.follow_task import rollout, visual_teacher
+from malecns_lab.learning import neural_data as data
+from malecns_lab.senses.target import TargetCamera
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def test_complete_sequences_match_independent_rollout_and_preserve_invalid_frame
     assert np.any(np.abs(invalid.teacher_raw) > data.LIMITS)
     assert np.all(np.abs(invalid.teacher_target) <= data.LIMITS)
     # The dataset is a frame source only: it never imports a neural policy.
-    assert "cnsbridge.learning.neural_policy" not in data.__dict__
+    assert "malecns_lab.learning.neural_policy" not in data.__dict__
 
 
 def test_reject_overwrite_and_unsealed_output(short_registry, tmp_path):

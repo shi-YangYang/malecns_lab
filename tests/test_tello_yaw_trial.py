@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-from cnsbridge.experiments.tello import policy, trial
-from cnsbridge.experiments.tello.worker import BrainProcess
+from malecns_lab.experiments.tello import policy, trial
+from malecns_lab.experiments.tello.worker import BrainProcess
 
 
 class FakeClock:

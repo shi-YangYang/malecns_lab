@@ -1,5 +1,7 @@
 # 完整图配对可观测性工具
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 该工具检查工程视觉输入是否使下降神经元的电位或发放发生变化。它使用完整 MaleCNS 参考图、全部 R1–R6 输入和全部 `descending_neuron`，比较原无背景模型与固定 8 mV 的 L1–L5 背景变体。不训练参数、不生成动作、不连接 Tello。
 
 2026-10-19已完成[首轮完整图实际诊断](../specs/spec-008-trainable-snn/observability-run-20261019-r1.md)并获独立验收：60ms预处理、20ms刺激、10ms撤除，两模式七条件共5400步；墙钟468.51s，采样峰值约1.50GiB。固定背景下观察到DN电位/时序差异，零背景本窗没有DN差异。超容差响应首次出现在刺激开始后21–25ms，即撤除后1–5ms，尚不能区分延迟传播与撤除响应；全部条件逐细胞30ms总发放数相同，不支持直接以该总发放率区分刺激。没有学习动作或控制设备。
@@ -13,7 +15,7 @@
 从项目根目录使用独立训练环境：
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.diagnostics.observability \
   --write-template data/observability_candidate.json
 ```
 
@@ -36,7 +38,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
 以下是工具接口示例；应按成本冻结协议，确认内存条件满足后再执行：
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.diagnostics.observability \
   --graph data/malecns_v2/full_reference.npz \
   --protocol data/observability_candidate.json \
   --out data/observability_run_001
@@ -45,7 +47,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
 输出目录必须全新。父进程在导入 Torch、载入图之前写 `registration.json`，记录协议、步数账本、图路径、源码身份、当前内存和有效预算。可用内存不足时直接保存未启动终态。图只载入一次，两个模型依次构造与释放，所有导入、载图、计算和保存都在父监督范围内。
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.diagnostics.observability \
   --validate-run data/observability_run_001
 ```
 

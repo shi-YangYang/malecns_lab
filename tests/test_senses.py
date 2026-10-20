@@ -1,7 +1,7 @@
 import numpy as np
 
-from cnsbridge.senses import Retina
-from cnsbridge.senses.retina import box_blur
+from malecns_lab.senses import Retina
+from malecns_lab.senses.retina import box_blur
 
 
 def shifted(tex, dx, dy, scale=1.0):

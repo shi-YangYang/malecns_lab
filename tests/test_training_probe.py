@@ -11,11 +11,11 @@ from scipy import sparse
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash, file_hashes  # noqa: E402
-from cnsbridge.brain.trainable import TrainableLIF  # noqa: E402
-from cnsbridge.learning.checkpoint import load_checkpoint, read_checkpoint, restore_checkpoint, save_checkpoint  # noqa: E402
-from cnsbridge.learning.probe import run_registered  # noqa: E402
-from cnsbridge.learning.resource_guard import GIB, resource_budget, supervise  # noqa: E402
+from malecns_lab.brain.metadata import canonical_hash, file_hashes  # noqa: E402
+from malecns_lab.brain.trainable import TrainableLIF  # noqa: E402
+from malecns_lab.learning.checkpoint import load_checkpoint, read_checkpoint, restore_checkpoint, save_checkpoint  # noqa: E402
+from malecns_lab.learning.probe import run_registered  # noqa: E402
+from malecns_lab.learning.resource_guard import GIB, resource_budget, supervise  # noqa: E402
 
 
 def fixture_model(dtype=torch.float32):
@@ -82,7 +82,7 @@ def test_invalid_checkpoint_never_mutates_parameters(tmp_path, change):
 
 @pytest.mark.parametrize("mode", ["learnable", "fixed"])
 def test_tonic_checkpoint_save_and_restore_rejected_before_side_effects(tmp_path, mode):
-    from cnsbridge.brain.tonic import LaminaTonicLIF
+    from malecns_lab.brain.tonic import LaminaTonicLIF
     model = LaminaTonicLIF.for_numerical_test(sparse.csc_matrix((1, 1), dtype=np.int64),
                                              types=["L1"], tonic_types=("L1",), mode=mode)
     directory = tmp_path / "new_parent" / "rejected"
@@ -146,7 +146,7 @@ def test_resource_budget_reserves_system_memory():
 
 @pytest.mark.parametrize("available", [GIB - 1, GIB])
 def test_preflight_failure_is_registered_and_does_not_launch(tmp_path, monkeypatch, available):
-    import cnsbridge.learning.probe as probe
+    import malecns_lab.learning.probe as probe
     monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
     monkeypatch.setattr(probe, "supervise", lambda *args, **kwargs: pytest.fail("Child must not launch"))
     directory = tmp_path / "failed"
@@ -161,8 +161,8 @@ def test_preflight_failure_is_registered_and_does_not_launch(tmp_path, monkeypat
 
 @pytest.mark.parametrize("available,expected_limit", [(GIB + 1, 1), (4 * GIB, 3 * GIB), (8 * GIB, 6 * GIB)])
 def test_probe_supervision_uses_registered_budget(tmp_path, monkeypatch, available, expected_limit):
-    import cnsbridge.learning.probe as probe
-    from cnsbridge.learning.probe_evidence import validate_registration
+    import malecns_lab.learning.probe as probe
+    from malecns_lab.learning.probe_evidence import validate_registration
     monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
     calls = []
 
@@ -213,7 +213,7 @@ def test_timeout_terminates_child_and_retains_failure(tmp_path):
 
 @pytest.mark.parametrize("available,expected", [(GIB, "completed"), (GIB - 1, "failed")])
 def test_supervisor_default_reserve_enforces_running_boundary(tmp_path, monkeypatch, available, expected):
-    import cnsbridge.learning.resource_guard as guard
+    import malecns_lab.learning.resource_guard as guard
     monkeypatch.setattr(guard.psutil, "virtual_memory", lambda: SimpleNamespace(available=available))
     result = supervise([sys.executable, "-c", "pass"], tmp_path, rss_limit_bytes=GIB,
                        wall_seconds=10, poll_seconds=0.02)

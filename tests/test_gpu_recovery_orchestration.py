@@ -13,12 +13,12 @@ import numpy as np
 import pytest
 import torch
 
-from cnsbridge.learning import train_gpu
-from cnsbridge.learning.resource_guard import supervise as actual_supervise
-from cnsbridge.learning.training_contract import PARAMETERS, read_json, read_arrays
-from cnsbridge.learning.gpu_evidence import read_genesis, read_gate, scan_run
-from cnsbridge.learning.train_snn import workspace_lock
-from cnsbridge.brain.metadata import canonical_hash
+from malecns_lab.learning import train_gpu
+from malecns_lab.learning.resource_guard import supervise as actual_supervise
+from malecns_lab.learning.training_contract import PARAMETERS, read_json, read_arrays
+from malecns_lab.learning.gpu_evidence import read_genesis, read_gate, scan_run
+from malecns_lab.learning.train_snn import workspace_lock
+from malecns_lab.brain.metadata import canonical_hash
 from test_gpu_recovery import make_policy, run_identity
 
 
@@ -61,9 +61,9 @@ def test_initialize_gate_two_new_process_windows_and_terminal_tampering(tmp_path
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
-from cnsbridge.learning.training_contract import read_json, read_arrays
-import cnsbridge.learning.gpu_contract as contract
-import cnsbridge.learning.gpu_policy as policies
+from malecns_lab.learning.training_contract import read_json, read_arrays
+import malecns_lab.learning.gpu_contract as contract
+import malecns_lab.learning.gpu_policy as policies
 from test_gpu_recovery_orchestration import dataset
 from test_gpu_recovery import make_policy
 root=Path(sys.argv[1])
@@ -74,7 +74,7 @@ def factory(path,cpu,*,credit_horizon):
     assert path=='explicit-five-node-fixture-only'
     return make_policy(credit_horizon,frame_ms=4)[0]
 policies.GPUPolicy.from_reference=staticmethod(factory)
-from cnsbridge.learning.gpu_worker import run_worker
+from malecns_lab.learning.gpu_worker import run_worker
 result=run_worker(Path(sys.argv[2]))
 raise SystemExit(0 if result['status']=='completed' else 1)
 ''')

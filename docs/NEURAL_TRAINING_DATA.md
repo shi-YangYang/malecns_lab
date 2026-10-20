@@ -1,11 +1,13 @@
 # 神经策略训练序列
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 `learning.neural_data` 生成目标跟随的**仿真教师数据**。它运行既有速度级环境，不加载 MaleCNS，不训练神经策略，不连接 Tello。软件检查通过不代表已完成真实数据采集或学会跟随。
 
 在项目根目录创建一个新的目录：
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.neural_data \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.neural_data \
   --out data/neural_training_sequences_r1
 ```
 
@@ -33,7 +35,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.neural_data \
 ## 封存与读取
 
 ```python
-from cnsbridge.learning.neural_data import read_neural_data
+from malecns_lab.learning.neural_data import read_neural_data
 
 dataset = read_neural_data("data/neural_training_sequences_r1")
 for sequence in dataset.sequences:

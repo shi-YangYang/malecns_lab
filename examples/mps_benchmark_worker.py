@@ -12,7 +12,7 @@ import traceback
 
 from fullgraph_mps_benchmark import (ROOT, PROTOCOL, environment, implementation_hashes,
                                     observed_source_files, validate_registration, file_sha256)
-from cnsbridge.learning.resource_guard import write_json
+from malecns_lab.learning.resource_guard import write_json
 
 
 def run_worker(directory):
@@ -51,8 +51,8 @@ def run_worker(directory):
         phase("imports")
         import numpy as np
         import torch
-        from cnsbridge.brain.trainable import TrainableLIF, TrainableLIFConfig
-        from cnsbridge.brain.trainable_graph import load_training_graph
+        from malecns_lab.brain.trainable import TrainableLIF, TrainableLIFConfig
+        from malecns_lab.brain.trainable_graph import load_training_graph
         from adjoint_benchmark_kernel import array_sha256, make_inputs
         from mps_benchmark_memory import MPSMemorySampler
         from mps_benchmark_kernel import build_cache, verify_cache, measure_cases, assess_cases, autograd_check

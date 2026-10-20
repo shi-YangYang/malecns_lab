@@ -1,5 +1,7 @@
 # 完整图两帧动作联合更新
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 当前工具实现 [P3b r2 稳定分组裁剪协议](../specs/spec-008-trainable-snn/p3b-stable-group-clip.md)：一次离线动作模仿损失同时更新完整 MaleCNS 网络的内部 `theta` 与三轴读出。它不是完整训练、神经闭环、未见场景评估或无人机控制入口。
 
 ## 运行
@@ -7,8 +9,8 @@
 必须先完成软件独立验收和提交，保留 Noria/Docker，且没有其他完整图任务并行。每次使用新的输出目录，不覆盖或因阴性自动重试：
 
 ```bash
-cd /Users/yang/project/FlyDrones
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.joint_probe \
+cd /Users/yang/project/malecns_lab
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.joint_probe \
   --graph data/malecns_v2/full_reference.npz \
   --dataset data/neural_teacher_20261019_r1 \
   --out data/joint_update_20261019_r2

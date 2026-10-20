@@ -20,7 +20,7 @@ import traceback
 import psutil
 
 from fullgraph_matvec_benchmark import canonical_hash, file_sha256
-from cnsbridge.learning.resource_guard import GIB, resource_budget, supervise, write_json
+from malecns_lab.learning.resource_guard import GIB, resource_budget, supervise, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "cnsbridge.adjoint_benchmark_registration.v1"
@@ -71,11 +71,11 @@ def source_paths():
     pending, found = [Path(__file__).resolve()], set()
 
     def resolve(module):
-        base = ROOT / "src" / module.replace(".", "/") if module.startswith("cnsbridge") else ROOT / "examples" / module
+        base = ROOT / "src" / module.replace(".", "/") if module.startswith("malecns_lab") else ROOT / "examples" / module
         for path in (base.with_suffix(".py"), base / "__init__.py"):
             if path.is_file():
                 pending.append(path)
-                if module.startswith("cnsbridge"):
+                if module.startswith("malecns_lab"):
                     for directory in path.parents:
                         if directory == ROOT / "src":
                             break
@@ -217,8 +217,8 @@ def run_worker(directory):
         import numpy as np
         import scipy
         import torch
-        from cnsbridge.brain.trainable import TrainableLIF, TrainableLIFConfig
-        from cnsbridge.brain.trainable_graph import load_training_graph
+        from malecns_lab.brain.trainable import TrainableLIF, TrainableLIFConfig
+        from malecns_lab.brain.trainable_graph import load_training_graph
         from adjoint_benchmark_kernel import array_sha256, assess_cases, make_inputs, measure_cases, shared_adjoint, verify_storage
 
         torch.set_num_threads(PROTOCOL["restore_threads"])

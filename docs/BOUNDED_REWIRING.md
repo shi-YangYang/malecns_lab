@@ -1,15 +1,17 @@
 # 完整图 R 的显式续段生成
 
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+
 本工具只生成离线拓扑对照，不训练 SNN、不连接设备。使用当前已核验的完整 MaleCNS 母本，固定 seed 1901、最多 25,582,837 次成功交换或 102,331,348 次提案，先到任一边界结束。交换次数和图边重叠不证明充分混合；零成功不构成有效拓扑反事实。
 
 按 [P3e1 协议](../specs/spec-008-trainable-snn/p3e1-bounded-rewiring-draft.md)，软件独立验收及提交后，首段和第二段各 100000 次提案；第二段必须在新 worker 中验证真实恢复状态。两个实际段经过新的独立验收后，才能扩大每段额度至最多 1000000。没有自动循环或失败重试。
 
 ```bash
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.generate_rewiring \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.generate_rewiring \
   --graph data/malecns_v2/full_reference.npz \
   --out data/topology_generation_main_20261019_r1 --proposals 100000
 
-PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.generate_rewiring \
+PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.generate_rewiring \
   --run data/topology_generation_main_20261019_r1 --proposals 100000
 ```
 

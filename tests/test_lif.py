@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import sparse
 
-from cnsbridge.brain.lif import LIFNetwork, LIFParams
+from malecns_lab.brain.lif import LIFNetwork, LIFParams
 
 
 def chain(n=3, w=200.0):

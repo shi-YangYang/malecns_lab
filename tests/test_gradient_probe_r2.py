@@ -5,7 +5,7 @@ import os
 import numpy as np
 import pytest
 
-from cnsbridge.learning.gradient_probe_evidence import (
+from malecns_lab.learning.gradient_probe_evidence import (
     BRANCHES, THETA_TOLERANCE, theta_comparison, replay_comparison, classify_repeatability,
 )
 
@@ -72,9 +72,9 @@ def test_r2_unobserved_replay_calls_real_policy_forward_without_observer(monkeyp
     os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
     if not torch.backends.mps.is_available():
         pytest.skip("MPS unavailable; original-path fixture not executed")
-    from cnsbridge.learning import gradient_probe_math as probe
-    from cnsbridge.learning.mps_state import boundary_arrays
-    from cnsbridge.learning.train_snn import workspace_lock
+    from malecns_lab.learning import gradient_probe_math as probe
+    from malecns_lab.learning.mps_state import boundary_arrays
+    from malecns_lab.learning.train_snn import workspace_lock
     from test_mps_continuation import _migrated, selection
     from test_training_checkpoint import policy
     torch.set_num_threads(4)

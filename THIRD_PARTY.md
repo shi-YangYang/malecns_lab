@@ -2,7 +2,7 @@
 
 ## 上游代码
 
-CNSBridge 基于 [SpikeCalls/FlyDrones](https://github.com/SpikeCalls/FlyDrones) 的代码发展。连接组加载、LIF 仿真、视觉编码、旧运动读出与部分设备工具继承并改编自该项目；当前整理聚焦共享动作解码、Tello 实验和离线数据训练。
+MaleCNS Lab 基于 [SpikeCalls/FlyDrones](https://github.com/SpikeCalls/FlyDrones) 的代码发展。连接组加载、LIF 仿真、视觉编码、旧运动读出与部分设备工具继承并改编自该项目；当前整理聚焦共享动作解码、Tello 实验和离线数据训练。
 
 上游使用 MIT 许可。根目录 [LICENSE](LICENSE) 保留原文：
 

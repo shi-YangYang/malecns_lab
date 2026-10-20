@@ -13,13 +13,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash, file_hashes
-from cnsbridge.brain.tonic import LaminaTonicLIF
-from cnsbridge.learning import training_checkpoint as checkpoint
-from cnsbridge.learning import training_optimizer as adam
-from cnsbridge.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
-from cnsbridge.senses.spatial_drive import SpatialDriveConfig
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.metadata import canonical_hash, file_hashes
+from malecns_lab.brain.tonic import LaminaTonicLIF
+from malecns_lab.learning import training_checkpoint as checkpoint
+from malecns_lab.learning import training_optimizer as adam
+from malecns_lab.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
+from malecns_lab.senses.spatial_drive import SpatialDriveConfig
+from malecns_lab.senses.target import TargetCamera
 from test_neural_policy import assert_same_state, circuit, frame
 
 EXPECTED = {key: canonical_hash({"numerical_test": key}) for key in checkpoint.IDENTITIES}

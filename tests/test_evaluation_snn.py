@@ -15,15 +15,15 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import canonical_hash
-from cnsbridge.learning import evaluation_contract as contract
-from cnsbridge.learning import evaluation_checkpoint as checkpoint
-from cnsbridge.learning import evaluation_evidence as evidence
-from cnsbridge.learning import evaluate_snn as cli
-from cnsbridge.learning.evaluation_rollout import environment_for, environment_summary, metrics, readout_actions
-from cnsbridge.learning.evaluation_worker import apply_effective_parameters, execute_segment, parameters
-from cnsbridge.learning.resource_guard import GIB, write_json
-from cnsbridge.learning.training_contract import bytes_sha, read_arrays, read_json, sha256
+from malecns_lab.brain.metadata import canonical_hash
+from malecns_lab.learning import evaluation_contract as contract
+from malecns_lab.learning import evaluation_checkpoint as checkpoint
+from malecns_lab.learning import evaluation_evidence as evidence
+from malecns_lab.learning import evaluate_snn as cli
+from malecns_lab.learning.evaluation_rollout import environment_for, environment_summary, metrics, readout_actions
+from malecns_lab.learning.evaluation_worker import apply_effective_parameters, execute_segment, parameters
+from malecns_lab.learning.resource_guard import GIB, write_json
+from malecns_lab.learning.training_contract import bytes_sha, read_arrays, read_json, sha256
 from test_training_checkpoint import policy
 from test_neural_policy import assert_same_state
 
@@ -105,7 +105,7 @@ def numeric_worker(root, frames):
 
 
 def test_parent_imports_no_torch():
-    command = "import sys; import cnsbridge.learning.evaluate_snn; assert 'torch' not in sys.modules"
+    command = "import sys; import malecns_lab.learning.evaluate_snn; assert 'torch' not in sys.modules"
     subprocess.run([sys.executable, "-c", command], check=True, timeout=20)
 
 
@@ -142,7 +142,7 @@ def test_checkpoint_arbitrary_frame_and_terminal(tmp_path, frame):
     _, episode, _, _ = numeric_episode(tmp_path / "suite", run)
     env = environment_for(run, episode)
     state = model.initial_state()
-    from cnsbridge.control.body import BodyVelocity
+    from malecns_lab.control.body import BodyVelocity
     with torch.no_grad():
         for _ in range(frame):
             state = model.forward_tensor(env.frame(), state).state
@@ -219,7 +219,7 @@ def test_pixel_only_forward_action_changes_observation_and_lost_target_advances(
     path = root / "episodes/joint" / contract.VAL[0] / "segments/000001/chunks/000001/evidence.npz"
     values = read_arrays(path)
     assert np.all(values["executed_actions"] == 0) and np.any(values["raw_actions"] != 0)
-    from cnsbridge.control.body import BodyVelocity
+    from malecns_lab.control.body import BodyVelocity
     _, episode, _, _ = numeric_episode(root, run, override={"occlusion_s": [0., .3], "occlusion_fraction": 1.})
     episode["scene"]["occlusion_s"] = None
     a, b = environment_for(run, episode), environment_for(run, episode)
@@ -252,7 +252,7 @@ def test_readout_and_environment_reject_resealed_wrong_values(tmp_path):
     values = read_arrays(path / "evidence.npz")
     records = evidence.jsonl(path / "trajectory.jsonl")
     directory, episode, _, params = numeric_episode(root, run)
-    from cnsbridge.learning.evaluation_rollout import replay_chunk
+    from malecns_lab.learning.evaluation_rollout import replay_chunk
     for key in ("raw_actions", "frames", "executed_actions"):
         changed = {k: v.copy() for k, v in values.items()}
         changed[key].flat[0] += 1

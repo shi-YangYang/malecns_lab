@@ -1,6 +1,6 @@
 # Tello 实验
 
-实现位于 `cnsbridge.experiments.tello`，下列命令通过 `python -m` 直接运行包内模块。试飞策略、脑计算子进程、会话清理分别在 `policy.py`、`worker.py`、`session.py`，不需要从其他脚本导入业务逻辑。
+实现位于 `malecns_lab.experiments.tello`，下列命令通过 `python -m` 直接运行包内模块。试飞策略、脑计算子进程、会话清理分别在 `policy.py`、`worker.py`、`session.py`，不需要从其他脚本导入业务逻辑。
 
 当前实体平台是 Tello。电脑通过 Tello Wi-Fi 读取相机与遥测、发送 SDK 指令；飞机自身飞控负责姿态稳定。
 
@@ -11,7 +11,7 @@
 关闭手机 App 和其他 Tello 程序，将飞机放在地面，电脑连接 Tello Wi-Fi。在项目目录激活 Python 环境后运行：
 
 ```bash
-python -m cnsbridge.experiments.tello.check --seconds 20
+python -m malecns_lab.experiments.tello.check --seconds 20
 ```
 
 该步骤检查 SDK、遥测与视频，不起飞、不发送 RC。只有 `SDK OK` 和可见的实时画面，才说明连接与解码正常；不能据此判断控制算法有效。
@@ -21,12 +21,12 @@ python -m cnsbridge.experiments.tello.check --seconds 20
 ## 地面观察旧读出
 
 ```bash
-python -m cnsbridge.experiments.tello.shadow --seconds 30
+python -m malecns_lab.experiments.tello.shadow --seconds 30
 ```
 
 默认使用 `configs/malecns.yaml` 中的真实 MaleCNS 模型和校准读出；相对模型及校准路径按源码工程根解析，缺少所需资产时直接停止。等待 `SETTLING` 完成后再改变画面。终端的 `NOT SENT` 表示只记录算法输出，没有发给飞机。
 
-已有 `readout_malecns.json` 时无需重新校准。缺少它时，在模型准备完成后运行 `cnsbridge calibrate --brain data/malecns_brain.npz --out readout_malecns.json`，为旧读出生成校准资产；该校准不训练新的通用解码器，也不证明实机效果。
+已有 `readout_malecns.json` 时无需重新校准。缺少它时，在模型准备完成后运行 `malecns_lab calibrate --brain data/malecns_brain.npz --out readout_malecns.json`，为旧读出生成校准资产；该校准不训练新的通用解码器，也不证明实机效果。
 
 该工具使用 `MotorDecoder`，不加载新岭回归候选模型。左右移动小物体未引起明显偏航，可能涉及视觉特征、神经活动或读出映射，不能仅通过加大 RC 推断已解决。
 
@@ -35,7 +35,7 @@ python -m cnsbridge.experiments.tello.shadow --seconds 30
 已有录像时可以直接离线分析；新录像在 Tello 固定于地面、手机 App 和其他 Tello 程序关闭、电脑已连接 Tello Wi-Fi 后录制：
 
 ```bash
-python -m cnsbridge.experiments.tello.record --scene-id room_a --seconds 30
+python -m malecns_lab.experiments.tello.record --scene-id room_a --seconds 30
 ```
 
 Q 或 Escape 结束预览。也可使用 `--no-window` 保存而不显示画面；`--out-dir` 必须指定不存在的新目录。录制仅连接 SDK、读取视频和遥测，不加载脑模型、不发送运动指令。`--seconds` 允许 5–60 秒；终端打印 `data/ground_recordings/` 下的实际会话位置。
@@ -72,7 +72,7 @@ Q 或 Escape 结束预览。也可使用 `--no-window` 保存而不显示画面�
 采集后可以断开 Tello，使用完整参考图反复重放：
 
 ```bash
-python -m cnsbridge.diagnostics.replay_v2 \
+python -m malecns_lab.diagnostics.replay_v2 \
   --recording data/ground_recordings/SESSION --family-id room_a_session_01 \
   --stimulus-kind object_motion --out data/neural_v2/recording_01
 ```
@@ -86,7 +86,7 @@ python -m cnsbridge.diagnostics.replay_v2 \
 先查看试飞入口的参数和限制：
 
 ```bash
-python -m cnsbridge.experiments.tello.trial --help
+python -m malecns_lab.experiments.tello.trial --help
 ```
 
 实飞需要显式 `--takeoff`。试飞入口包含多种模式：

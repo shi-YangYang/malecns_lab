@@ -11,8 +11,8 @@ import zipfile
 import numpy as np
 import pytest
 
-from cnsbridge.learning import research_admission as module
-from cnsbridge.learning.rewiring_contract import PROTOCOL, canonical, sha
+from malecns_lab.learning import research_admission as module
+from malecns_lab.learning.rewiring_contract import PROTOCOL, canonical, sha
 
 
 def write_json(path, value):
@@ -161,10 +161,10 @@ import sys
 class Block:
     def find_spec(self, fullname, path=None, target=None):
         if fullname == 'torch' or fullname.startswith('torch.') or fullname in {
-            'cnsbridge.learning.research_policy', 'cnsbridge.brain.trainable', 'cnsbridge.brain.tonic'}:
+            'malecns_lab.learning.research_policy', 'malecns_lab.brain.trainable', 'malecns_lab.brain.tonic'}:
             raise AssertionError('Lightweight admission attempted model import: ' + fullname)
 sys.meta_path.insert(0, Block())
-from cnsbridge.learning.research_admission import factory_sources
+from malecns_lab.learning.research_admission import factory_sources
 assert len(factory_sources()) == 4
 assert 'torch' not in sys.modules
 """

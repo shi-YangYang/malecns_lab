@@ -18,9 +18,9 @@ def test_parent_import_cli_and_source_closure():
         "assert 'torch' not in sys.modules and 'numpy' not in sys.modules; "
         "paths = {str(p.relative_to(b.ROOT)) for p in b.source_paths()}; "
         "assert {'examples/fullgraph_adjoint_benchmark.py', 'examples/adjoint_benchmark_kernel.py', "
-        "'examples/fullgraph_matvec_benchmark.py', 'src/cnsbridge/__init__.py', "
-        "'src/cnsbridge/brain/__init__.py', 'src/cnsbridge/paths.py', "
-        "'src/cnsbridge/learning/__init__.py', 'src/cnsbridge/learning/resource_guard.py'} <= paths"
+        "'examples/fullgraph_matvec_benchmark.py', 'src/malecns_lab/__init__.py', "
+        "'src/malecns_lab/brain/__init__.py', 'src/malecns_lab/paths.py', "
+        "'src/malecns_lab/learning/__init__.py', 'src/malecns_lab/learning/resource_guard.py'} <= paths"
     )
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, check=True)
     help_result = subprocess.run([sys.executable, str(ROOT / "examples/fullgraph_adjoint_benchmark.py"), "--help"],

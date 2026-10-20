@@ -15,7 +15,7 @@ import traceback
 
 import psutil
 
-from cnsbridge.learning.resource_guard import GIB, resource_budget, supervise, write_json
+from malecns_lab.learning.resource_guard import GIB, resource_budget, supervise, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRATION_SCHEMA = "cnsbridge.matvec_registration.v1"
@@ -54,9 +54,9 @@ def file_sha256(path: Path) -> str:
 
 def source_paths() -> list[Path]:
     # Include the package import chain as well as the two numerical core modules.
-    return [Path(__file__).resolve(), ROOT / "src/cnsbridge/__init__.py",
-            ROOT / "src/cnsbridge/learning/__init__.py", ROOT / "src/cnsbridge/learning/resource_guard.py",
-            *sorted((ROOT / "src/cnsbridge/brain").glob("*.py"))]
+    return [Path(__file__).resolve(), ROOT / "src/malecns_lab/__init__.py",
+            ROOT / "src/malecns_lab/learning/__init__.py", ROOT / "src/malecns_lab/learning/resource_guard.py",
+            *sorted((ROOT / "src/malecns_lab/brain").glob("*.py"))]
 
 
 def implementation_hashes() -> dict:
@@ -158,8 +158,8 @@ def run_worker(directory: Path) -> dict:
         import scipy
         from scipy import sparse
         import torch
-        from cnsbridge.brain.trainable import TrainableLIF, TrainableLIFConfig
-        from cnsbridge.brain.trainable_graph import load_training_graph
+        from malecns_lab.brain.trainable import TrainableLIF, TrainableLIFConfig
+        from malecns_lab.brain.trainable_graph import load_training_graph
 
         torch.set_num_threads(PROTOCOL["torch_threads"])
         torch.set_num_interop_threads(PROTOCOL["torch_interop_threads"])

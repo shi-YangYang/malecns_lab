@@ -15,10 +15,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from cnsbridge.learning.probe import PROTOCOL, finalize_run, register
-from cnsbridge.learning.probe_evidence import (ARTIFACTS, PHASES, RESULT_SCHEMA, canonical_hash, file_sha256,
+from malecns_lab.learning.probe import PROTOCOL, finalize_run, register
+from malecns_lab.learning.probe_evidence import (ARTIFACTS, PHASES, RESULT_SCHEMA, canonical_hash, file_sha256,
                                               validate_probe_evidence, validate_registration)
-from cnsbridge.learning.resource_guard import GIB, supervise, write_json
+from malecns_lab.learning.resource_guard import GIB, supervise, write_json
 
 
 def rehash(value, key):
@@ -28,7 +28,7 @@ def rehash(value, key):
 
 
 def software_evidence(tmp_path, monkeypatch):
-    import cnsbridge.learning.probe as probe
+    import malecns_lab.learning.probe as probe
     monkeypatch.setattr(probe.psutil, "virtual_memory", lambda: SimpleNamespace(available=12 * GIB))
     directory = tmp_path / "software_fixture_only"
     registration = register(tmp_path / "NOT_A_REAL_GRAPH.npz", directory)
@@ -110,8 +110,8 @@ def test_complete_software_fixture_needs_all_evidence_before_passed(tmp_path, mo
 def test_current_model_identity_and_strict_backend_contract(tmp_path, monkeypatch, backend):
     pytest.importorskip("torch")
     from scipy import sparse
-    from cnsbridge.brain.trainable import TrainableLIF
-    from cnsbridge.brain.trainable_graph import TrainingGraph
+    from malecns_lab.brain.trainable import TrainableLIF
+    from malecns_lab.brain.trainable_graph import TrainingGraph
 
     directory, _, result = software_evidence(tmp_path, monkeypatch)
     # Explicitly fabricated evidence identity, never a production loader/brain
@@ -241,6 +241,6 @@ def test_status_only_report_and_process_failure_cannot_be_promoted(tmp_path):
 
 
 def test_evidence_module_does_not_import_torch_or_brain_loader():
-    code = ("import sys; from cnsbridge.learning import probe_evidence; "
-            "assert 'torch' not in sys.modules; assert 'cnsbridge.brain.reference' not in sys.modules")
+    code = ("import sys; from malecns_lab.learning import probe_evidence; "
+            "assert 'torch' not in sys.modules; assert 'malecns_lab.brain.reference' not in sys.modules")
     subprocess.run([sys.executable, "-c", code], check=True)

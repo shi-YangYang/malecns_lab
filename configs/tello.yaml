@@ -1,5 +1,5 @@
 # DJI / Ryze Tello: its camera is the fly's eyes.
-# Optional overrides for cnsbridge.experiments.tello modules.
+# Optional overrides for malecns_lab.experiments.tello modules.
 control:
   hz: 20
 vision:

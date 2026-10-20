@@ -12,18 +12,18 @@ from scipy import sparse
 
 torch = pytest.importorskip("torch")
 
-from cnsbridge.brain.metadata import annotation_hash, canonical_hash
-from cnsbridge.brain.policy_groups import _build_policy_map, load_policy_neuron_map, numerical_test_policy_map
-from cnsbridge.brain.tonic import LaminaTonicLIF
-from cnsbridge.brain.trainable import TrainableLIFConfig, fixed_sparse_matvec
-from cnsbridge.brain.trainable_graph import _graph, numerical_test_graph
-from cnsbridge.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
-from cnsbridge.learning.research_admission import factory_sources
-from cnsbridge.learning.research_cache import validate_cache_correspondence, validate_membership
-from cnsbridge.learning.research_contract import common_numeric_contract, require_common_numeric_contract
-from cnsbridge.learning.research_policy import _new_brain, _finish_policy, from_terminal_research_run
-from cnsbridge.senses.spatial_drive import SpatialDriveConfig
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.metadata import annotation_hash, canonical_hash
+from malecns_lab.brain.policy_groups import _build_policy_map, load_policy_neuron_map, numerical_test_policy_map
+from malecns_lab.brain.tonic import LaminaTonicLIF
+from malecns_lab.brain.trainable import TrainableLIFConfig, fixed_sparse_matvec
+from malecns_lab.brain.trainable_graph import _graph, numerical_test_graph
+from malecns_lab.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
+from malecns_lab.learning.research_admission import factory_sources
+from malecns_lab.learning.research_cache import validate_cache_correspondence, validate_membership
+from malecns_lab.learning.research_contract import common_numeric_contract, require_common_numeric_contract
+from malecns_lab.learning.research_policy import _new_brain, _finish_policy, from_terminal_research_run
+from malecns_lab.senses.spatial_drive import SpatialDriveConfig
+from malecns_lab.senses.target import TargetCamera
 
 CONFIG = NeuralPolicyConfig(frame_ms=10, precondition_ms=0, control_dt_s=.1, readout_seed=1703)
 LIF = TrainableLIFConfig(dt_ms=1, delay_ms=1, refractory_ms=2)
@@ -172,7 +172,7 @@ def test_state_isolation_factory_takes_no_existing_state_and_old_entry_rejects()
         from_terminal_research_run({}, config=CONFIG, camera=CAMERA, drive_config=DRIVE, lif_config=LIF, state=old.initial_state())
     with pytest.raises(ValueError, match="directory"):
         from_terminal_research_run(new.brain.graph, config=CONFIG, camera=CAMERA, drive_config=DRIVE, lif_config=LIF)
-    from cnsbridge.learning.policy_checkpoint import _validate_identity
+    from malecns_lab.learning.policy_checkpoint import _validate_identity
     forged = deepcopy(new.identity)
     forged["role"] = "research_control"  # Negative role fixture, no neural run under a false biological identity.
     forged["policy_id"] = canonical_hash({k: v for k, v in forged.items() if k != "policy_id"})
@@ -204,7 +204,7 @@ def test_common_contract_rejects_changed_initial_parameters_or_hidden_dynamics()
 
 def test_fresh_constructor_releases_old_storage_before_loading_and_never_steps(monkeypatch):
     import weakref
-    from cnsbridge.brain.trainable import TrainableLIF
+    from malecns_lab.brain.trainable import TrainableLIF
     references = []
     original_init = LaminaTonicLIF.__init__
     def observed_init(self, *args, **kwargs):

@@ -11,21 +11,21 @@ import numpy as np
 import pytest
 import torch
 
-from cnsbridge.brain.metadata import canonical_hash
-from cnsbridge.brain.mps_trainable import MPSLIF
-from cnsbridge.learning.neural_policy import NeuralPolicy
-from cnsbridge.learning.gpu_policy import GPUPolicy
-from cnsbridge.learning.gpu_optimizer import GPUAdam
-from cnsbridge.learning.gpu_window import compute_window, logit_loss
-from cnsbridge.learning.gpu_state import boundary_arrays, restore, state_arrays, state_digest, state_metadata
-from cnsbridge.learning.gpu_archive import write_checkpoint, inspect_checkpoint, validate_payload, verify_resume
-from cnsbridge.learning.gpu_contract import source_hashes, runtime, protocol, optimizer_identity
-from cnsbridge.learning.gpu_numbers import validate_numbers, validate_correction
-from cnsbridge.learning.gpu_evidence import validate_registration, validate_residency
-from cnsbridge.learning.train_snn import workspace_lock
-from cnsbridge.learning.train_gpu import run_job
-from cnsbridge.learning.training_contract import PARAMETERS, IDENTITIES, cursor, bytes_sha
-from cnsbridge.learning.resource_guard import resource_budget, GIB, write_json
+from malecns_lab.brain.metadata import canonical_hash
+from malecns_lab.brain.mps_trainable import MPSLIF
+from malecns_lab.learning.neural_policy import NeuralPolicy
+from malecns_lab.learning.gpu_policy import GPUPolicy
+from malecns_lab.learning.gpu_optimizer import GPUAdam
+from malecns_lab.learning.gpu_window import compute_window, logit_loss
+from malecns_lab.learning.gpu_state import boundary_arrays, restore, state_arrays, state_digest, state_metadata
+from malecns_lab.learning.gpu_archive import write_checkpoint, inspect_checkpoint, validate_payload, verify_resume
+from malecns_lab.learning.gpu_contract import source_hashes, runtime, protocol, optimizer_identity
+from malecns_lab.learning.gpu_numbers import validate_numbers, validate_correction
+from malecns_lab.learning.gpu_evidence import validate_registration, validate_residency
+from malecns_lab.learning.train_snn import workspace_lock
+from malecns_lab.learning.train_gpu import run_job
+from malecns_lab.learning.training_contract import PARAMETERS, IDENTITIES, cursor, bytes_sha
+from malecns_lab.learning.resource_guard import resource_budget, GIB, write_json
 from test_training_checkpoint import policy as cpu_policy
 from test_neural_policy import frame
 
@@ -71,7 +71,7 @@ def context(run, completed, parent="1" * 64):
 
 
 def test_light_parent_and_job_budget_guards(tmp_path):
-    code = "import sys; import cnsbridge.learning.train_gpu; import cnsbridge.learning.gpu_worker; assert 'torch' not in sys.modules"
+    code = "import sys; import malecns_lab.learning.train_gpu; import malecns_lab.learning.gpu_worker; assert 'torch' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)
     assert not any("gradient_probe" in k for k in source_hashes())
     with pytest.raises(ValueError, match="Invalid window"):
@@ -87,7 +87,7 @@ def test_light_parent_and_job_budget_guards(tmp_path):
     reg["job_id"] = canonical_hash(reg)
     with pytest.raises(ValueError, match="First two"):
         validate_registration(reg, run, "train", previous, segment=1)
-    p = subprocess.run([sys.executable, "-m", "cnsbridge.learning.train_gpu", "--worker", str(tmp_path)], capture_output=True)
+    p = subprocess.run([sys.executable, "-m", "malecns_lab.learning.train_gpu", "--worker", str(tmp_path)], capture_output=True)
     assert p.returncode != 0 and not (tmp_path / "worker.claim").exists()
 
 
@@ -153,7 +153,7 @@ def test_correction_update_checkpoint_roundtrip_and_reject_forged_state(tmp_path
     np.savez(tmp_path / "resume.npz", **actual)
     write_json(tmp_path / "resume.json", {"job_id": "c" * 64, "parent_checkpoint_id": saved["checkpoint_id"],
         "state": state_metadata(other_state, second.drive_config.dt_ms),
-        "arrays_sha256": __import__("cnsbridge.learning.training_contract", fromlist=["sha256"]).sha256(tmp_path / "resume.npz")})
+        "arrays_sha256": __import__("malecns_lab.learning.training_contract", fromlist=["sha256"]).sha256(tmp_path / "resume.npz")})
     verify_resume(tmp_path, {"job_id": "c" * 64}, saved, run)
     continued = []
     for model, opt, current in ((policy, optimizer, state), (second, other_optimizer, other_state)):

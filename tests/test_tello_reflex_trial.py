@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from test_tello_yaw_trial import FakeClock, FakeTello, FakeWorker, trial
 
-from cnsbridge.experiments.tello import policy
+from malecns_lab.experiments.tello import policy
 
 
 class ReflexWorker(FakeWorker):

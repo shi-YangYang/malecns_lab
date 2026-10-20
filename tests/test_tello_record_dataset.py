@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from cnsbridge.experiments.tello import record as recorder
+from malecns_lab.experiments.tello import record as recorder
 
 
 class Clock:

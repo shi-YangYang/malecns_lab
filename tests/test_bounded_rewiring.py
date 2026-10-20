@@ -10,17 +10,17 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from cnsbridge.brain.connectome import Connectome
-from cnsbridge.brain.metadata import annotation_hash
-from cnsbridge.brain.reference import graph_hash
-from cnsbridge.learning.graph_controls import _clone, _rewire
-from cnsbridge.learning.graph_diagnostics import validate_rw, policy_path_vectors, incoming_strength_vectors
-from cnsbridge.learning.rewiring_steps import advance, counters, restore_rng, report
-from cnsbridge.learning.rewiring_archive import save_checkpoint, restore_checkpoint, state_identity
-from cnsbridge.learning.rewiring_contract import canonical, sha
-from cnsbridge.learning.rewiring_evidence import initial_state, checkpoint_context, scan_run, evidence_hashes, validate_completion
-from cnsbridge.learning.generate_rewiring import register_segment, finalize_segment
-from cnsbridge.learning.resource_guard import write_json
+from malecns_lab.brain.connectome import Connectome
+from malecns_lab.brain.metadata import annotation_hash
+from malecns_lab.brain.reference import graph_hash
+from malecns_lab.learning.graph_controls import _clone, _rewire
+from malecns_lab.learning.graph_diagnostics import validate_rw, policy_path_vectors, incoming_strength_vectors
+from malecns_lab.learning.rewiring_steps import advance, counters, restore_rng, report
+from malecns_lab.learning.rewiring_archive import save_checkpoint, restore_checkpoint, state_identity
+from malecns_lab.learning.rewiring_contract import canonical, sha
+from malecns_lab.learning.rewiring_evidence import initial_state, checkpoint_context, scan_run, evidence_hashes, validate_completion
+from malecns_lab.learning.generate_rewiring import register_segment, finalize_segment
+from malecns_lab.learning.resource_guard import write_json
 
 
 def fixture_graph():
@@ -98,8 +98,8 @@ def test_original_kernel_continuous_and_true_os_resume_exact(tmp_path):
     code = '''import json,sys,numpy as np
 from pathlib import Path
 from test_bounded_rewiring import fixture_graph
-from cnsbridge.learning.rewiring_archive import restore_checkpoint,save_checkpoint
-from cnsbridge.learning.rewiring_steps import advance
+from malecns_lab.learning.rewiring_archive import restore_checkpoint,save_checkpoint
+from malecns_lab.learning.rewiring_steps import advance
 p=Path(sys.argv[1]);run=json.loads((p/'run.json').read_text())
 g,r,c,m=restore_checkpoint(p/'first',parent=fixture_graph(),run=run,context={'fixture':'first'})
 advance(g.weights,r,c,max_attempts=501,target_swaps=120,proposals=364)
@@ -203,7 +203,7 @@ def test_corrupt_checkpoint_rejected(tmp_path, change):
 
 
 def test_manifest_last_and_intermediate_rejects_production(tmp_path, monkeypatch):
-    from cnsbridge.brain.brain import load_connectome
+    from malecns_lab.brain.brain import load_connectome
     parent, run, directory, meta = checkpoint_fixture(tmp_path)
     with pytest.raises((ValueError, KeyError)):
         load_connectome(directory / "arrays.npz")
@@ -238,7 +238,7 @@ def simulated_segment(tmp_path):
 
 
 def test_parent_chain_corruption_and_terminal_reject(tmp_path, monkeypatch):
-    monkeypatch.setattr("cnsbridge.learning.generate_rewiring.validate_run", lambda run: None)
+    monkeypatch.setattr("malecns_lab.learning.generate_rewiring.validate_run", lambda run: None)
     run, segment, registration, outcome = simulated_segment(tmp_path)
     result = finalize_segment(segment, run, registration, outcome)
     assert result["status"] == "completed"
@@ -256,7 +256,7 @@ def test_parent_chain_corruption_and_terminal_reject(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("failure", ["rss_limit", "wall_limit", "missing_artifact", "bad_resume", "zero_exit_only"])
 def test_failed_segment_never_adopts_checkpoint_or_final_npz(tmp_path, failure, monkeypatch):
-    monkeypatch.setattr("cnsbridge.learning.generate_rewiring.validate_run", lambda run: None)
+    monkeypatch.setattr("malecns_lab.learning.generate_rewiring.validate_run", lambda run: None)
     run, segment, registration, outcome = simulated_segment(tmp_path)
     (segment / "candidate.npz").write_bytes(b"unapproved candidate")
     if failure in {"rss_limit", "wall_limit"}:
@@ -280,7 +280,7 @@ def test_failed_segment_never_adopts_checkpoint_or_final_npz(tmp_path, failure, 
 
 @pytest.mark.parametrize("corruption", ["duplicate_target", "out_of_range", "zero_weight", "wrong_dtype", "pointer"])
 def test_structural_csc_corruption_rejected_even_after_file_and_array_hashes_resealed(tmp_path, corruption):
-    from cnsbridge.learning.rewiring_archive import array_description
+    from malecns_lab.learning.rewiring_archive import array_description
     parent, run, directory, meta = checkpoint_fixture(tmp_path)
     with np.load(directory / "arrays.npz", allow_pickle=False) as archive:
         arrays = {name: archive[name] for name in archive.files}
@@ -304,8 +304,8 @@ def test_structural_csc_corruption_rejected_even_after_file_and_array_hashes_res
 
 
 def test_terminal_parent_approval_required_and_bound_to_every_file(tmp_path, monkeypatch):
-    from cnsbridge.learning.generate_rewiring import accepted_candidate
-    monkeypatch.setattr("cnsbridge.learning.generate_rewiring.validate_run", lambda run: None)
+    from malecns_lab.learning.generate_rewiring import accepted_candidate
+    monkeypatch.setattr("malecns_lab.learning.generate_rewiring.validate_run", lambda run: None)
     run, segment, registration, outcome = simulated_segment(tmp_path)
     # Exercise terminal evidence admission only; these opaque files are NOT graph/model fixtures.
     run["protocol"].update(max_attempts=20, nodes=9, edges=32, synapses=80, self_edges=8, inputs=1, outputs=2)
@@ -343,7 +343,7 @@ def test_parent_rechecks_source_after_worker_exit(tmp_path, monkeypatch):
     run, segment, registration, outcome = simulated_segment(tmp_path)
     def changed(run):
         raise ValueError("Generation source/runtime changed")
-    monkeypatch.setattr("cnsbridge.learning.generate_rewiring.validate_run", changed)
+    monkeypatch.setattr("malecns_lab.learning.generate_rewiring.validate_run", changed)
     result = finalize_segment(segment, run, registration, outcome)
     assert result["status"] == "failed" and "source/runtime changed" in result["reason"]
     assert scan_run(tmp_path, run)["checkpoint_id"] is None

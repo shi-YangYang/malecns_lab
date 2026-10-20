@@ -16,7 +16,7 @@
 
 ## 工程空间映射
 
-`senses.spatial_drive.build_spatial_input_map(policy)` 将全部输入细胞映射到 [target_mask](../src/cnsbridge/senses/target.py) 产生的 12×16 占用图。行从上到下、列从左到右，格号为 `row * 16 + column`。
+`senses.spatial_drive.build_spatial_input_map(policy)` 将全部输入细胞映射到 [target_mask](../src/malecns_lab/senses/target.py) 产生的 12×16 占用图。行从上到下、列从左到右，格号为 `row * 16 + column`。
 
 映射固定为以下算法：
 
@@ -44,9 +44,9 @@ phase += occupancy[pixel_cell] * max_rate_hz * dt_ms / 1000
 单步返回 `DriveEvents`，只包含本步发放输入的图内索引和电压增量。按需调用 `to_dense()` 或 `to_torch(dtype=...)` 才分配完整节点向量；所有非输入细胞严格为零。PyTorch 返回 CPU float32/float64 张量，不调用模型或硬件。
 
 ```python
-from cnsbridge.brain.trainable_graph import load_training_graph
-from cnsbridge.brain.policy_groups import load_policy_neuron_map
-from cnsbridge.senses.spatial_drive import SpatialDrive, build_spatial_input_map
+from malecns_lab.brain.trainable_graph import load_training_graph
+from malecns_lab.brain.policy_groups import load_policy_neuron_map
+from malecns_lab.senses.spatial_drive import SpatialDrive, build_spatial_input_map
 
 # 这一加载会验证完整图；只在资源和实验登记条件满足后执行。
 graph = load_training_graph("data/malecns_v2/full_reference.npz")

@@ -3,7 +3,7 @@
 `learning.policy_checkpoint` 的模式为 `cnsbridge.neural_policy_checkpoint.v1`。它保存完整策略的三个可训练参数：`brain.theta`、`readout.weight`、`readout.bias`。旧 `learning.checkpoint` 是仅保存内部增益的独立模式，两者互相拒绝，不能替换文件名来混用。
 
 ```python
-from cnsbridge.learning.policy_checkpoint import (
+from malecns_lab.learning.policy_checkpoint import (
     save_policy_checkpoint, read_policy_checkpoint,
     restore_policy_checkpoint, load_policy_checkpoint,
 )

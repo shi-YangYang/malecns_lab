@@ -1,4 +1,4 @@
-# Offline V2 full reference. Build with python -m cnsbridge.brain.reference.
+# Offline V2 full reference. Build with python -m malecns_lab.brain.reference.
 # Group selection is explicit; HAL is disabled in the V2 main input encoder.
 # This file does not authorize device operation or use the legacy MotorDecoder.
 brain:

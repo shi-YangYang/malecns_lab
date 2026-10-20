@@ -4,8 +4,8 @@ import unittest
 
 import numpy as np
 
-from cnsbridge.control.body import BODY_AXES, BodyVelocity
-from cnsbridge.control.adapters import DifferentialDriveAdapter, FlightCommandAdapter
+from malecns_lab.control.body import BODY_AXES, BodyVelocity
+from malecns_lab.control.adapters import DifferentialDriveAdapter, FlightCommandAdapter
 
 
 class BodyAdapterTests(unittest.TestCase):

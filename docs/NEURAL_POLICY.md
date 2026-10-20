@@ -1,6 +1,6 @@
 # 有状态三轴神经策略接口
 
-`cnsbridge.learning.neural_policy` 将图像接入完整神经网络，再由所有下降神经元的活动产生 `vx/vz/wz` 张量。当前完成的是可微接口和显式小电路数值检查；尚未训练出目标跟随策略，没有本接口的完整图任务成绩或设备效果证据。
+`malecns_lab.learning.neural_policy` 将图像接入完整神经网络，再由所有下降神经元的活动产生 `vx/vz/wz` 张量。当前完成的是可微接口和显式小电路数值检查；尚未训练出目标跟随策略，没有本接口的完整图任务成绩或设备效果证据。
 
 ## 路径和模型身份
 
@@ -37,10 +37,10 @@ BGR 图像 → target_mask（12×16 红色占用）→ SpatialDrive → 完整 L
 
 ```python
 import torch
-from cnsbridge.brain.trainable import TrainableLIFConfig
-from cnsbridge.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
-from cnsbridge.senses.spatial_drive import SpatialDriveConfig
-from cnsbridge.senses.target import TargetCamera
+from malecns_lab.brain.trainable import TrainableLIFConfig
+from malecns_lab.learning.neural_policy import NeuralPolicy, NeuralPolicyConfig
+from malecns_lab.senses.spatial_drive import SpatialDriveConfig
+from malecns_lab.senses.target import TargetCamera
 
 def build_policy(protocol):
     return NeuralPolicy.from_reference(
@@ -78,8 +78,8 @@ state = result.state
 `NeuralController` 是已有 `FollowPolicyInput -> BodyVelocity` 的独立适配器。创建 controller 不预热，首次调用及每个新场景必须先 `reset()`。它按 policy 登记的相机与 `control_dt_s` 检查输入时间，时钟不符报错而非自动继续旧场景。
 
 ```python
-from cnsbridge.learning.neural_policy import NeuralController
-from cnsbridge.learning.follow_task import rollout
+from malecns_lab.learning.neural_policy import NeuralController
+from malecns_lab.learning.follow_task import rollout
 
 controller = NeuralController(policy)
 controller.reset()
