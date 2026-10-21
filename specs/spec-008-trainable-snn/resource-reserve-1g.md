@@ -1,6 +1,6 @@
 # 系统额外预留调整
 
-状态：Done（软件调整）。41项定向检查通过，独立[验收PASS](acceptance-reserve-1g.md)。用户已明确要求保留 1 GiB，见 [Decision 012](../../.ai/decisions/012-one-gib-system-reserve.md)。实际P1结果另报。
+状态：Done（软件调整）。41项定向检查通过，独立验收PASS。用户已明确要求保留 1 GiB，见 [Decision 012](../../.ai/decisions/012-one-gib-system-reserve.md)。实际P1结果另报。
 
 ## 目标与范围
 

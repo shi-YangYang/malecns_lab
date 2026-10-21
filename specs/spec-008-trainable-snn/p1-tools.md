@@ -1,6 +1,6 @@
 # P1a — 完整图探针工具的软件验收
 
-状态：Done，返工后的新独立[验收 PASS](acceptance-p1-tools-r1.md)。从 [P1 完整协议](p1-fullgraph-probe.md)拆出可单独审查和提交的软件步骤，不降低 P1 的实际更新标准；原误报成功问题与 FAIL 记录保留。
+状态：Done，返工后的新独立验收 PASS。从 [P1 完整协议](p1-fullgraph-probe.md)拆出可单独审查和提交的软件步骤，不降低 P1 的实际更新标准；原误报成功问题与 FAIL 记录保留。
 
 ## 当前证据
 

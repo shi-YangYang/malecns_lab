@@ -1,6 +1,6 @@
 # 完整图前向共享 SciPy CSR
 
-状态：Done。A/B软件经身份契约返工后已获新独立[PASS](acceptance-forward-csr-cache-r1.md)并提交13716c6；C/D实际完整图对照也获新独立[PASS](acceptance-forward-csr-actual.md)，见[实测报告](forward-csr-run-20261019.md)。属于完整图训练路线的性能子批，不改变图、动力学或训练目标。
+状态：Done。A/B软件经身份契约返工后已获新独立PASS并提交13716c6；C/D实际完整图对照也获新独立PASS，见[实测报告](forward-csr-run-20261019.md)。属于完整图训练路线的性能子批，不改变图、动力学或训练目标。
 
 ## 背景
 

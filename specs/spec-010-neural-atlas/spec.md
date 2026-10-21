@@ -1,6 +1,6 @@
 # Spec 010 — 本地 WebGL 神经活动图谱
 
-状态：Done；[独立验收](acceptance.md) AC1–5 全部 PASS。2026-10-21 用户要求先完成可视化，并询问 WebGL、原生、Electron、Tauri 选型。采用本地浏览器 WebGL；Python 只读导出已有记录，暂不增加桌面壳、云发布、训练或设备控制。该选择可逆，沿用已有完整 MaleCNS 资产和证据边界。
+状态：Done；独立验收 AC1–5 全部 PASS。2026-10-21 用户要求先完成可视化，并询问 WebGL、原生、Electron、Tauri 选型。采用本地浏览器 WebGL；Python 只读导出已有记录，暂不增加桌面壳、云发布、训练或设备控制。该选择可逆，沿用已有完整 MaleCNS 资产和证据边界。
 
 ## 交付
 

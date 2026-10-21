@@ -1,6 +1,6 @@
 # Spec — 接入 CNSBridge Agent 开发流程
 
-状态：Done。已完成实施与独立验收，AC1–AC6 均为 PASS；见 [实施报告](implementation.md)和[验收报告](acceptance.md)。
+状态：Done。已完成实施与独立验收，AC1–AC6 均为 PASS；见 实施报告和验收报告。
 
 ## 背景
 

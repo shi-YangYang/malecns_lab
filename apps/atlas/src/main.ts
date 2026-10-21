@@ -3,6 +3,8 @@ import { loadDataset } from './data';
 import { BrainView } from './brain';
 import { FlyView } from './fly';
 import { drawRateChart } from './chart';
+import { ExperimentPanel, stimulusLabels, experimentLabel, parameterDetail } from './experiments';
+import type { Job } from './experiments';
 import type { Dataset, Run } from './types';
 
 const icon = (name: string, size = 18): string => {
@@ -29,16 +31,19 @@ app.innerHTML = `
   <main>
     <section class="page-heading">
       <h1>神经活动图谱</h1>
-      <div class="mode-badge"><span class="status-dot"></span> 仿真回放</div>
+      <div class="mode-badge"><span class="status-dot"></span><span id="view-mode">已有记录 · 仿真</span></div>
     </section>
+    <section id="experiments" class="panel experiments" aria-label="完整脑实验"></section>
+    <div class="view-heading"><p id="view-description">已有刺激记录</p><span id="view-loading" role="status" hidden>正在载入结果…</span></div>
+    <p id="view-error" class="view-error" role="alert" hidden></p>
     <div id="load-state" class="load-state" role="status"><div class="loading-symbol"></div><h2>正在载入图谱…</h2></div>
     <div id="dashboard" hidden>
       <section class="workspace" aria-label="神经图谱研究工作区">
         <aside class="left-panel">
           <section class="panel stimulus-panel">
-            <div class="panel-heading"><h2>视觉刺激</h2></div>
+            <div class="panel-heading"><h2 id="stimulus-title">视觉刺激</h2></div>
             <div id="stimulus-list" class="stimulus-list" role="group" aria-label="选择刺激"></div>
-            <div class="preview-heading"><span>刺激画面</span><span class="small-tag">重建</span></div>
+            <div class="preview-heading"><span id="preview-title">刺激画面</span><span class="small-tag" id="preview-kind">重建</span></div>
             <div class="stimulus-preview" id="stimulus-preview"><canvas id="stimulus-canvas" aria-label="当前记录帧对应的重建刺激"></canvas><span id="preview-message">正在载入重建画面</span><div class="preview-corners" aria-hidden="true"></div></div>
           </section>
           <section class="panel reference-panel">
@@ -66,14 +71,14 @@ app.innerHTML = `
             <div class="network-stats"><div><span>本帧脉冲</span><strong id="network-spikes">—</strong></div><div><span>活跃神经元</span><strong id="active-neurons">—</strong></div></div>
           </section>
           <section class="panel body-panel">
-            <div class="panel-heading"><h2>果蝇</h2><span class="small-tag">静态示意</span></div>
+            <div class="panel-heading"><h2>果蝇</h2><span class="small-tag" id="body-kind">静态示意</span></div>
             <div id="fly-view" class="fly-view"></div>
           </section>
         </aside>
       </section>
       <section class="timeline panel" aria-label="记录回放控制">
         <div class="timeline-top"><div class="timeline-title"><h2>回放</h2><span id="phase-badge" class="phase-badge">预热</span><span id="frame-validity" class="frame-validity"></span></div><div class="time-readout"><strong id="time-value" data-testid="time-value">0.00</strong><span>秒</span><span class="time-total" id="time-total">/ 2.50 秒</span><span class="frame-readout" id="frame-readout">第 — / — 帧</span></div></div>
-        <div class="timeline-main"><div class="playback-buttons"><button class="icon-button" id="previous-frame" aria-label="上一记录帧">${icon('back')}</button><button class="play-button" id="play-button" aria-label="播放回放">${icon('play')}</button><button class="icon-button" id="next-frame" aria-label="下一记录帧">${icon('next')}</button></div><div class="scrubber"><label class="sr-only" for="timeline-slider">记录帧时间轴</label><div class="timeline-track"><div id="warmup-band" class="warmup-band"></div><input type="range" id="timeline-slider" aria-label="记录帧时间轴" min="0" max="49" step="1" value="0"></div><div class="timeline-labels"><span id="timeline-start">0.00 s</span><span id="warmup-label">预热 0–2.00 s</span><span id="timeline-end">2.50 s</span></div></div><label class="speed-control"><span>速度</span><select id="playback-speed" aria-label="回放速度"><option value="0.25" selected>0.25×</option><option value="0.5">0.5×</option><option value="1">1×</option></select></label><button class="icon-button restart-button" id="restart-playback" aria-label="从头回放" title="从头回放">${icon('reset')}</button></div>
+        <div class="timeline-main"><div class="playback-buttons"><button class="icon-button" id="previous-frame" aria-label="上一记录帧">${icon('back')}</button><button class="play-button" id="play-button" aria-label="播放回放">${icon('play')}</button><button class="icon-button" id="next-frame" aria-label="下一记录帧">${icon('next')}</button></div><div class="scrubber"><label class="sr-only" for="timeline-slider">记录帧时间轴</label><div class="timeline-track"><div id="warmup-band" class="warmup-band"></div><input type="range" id="timeline-slider" aria-label="记录帧时间轴" min="0" max="49" step="1" value="0"></div><div class="timeline-labels"><span id="timeline-start">0.00 秒</span><span id="warmup-label">预热 0–2.00 秒</span><span id="timeline-end">2.50 秒</span></div></div><label class="speed-control"><span>速度</span><select id="playback-speed" aria-label="回放速度"><option value="0.25" selected>0.25×</option><option value="0.5">0.5×</option><option value="1">1×</option></select></label><button class="icon-button restart-button" id="restart-playback" aria-label="从头回放" title="从头回放">${icon('reset')}</button></div>
         <p id="playback-note" class="playback-note" role="status"></p>
       </section>
     </div>
@@ -104,18 +109,35 @@ class AtlasApp {
   private previewImages = new Map<string, HTMLImageElement>();
   private previewFailures = new Set<string>();
   private buttons = new Map<string, HTMLButtonElement>();
+  private previewGeneration = 0;
+  private readonly events = new AbortController();
   constructor(private data: Dataset) {
     this.run = data.runs.find(run => run.stimulus === 'expansion' && run.time_s.length > 0) ?? data.runs[0];
     this.populate();
     el('load-state').hidden = true; el('dashboard').hidden = false;
-    try {
-      if (data.atlas.positioned_count) this.brain = new BrainView(el('brain-view'), data.atlas);
-      else this.brainError('没有可显示的胞体位置。参考节点仍保留在统计中。');
-    } catch (error) { this.brainError(`WebGL 暂不可用：${error instanceof Error ? error.message : String(error)}`); }
-    try { this.fly = new FlyView(el('fly-view')); } catch { el('fly-view').textContent = 'WebGL 不可用 · 静态身体示意未加载'; }
+    this.createBrain();
+    try { this.fly = new FlyView(el('fly-view')); } catch { el('fly-view').textContent = 'WebGL 不可用 · 身体示意未加载'; }
     this.bind(); this.changeRun(this.run.id, true);
     this.animation = requestAnimationFrame(this.tick);
-    window.addEventListener('pagehide', () => { cancelAnimationFrame(this.animation); this.brain?.dispose(); this.fly?.dispose(); }, { once: true });
+    window.addEventListener('pagehide', () => this.dispose(), { once: true, signal: this.events.signal });
+  }
+  setDataset(data: Dataset): void {
+    this.setPlaying(false); this.previewGeneration++;
+    this.data = data; this.run = data.runs.find(run => run.stimulus === 'expansion') ?? data.runs[0];
+    this.previewImages.clear(); this.previewFailures.clear(); this.buttons.clear();
+    el('stimulus-list').replaceChildren(); el('group-select').replaceChildren();
+    this.brain?.dispose(); this.brain = null; el('brain-view').replaceChildren(); el('brain-empty').hidden = true;
+    this.populate(); this.createBrain(); this.changeRun(this.run.id, true);
+  }
+  private createBrain(): void {
+    try {
+      if (this.data.atlas.positioned_count) this.brain = new BrainView(el('brain-view'), this.data.atlas);
+      else this.brainError('没有可显示的胞体位置。参考节点仍保留在统计中。');
+    } catch (error) { this.brainError(`WebGL 暂不可用：${error instanceof Error ? error.message : String(error)}`); }
+  }
+  dispose(): void {
+    cancelAnimationFrame(this.animation); this.events.abort(); this.previewGeneration++;
+    this.brain?.dispose(); this.fly?.dispose(); this.previewImages.clear();
   }
   private brainError(message: string): void { text('brain-empty', message); el('brain-empty').hidden = false; }
   private populate(): void {
@@ -125,10 +147,11 @@ class AtlasApp {
     text('coverage-percent', `${(fraction * 100).toFixed(1)}%`); el('coverage-bar').style.width = `${fraction * 100}%`;
     text('positioned-count', `已显示 ${number(atlas.positioned_count)}`); text('missing-count', `缺坐标 ${number(atlas.missing_count)}`);
     text('legend-max', maxRate.toFixed(1)); text('legend-mid', (maxRate / 2).toFixed(1));
-    const labels: Record<string, string> = { static: '静止', left: '向左', right: '向右', up: '向上', down: '向下', expansion: '扩张' };
+    const labels = stimulusLabels;
     for (const run of this.data.runs) {
       const button = document.createElement('button'); button.className = 'stimulus-button';
-      const label = labels[run.stimulus] ?? run.label; button.innerHTML = `${icon(run.stimulus, 19)}<span></span>`;
+      const label = labels[run.stimulus] ?? run.label;
+      button.innerHTML = `${icon(run.stimulus, 19)}<span></span>`;
       button.querySelector('span')!.textContent = label;
       button.dataset.runId = run.id; button.setAttribute('aria-label', `选择${label}刺激`);
       button.addEventListener('click', () => this.changeRun(run.id, true));
@@ -136,7 +159,7 @@ class AtlasApp {
     }
     const select = el<HTMLSelectElement>('group-select');
     for (const group of atlas.groups) { const option = document.createElement('option'); option.value = group.name; option.textContent = `${group.name}${group.total_neurons === 0 ? ' · 空群组' : ''}`; select.append(option); }
-    this.selectedGroup = atlas.groups.find(group => group.name === 'R16_L')?.name ?? atlas.groups[0]?.name ?? '';
+    this.selectedGroup = atlas.groups.find(group => group.name === this.selectedGroup)?.name ?? atlas.groups.find(group => group.name === 'R16_L')?.name ?? atlas.groups[0]?.name ?? '';
     select.value = this.selectedGroup; select.disabled = atlas.groups.length === 0;
     this.populateSource();
   }
@@ -145,8 +168,8 @@ class AtlasApp {
     for (const [title, description] of [
       ['模型', '固定 LIF 完整参考模型的诊断仿真，不代表活体测量或已训练策略。'],
       ['脑图', '来自 MaleCNS v1.0 官方胞体位置，未包含神经形态与突触连线。缺坐标的神经元计入总数，不在图中显示。'],
-      ['活动与颜色', '颜色表示群组平均放电率，全部刺激共用色标。无记录的节点保持背景色；重叠群组取均值中的最大值。'],
-      ['刺激与回放', '刺激画面按原记录参数重建，非摄像头录像。按原始仿真时间逐帧回放，灰色区间为预热。'],
+      ['活动与颜色', '颜色表示群组平均放电率，已查看的记录共用色标。载入更高响应时，色标上限随之扩大；具体比较请以 Hz 数值为准。无记录的节点保持背景色，重叠群组取最大均值。'],
+      ['刺激与回放', this.run.stimulus_preview?.kind !== 'reconstructed' && this.run.stimulus_preview ? '画面是本次计算使用的实际输入。按仿真时间逐帧回放，灰色区间为预热；计算耗时与仿真时长分别记录。' : '画面按原记录参数重建，非摄像头录像。按原始仿真时间逐帧回放，灰色区间为预热。'],
       ['果蝇示意', '仅展示静态形态，未由神经活动驱动，也未接入实体设备。'],
     ]) { const section = document.createElement('section'); const h3 = document.createElement('h3'); h3.textContent = title; const p = document.createElement('p'); p.textContent = description; section.append(h3, p); content.append(section); }
     const attribution = document.createElement('p'); attribution.className = 'source-attribution';
@@ -154,19 +177,20 @@ class AtlasApp {
     attribution.append(link); content.append(attribution);
   }
   private bind(): void {
-    el('reset-view').addEventListener('click', () => this.brain?.reset());
-    el<HTMLSelectElement>('group-select').addEventListener('change', event => { this.selectedGroup = (event.target as HTMLSelectElement).value; this.update(); });
-    el('highlight-group').addEventListener('change', () => this.update());
+    const options = { signal: this.events.signal };
+    el('reset-view').addEventListener('click', () => this.brain?.reset(), options);
+    el<HTMLSelectElement>('group-select').addEventListener('change', event => { this.selectedGroup = (event.target as HTMLSelectElement).value; this.update(); }, options);
+    el('highlight-group').addEventListener('change', () => this.update(), options);
     el('play-button').addEventListener('click', () => {
       if (this.frame === this.run.time_s.length - 1 && !this.playing) this.frame = 0;
       this.setPlaying(!this.playing); this.update();
-    });
-    el('previous-frame').addEventListener('click', () => { this.setPlaying(false); this.setFrame(this.frame - 1); });
-    el('next-frame').addEventListener('click', () => { this.setPlaying(false); this.setFrame(this.frame + 1); });
-    el('restart-playback').addEventListener('click', () => { this.frame = 0; this.setPlaying(true); this.update(); });
-    el<HTMLInputElement>('timeline-slider').addEventListener('input', event => { this.setPlaying(false); this.setFrame(Number((event.target as HTMLInputElement).value)); });
-    el<HTMLSelectElement>('playback-speed').addEventListener('change', event => { this.speed = Number((event.target as HTMLSelectElement).value); this.elapsed = 0; });
-    document.addEventListener('visibilitychange', () => { this.previousTimestamp = 0; });
+    }, options);
+    el('previous-frame').addEventListener('click', () => { this.setPlaying(false); this.setFrame(this.frame - 1); }, options);
+    el('next-frame').addEventListener('click', () => { this.setPlaying(false); this.setFrame(this.frame + 1); }, options);
+    el('restart-playback').addEventListener('click', () => { this.frame = 0; this.setPlaying(true); this.update(); }, options);
+    el<HTMLInputElement>('timeline-slider').addEventListener('input', event => { this.setPlaying(false); this.setFrame(Number((event.target as HTMLInputElement).value)); }, options);
+    el<HTMLSelectElement>('playback-speed').addEventListener('change', event => { this.speed = Number((event.target as HTMLSelectElement).value); this.elapsed = 0; }, options);
+    document.addEventListener('visibilitychange', () => { this.previousTimestamp = 0; }, options);
   }
   private changeRun(id: string, observation: boolean): void {
     this.setPlaying(false); this.run = this.data.runs.find(run => run.id === id)!;
@@ -180,26 +204,30 @@ class AtlasApp {
     this.loadPreview(); this.populateSource(); this.update();
   }
   private loadPreview(): void {
-    const id = this.run.id, url = this.data.previewUrls.get(id);
+    const id = this.run.id, url = this.data.previewUrls.get(id), generation = this.previewGeneration;
     if (!url || this.previewImages.has(id) || this.previewFailures.has(id)) return;
     const image = new Image();
     image.onload = () => {
+      if (generation !== this.previewGeneration) return;
       const run = this.data.runs.find(item => item.id === id)!;
       if (image.naturalWidth !== run.stimulus_preview?.width || image.naturalHeight !== run.stimulus_preview.height * run.stimulus_preview.frames) this.previewFailures.add(id);
       else this.previewImages.set(id, image);
       if (this.run.id === id) this.drawPreview();
     };
-    image.onerror = () => { this.previewFailures.add(id); if (this.run.id === id) this.drawPreview(); }; image.src = url;
+    image.onerror = () => { if (generation !== this.previewGeneration) return; this.previewFailures.add(id); if (this.run.id === id) this.drawPreview(); }; image.src = url;
   }
   private drawPreview(): void {
     const canvas = el<HTMLCanvasElement>('stimulus-canvas'); const context = canvas.getContext('2d');
     const image = this.previewImages.get(this.run.id), preview = this.run.stimulus_preview;
+    const generated = preview?.kind === 'generated';
+    text('preview-kind', generated ? '实际输入' : '重建');
+    canvas.setAttribute('aria-label', generated ? '当前帧实际输入画面' : '当前帧重建刺激画面');
     const available = Boolean(image && preview && this.run.time_s.length > 0);
     canvas.hidden = !available; el('preview-message').hidden = available;
     if (available && image && preview && context) {
       canvas.width = preview.width; canvas.height = preview.height;
       context.drawImage(image, 0, this.frame * preview.height, preview.width, preview.height, 0, 0, preview.width, preview.height);
-    } else text('preview-message', this.previewFailures.has(this.run.id) ? '刺激预览缺失或尺寸损坏，请重新导出' : !preview ? '此记录没有刺激重建资产' : this.run.time_s.length === 0 ? '此刺激没有记录帧' : '正在读取刺激重建…');
+    } else text('preview-message', this.previewFailures.has(this.run.id) ? '刺激预览无法显示' : !preview ? '此记录没有刺激预览' : this.run.time_s.length === 0 ? '此刺激没有记录帧' : '正在读取刺激画面…');
   }
   private setPlaying(value: boolean): void {
     this.playing = value && this.run.time_s.length > 0; this.elapsed = 0; this.previousTimestamp = 0;
@@ -249,13 +277,39 @@ class AtlasApp {
   }
 }
 
-loadDataset().then(data => new AtlasApp(data)).catch(error => {
-  const state = el('load-state'); state.setAttribute('role', 'alert'); state.replaceChildren();
-  const heading = document.createElement('h2'); heading.textContent = '本地图谱尚未就绪';
-  const message = document.createElement('p'); message.textContent = error instanceof Error ? error.message : String(error);
-  const instruction = document.createElement('p'); instruction.textContent = '请在项目根目录运行以下命令，再重新载入。';
-  const command = document.createElement('code'); command.textContent = '.venv/bin/python -m malecns_lab.visualization.export';
-  const reload = document.createElement('button'); reload.className = 'retry-button'; reload.textContent = '重新载入'; reload.addEventListener('click', () => location.reload());
-  state.append(heading, message, instruction, command, reload);
-  el('source-content').textContent = '数据尚未载入，请按页面提示重新载入。';
-});
+let viewer: AtlasApp | null = null;
+let viewRequest = 0;
+let sharedMaxRate = 1;
+
+async function openDataset(job: Job | null): Promise<boolean> {
+  const requestId = ++viewRequest;
+  el('view-loading').hidden = false; el('view-error').hidden = true;
+  try {
+    const data = await loadDataset(job?.catalog_url ?? '/data/catalog.json');
+    if (requestId !== viewRequest) return false;
+    sharedMaxRate = Math.max(sharedMaxRate, data.maxRate); data.maxRate = sharedMaxRate;
+    if (viewer) viewer.setDataset(data); else viewer = new AtlasApp(data);
+    text('view-mode', job ? '实验结果 · 仿真' : '已有记录 · 仿真');
+    text('view-description', job
+      ? `${experimentLabel(job.parameters)} · ${parameterDetail(job.parameters)} · 观察 ${job.parameters.duration_s.toFixed(2)} 秒`
+      : '已有刺激记录');
+    return true;
+  } catch (error) {
+    if (requestId !== viewRequest) return false;
+    const message = error instanceof Error ? error.message : String(error);
+    text('view-error', `结果载入失败：${message}`); el('view-error').hidden = false;
+    if (!viewer) {
+      const state = el('load-state'); state.setAttribute('role', 'status'); state.replaceChildren();
+      const heading = document.createElement('h2'); heading.textContent = '暂未载入图谱';
+      const instruction = document.createElement('p'); instruction.textContent = '可运行新实验，或重试读取已有记录。';
+      const reload = document.createElement('button'); reload.className = 'retry-button'; reload.textContent = '重试载入';
+      reload.addEventListener('click', () => { void openDataset(job); });
+      state.append(heading, instruction, reload);
+      el('source-content').textContent = '数据尚未载入。';
+    }
+    return false;
+  } finally { if (requestId === viewRequest) el('view-loading').hidden = true; }
+}
+
+new ExperimentPanel(openDataset);
+void openDataset(null);

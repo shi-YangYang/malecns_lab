@@ -1,6 +1,6 @@
 # P2d — 完整图配对可观测性工具
 
-状态：Done（软件子批）。47项不同定向检查有通过记录，独立[验收PASS](acceptance-p2d.md)，详见[实施报告](implementation-p2d.md)。软件交付时尚未执行完整图实验；2026-10-19在P1实测后，另行冻结的[实际协议](observability-plan.md)已完成并获[独立验收](acceptance-observability-r1.md)。具体有限窗口结论见[实测报告](observability-run-20261019-r1.md)，不以软件PASS替代实际证据。
+状态：Done（软件子批）。47项不同定向检查有通过记录，独立验收PASS，详见实施报告。软件交付时尚未执行完整图实验；2026-10-19在P1实测后，另行冻结的实际协议已完成并获独立验收。具体有限窗口结论见[实测报告](observability-run-20261019-r1.md)，不以软件PASS替代实际证据。
 
 ## 背景 / 目标
 

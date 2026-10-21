@@ -1,6 +1,6 @@
 # 全GPU修复训练实测
 
-本轮完成新协议的160/160窗、320帧和160次联合更新。正式训练session42726已收取exit0，`epoch_complete=true`；没有追加epoch。新增158窗的[独立保存证据审查](acceptance-gpu-recovery-epoch-actual.md)session53179 exit0、PASS；审查没有重算模型或重复首两窗验收。不能仅凭进程退出或参数变化称为学会控制。
+本轮完成新协议的160/160窗、320帧和160次联合更新。正式训练session42726已收取exit0，`epoch_complete=true`；没有追加epoch。新增158窗的独立保存证据审查session53179 exit0、PASS；审查没有重算模型或重复首两窗验收。不能仅凭进程退出或参数变化称为学会控制。
 
 ## 这次在训练什么
 
@@ -10,7 +10,7 @@
 
 ## 修复、继承与GPU范围
 
-[原因报告](gpu-recovery-causes.md)和[配对诊断验收](acceptance-gradient-probe-r2-actual.md)记录了旧动作MSE在tanh精确饱和时失去纠错梯度，以及长递归反向造成theta梯度放大的证据。没有发现FLU前后轴映射接反。
+[原因报告](gpu-recovery-causes.md)和配对诊断验收记录了旧动作MSE在tanh精确饱和时失去纠错梯度，以及长递归反向造成theta梯度放大的证据。没有发现FLU前后轴映射接反。
 
 本轮采用稳定logit损失；保留每窗全部1000步前向，将递归信用范围固定为100步（10ms），50步activation checkpoint负责重算节省内存。截断改变的是学习中的跨时间梯度，不删除图节点、边或前向步骤，也不证明100步是最佳超参数。
 
@@ -20,7 +20,7 @@
 
 ## 实际执行链
 
-先完成[软件验收](acceptance-gpu-recovery-software.md)，再initialize→可丢弃负向目标gate→正式第1窗→新进程第2窗。上述门槛已[独立实际PASS](acceptance-gpu-recovery-gates-actual.md)，之后才启动剩余158窗。
+先完成软件验收，再initialize→可丢弃负向目标gate→正式第1窗→新进程第2窗。上述门槛已独立实际PASS，之后才启动剩余158窗。
 
 gate错误正vx的两帧logit从1.4313/5.3131降至1.2880/4.7090，固定特征vx损失3.5338→3.1542；内部theta梯度L2为0.07614、5014项内部参数改变，gate更新随后丢弃。gate动作仍为正；该结果不等于一次更新已反向，也不是旧第160窗旧状态的精确重放。
 

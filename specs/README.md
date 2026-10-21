@@ -1,39 +1,29 @@
-# Specs
+# 设计与实测记录
 
-Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写英文与连字符。不要另建 `.ai/specs/` 或 `docs/specs/`。
+当前工作是[仓库清理与官方 X2 路线](spec-014-x2-repository-cleanup/spec.md)。随后尝试 Mac 上的官方 X2 Docker 环境；单轴稳向不再是接入前置。日常操作从[文档索引](../docs/README.md)进入，实验结论见[已有结果](../docs/EXPERIMENT_RESULTS.md)。
 
-## 生命周期
+本目录保留阶段设计、独有数值协议和实际实验报告，删除重复实施、返工和验收流水。历史报告描述当时状态，不是当前待办清单；过程文件中已经提交的版本可从 Git 历史查看，未提交且被精简的过程说明不保证另有副本。原始数据、参数、源码快照和日志没有删除。
 
-`Initialization → Planning → Implementation → Acceptance → Done`；验收失败进入 `Rework → Acceptance`。
+## 保留的阶段设计
 
-协调 Agent 在 Planning 阶段完成足够的需求理解，将无阻塞关键问题的 Spec 标记 `Ready` 后才分配实施。无需为形式重复询问用户已明确的信息。每个状态应反映真实进展；`Ready` 表示可实施，不表示已验收。
-
-| 文件 | 责任与内容 |
+| 阶段 | 范围与当前定位 |
 |---|---|
-| `spec.md` | 协调者维护目标、边界、兼容性与逐项验收标准 |
-| `plan.md` | 实施顺序、预计文件、风险、迁移与相称的验证计划 |
-| `implementation.md` | 实施者记录实际修改、实际验证与限制 |
-| `acceptance.md` | 新的独立验收者逐项判断并记录 PASS 或 FAIL |
-| `rework.md`（需要时） | 协调者整理失败原因、返工范围及完成条件 |
+| [001](spec-001-agent-workflow/spec.md)、[002](spec-002-business-layout/spec.md)、[003](spec-003-remove-compat/spec.md) | 已完成的工程流程、目录与入口整理 |
+| [004](spec-004-neural-activity/spec.md)、[005](spec-005-remove-minifly/spec.md)、[006](spec-006-malecns-audit/spec.md) | 神经活动诊断、删除合成网络及历史数据审计 |
+| [007](spec-007-model-v2/spec.md) | 完整参考图、V2 诊断与冻结脑研究工具 |
+| [008](spec-008-trainable-snn/spec.md) | 完整图可训练 SNN、三轴跟随、GPU 与研究对照；保留实现及实测，不自动续训 |
+| [009](spec-009-malecns-lab/spec.md) | 已完成的项目与 Python 包改名 |
+| [010](spec-010-neural-atlas/spec.md)、[011](spec-011-interactive-atlas/spec.md) | 保留的 WebGL 图谱与交互刺激响应 |
+| [012](spec-012-yaw-closed-loop/spec.md) | 历史单轴固定读出实验；无一致控制优势，网页入口已移除 |
+| [013](spec-013-yaw-learning/spec.md) | 历史单轴学习：两分支各 80 窗完成、固定模型验证失败；后续支线已停止 |
 
-从 [_template/spec.md](_template/spec.md)、[plan.md](_template/plan.md)、[acceptance.md](_template/acceptance.md) 创建任务文档。模板占位符不是事实；未验收不得预填 PASS。正式验收报告的结论只能是 PASS 或 FAIL，并给出逐项证据。
+## 关键实测
 
-验收 FAIL 时，由协调者创建新的实施 Agent 返工，再创建新的独立验收 Agent；实施者不负责最终验收。环境不支持多 Agent 时，按 [AGENTS.md](../AGENTS.md) 做阶段隔离，并如实记录单 Agent 审查。
+- [完整参考图构建](spec-007-model-v2/implementation-p0.md)。
+- [CPU/MPS 数值差异](spec-008-trainable-snn/mps-fullgraph-run-20261019-r1.md)。
+- [持续输入响应](spec-008-trainable-snn/sustained-observability-run-20261019-r1.md)。
+- [全 GPU 160 窗训练](spec-008-trainable-snn/gpu-recovery-run-20261019.md)。
+- [交互刺激实测](spec-011-interactive-atlas/actual-run-20261021.md)。
+- [单轴基线](spec-012-yaw-closed-loop/actual-run-20261021.md)、[单轴学习](spec-013-yaw-learning/actual-run-20261021.md)、[固定模型验证失败](spec-013-yaw-learning/acceptance-validation.md)。
 
-实施与验收都按 S0–S3 控制验证范围，不机械重复已通过检查。PASS 后由协调者核对报告、更新状态；只有用户要求或工作流明确要求时创建提交，使用 `<type>: <中文说明>`，不默认推送。
-
-## 当前记录
-
-- [spec-010-neural-atlas](spec-010-neural-atlas/spec.md)：Done，独立验收 PASS；本地 WebGL 胞体图谱、六种刺激回放、群组活动曲线和三维果蝇示意；使用已有诊断记录，不启动训练或设备。
-
-- [spec-009-malecns-lab](spec-009-malecns-lab/spec.md)：Done，已通过[独立验收](spec-009-malecns-lab/acceptance.md)；统一展示名 MaleCNS Lab、包与 CLI `malecns_lab`，保留科研资产与历史来源，整理文档和机器人资料入口。
-
-- [spec-001-agent-workflow](spec-001-agent-workflow/spec.md)：已有项目接入 Agent 开发流程。当前阶段以 [Plan](spec-001-agent-workflow/plan.md) 和[任务交接](../.ai/prompts/task-handoff.md)为准。
-
-- [spec-002-business-layout](spec-002-business-layout/spec.md)：按职责重构业务目录，当前状态见对应 Plan 与任务交接。
-- [spec-003-remove-compat](spec-003-remove-compat/spec.md)：删除旧兼容层，统一新模块入口与文档命令。
-- [spec-004-neural-activity](spec-004-neural-activity/spec.md)：离线神经活动记录、刺激比较与可视化。
-- [spec-005-remove-minifly](spec-005-remove-minifly/spec.md)：移除合成飞行网络，所有脑入口统一真实连接组。
-- [spec-006-malecns-audit](spec-006-malecns-audit/spec.md)：原始数据过滤、输入输出通路与群组覆盖审计；用户报告见 [MaleCNS 审计](../docs/MALECNS_AUDIT.md)。
-- [spec-007-model-v2](spec-007-model-v2/spec.md)：第二版 MaleCNS 模型设计及完整图诊断、学习与对照工具；[P0–P3 离线实施](spec-007-model-v2/execution-plan.md)已独立验收完成，M4 真实动作研究待数据。设计见 [MODEL_V2](../docs/MODEL_V2.md)。
-- [spec-008-trainable-snn](spec-008-trainable-snn/spec.md)：训练完整MaleCNS网络内部参数，实现指定目标跟随的前进、升降和转向；当前仅Mac，已授权逐步实施/提交。完整图数值更新、优化、目标环境、神经策略、参数/状态存档、连续训练与闭环评估软件已验收，旧joint160窗保留，饱和/梯度根因诊断、全GPU修复及新的[160/160窗](spec-008-trainable-snn/gpu-recovery-run-20261019.md)已完成；数值稳定和训练期改善不等于固定策略控制成功，独立冻结脑仍CPU10/160窗；独立冻结脑完整训练及闭环/拓扑比较、实飞仍待推进，不声称已学会控制。
+源码直接引用的 MPS 数值先例报告保留原路径与原文。新的改动按 [AGENTS.md](../AGENTS.md) 和 [_template](_template/) 使用与风险相称的记录与验证。

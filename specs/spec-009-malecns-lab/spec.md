@@ -1,6 +1,6 @@
 # Spec — MaleCNS Lab 仓库命名与入口整理
 
-状态：Done。2026-10-20 用户要求先整理仓库，并明确选择“项目和 Python 包名一起改成 malecns_lab”；实施完成且新的[独立验收](acceptance.md)为 PASS。
+状态：Done。2026-10-20 用户要求先整理仓库，并明确选择“项目和 Python 包名一起改成 malecns_lab”；实施完成且新的独立验收为 PASS。
 
 ## 背景
 

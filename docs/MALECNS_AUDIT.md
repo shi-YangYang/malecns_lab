@@ -1,5 +1,7 @@
 # MaleCNS 数据过滤与输入输出审计报告
 
+> 历史审计：源码定位使用审计时的 `src/cnsbridge/` 名称与行号，不是当前 checkout 的链接；本文不作为当前操作入口。完整参考及当前结论见 [研究说明](RESEARCH.md)与[实验记录](EXPERIMENT_RESULTS.md)。
+
 审计日期：2026 年 10 月 16 日。源码基线：`747a8aa38031ed927d121afbb85aaf9643256612`。对象为本地 MaleCNS v1.0 原始表、`data/malecns_brain.npz`、当前配置和 `readout_malecns.json`。
 
 **现有模型确实使用真实连接组，且与当前构建规则一致。主要发现是输入映射存在明确遗漏，动作输出也只有部分通道由校准后的神经率决定。** 再下载文件或用相同参数重建，均不会自动改变这些行为。
@@ -21,7 +23,7 @@
 
 下载目录包含官方 `flat-connectome` 发布目录全部 11 个文件，共 31,318,683,398 字节。官方将完整 weights 定义为有突触片段之间的连接图，端点并非都已归属到完整神经元；当前表名中的 `minconf-0.5` 已包含官方置信度筛选。[官方下载说明](https://male-cns.janelia.org/download/)
 
-实际构建器只读取三份文件：`body-annotations`、`body-neurotransmitters`、完整 `connectome-weights`。其他八份统计、逐突触数据和官方派生子集尚未被构建器使用。运行时直接加载 NPZ，也不会因为下载目录增加文件而自动更新网络。[构建器](../src/cnsbridge/brain/connectome.py#L204)、[模型加载](../src/cnsbridge/brain/brain.py#L16)
+实际构建器只读取三份文件：`body-annotations`、`body-neurotransmitters`、完整 `connectome-weights`。其他八份统计、逐突触数据和官方派生子集尚未被构建器使用。运行时直接加载 NPZ，也不会因为下载目录增加文件而自动更新网络。构建器（历史源码 `src/cnsbridge/brain/connectome.py#L204`）、模型加载（历史源码 `src/cnsbridge/brain/brain.py#L16`）
 
 逐项对照这三张源表与当前 NPZ 的结果：
 
@@ -38,7 +40,7 @@
 
 ### 节点筛选
 
-原始注释有 211,577 行，body ID 全部非空且唯一。构建器要求 superclass 非空，移除 44,877 行，剩余 166,700 行；随后排除 `status=Glia` 没有再移除节点，因为这些记录已经在前一步被排除。状态条件实际读取 `status`，没有要求全部为 `Traced`。[节点筛选代码](../src/cnsbridge/brain/connectome.py#L251)
+原始注释有 211,577 行，body ID 全部非空且唯一。构建器要求 superclass 非空，移除 44,877 行，剩余 166,700 行；随后排除 `status=Glia` 没有再移除节点，因为这些记录已经在前一步被排除。状态条件实际读取 `status`，没有要求全部为 `Traced`。节点筛选代码（历史源码 `src/cnsbridge/brain/connectome.py#L251`）
 
 | status | 原始注释数 | 模型保留数 |
 |---|---:|---:|
@@ -55,7 +57,7 @@
 
 ### 连接筛选
 
-下表按代码顺序统计。一个有向端点对对应一行连接，`weight` 是该连接包含的突触计数；两列不能互换。[连接筛选代码](../src/cnsbridge/brain/connectome.py#L287)
+下表按代码顺序统计。一个有向端点对对应一行连接，`weight` 是该连接包含的突触计数；两列不能互换。连接筛选代码（历史源码 `src/cnsbridge/brain/connectome.py#L287`）
 
 | 依次应用的条件 | 有向连接行数 | 突触计数总和 |
 |---|---:|---:|
@@ -84,7 +86,7 @@
 
 ### 递质与连接符号
 
-构建器将每个突触前节点的 `consensus_nt` 转成统一的正负号，再乘突触数量。它没有使用逐突触递质概率或额外递质置信度筛选。[符号规则](../src/cnsbridge/brain/connectome.py#L19)、[符号应用](../src/cnsbridge/brain/connectome.py#L272)
+构建器将每个突触前节点的 `consensus_nt` 转成统一的正负号，再乘突触数量。它没有使用逐突触递质概率或额外递质置信度筛选。符号规则（历史源码 `src/cnsbridge/brain/connectome.py#L19`）、符号应用（历史源码 `src/cnsbridge/brain/connectome.py#L272`）
 
 | 递质标签 | 保留节点数 | 当前数值处理 |
 |---|---:|---|
@@ -98,11 +100,11 @@
 
 默认正号共涉及 3,177 个节点。其中 unclear 节点影响 174,745 条保留连接、1,527,368 个突触计数；178 个无递质记录节点没有保留出边。未知递质默认兴奋是一项实际影响网络的建模选择，不能当成原始数据已经确定的生物学事实。
 
-另有一处低影响展示差异：`Connectome.n_synapses` 使用 float32 累加，显示 104,351,896，比精确整数总和多 3。本报告使用精确计数，该差异没有改变连接矩阵。[计数属性](../src/cnsbridge/brain/connectome.py#L77)
+另有一处低影响展示差异：`Connectome.n_synapses` 使用 float32 累加，显示 104,351,896，比精确整数总和多 3。本报告使用精确计数，该差异没有改变连接矩阵。计数属性（历史源码 `src/cnsbridge/brain/connectome.py#L77`）
 
 ## 群组覆盖与缺失原因
 
-实际配置由默认文件与 `configs/malecns.yaml` 合并。群组按 type 正则与侧别选择，Brain 启动时重新解析；全部 22 个群组与 NPZ 中保存的群组一致，没有未定义的读出或偏置群组引用。[默认群组配置](../src/cnsbridge/defaults.yaml#L34)、[解析逻辑](../src/cnsbridge/brain/brain.py#L38)
+实际配置由默认文件与 `configs/malecns.yaml` 合并。群组按 type 正则与侧别选择，Brain 启动时重新解析；全部 22 个群组与 NPZ 中保存的群组一致，没有未定义的读出或偏置群组引用。默认群组配置（历史源码 `src/cnsbridge/defaults.yaml#L34`）、解析逻辑（历史源码 `src/cnsbridge/brain/brain.py#L38`）
 
 下表每行代表左右两个群组；左右条件分别为保存的 side 等于 L、R。T4a–d 群组名实际同时包含对应的 T4 和 T5。
 
@@ -124,7 +126,7 @@
 
 ### R1–R6 侧别遗漏
 
-图中 3,377 个 R1–R6 全部有 rootSide：L 1,112、R 2,265。但 somaSide 只有 L 4、R 9，其余 3,364 个缺失。构建器在整张表上优先选择 somaSide 列，没有按行或按细胞类别回退到 rootSide，群组因此只覆盖 13 / 3,377，即约 0.385%。[侧别列选择](../src/cnsbridge/brain/connectome.py#L254)
+图中 3,377 个 R1–R6 全部有 rootSide：L 1,112、R 2,265。但 somaSide 只有 L 4、R 9，其余 3,364 个缺失。构建器在整张表上优先选择 somaSide 列，没有按行或按细胞类别回退到 rootSide，群组因此只覆盖 13 / 3,377，即约 0.385%。侧别列选择（历史源码 `src/cnsbridge/brain/connectome.py#L254`）
 
 这 3,364 个节点仍然在网络里。侧别保存为字符串 `nan` 与本机当前构建和序列化行为一致，不是模型版本漂移。直接运动输入同时进入 T4/T5、LPLC2、LC4，所以不能据此说网络完全没有视觉驱动。
 
@@ -139,7 +141,7 @@ rootSide 提供了可核查的替代注释，但侧别字段应按细胞类别�
 1. `GroupSpec` 只在 type 中查 `haltere`，不会查 subclass；实际 type 是 SApp、SNpp 等名称，还有 4 条没有 type。
 2. 即使找到这些节点，当前保存侧别也无法匹配 L/R。NPZ 没有保留原始 subclass 和 rootSide 供群组直接使用。
 
-简单替换成 type 名称列表也不能准确选中这批细胞：相同非空 type 在原始表中匹配 219 条，其中 18 条不是 haltere，同时会漏掉 4 条无 type 的 haltere。后续应保留或关联官方注释字段，按 subclass 和适用侧别建立明确选择规则，再验证设备偏航反馈的编码假设。[群组选择接口](../src/cnsbridge/brain/connectome.py#L41)、[HAL 注释证据](../data/audits/malecns_20261016/group_audit.json)
+简单替换成 type 名称列表也不能准确选中这批细胞：相同非空 type 在原始表中匹配 219 条，其中 18 条不是 haltere，同时会漏掉 4 条无 type 的 haltere。后续应保留或关联官方注释字段，按 subclass 和适用侧别建立明确选择规则，再验证设备偏航反馈的编码假设。群组选择接口（历史源码 `src/cnsbridge/brain/connectome.py#L41`）、[HAL 注释证据](../data/audits/malecns_20261016/group_audit.json)
 
 ### 结构通路存在，但不等于功能已验证
 
@@ -167,13 +169,13 @@ flowchart TD
 
 ### 感觉编码和神经计算
 
-当前没有物体识别网络。Retina 将画面缩为 96×72，把单个前向画面的左右半幅当作两眼，每眼 6×8 网格；软件计算 Lucas–Kanade 光流和扩张。图像上移形成 up，下移形成 down，左右眼分别定义 ftb/btf。外部代码再把这些特征同时注入 R1–R6、T4/T5、LPLC2、LC4，并非所有视觉处理都由连接组从像素中自行产生。[Retina](../src/cnsbridge/senses/retina.py#L96)
+当前没有物体识别网络。Retina 将画面缩为 96×72，把单个前向画面的左右半幅当作两眼，每眼 6×8 网格；软件计算 Lucas–Kanade 光流和扩张。图像上移形成 up，下移形成 down，左右眼分别定义 ftb/btf。外部代码再把这些特征同时注入 R1–R6、T4/T5、LPLC2、LC4，并非所有视觉处理都由连接组从像素中自行产生。Retina（历史源码 `src/cnsbridge/senses/retina.py#L96`）
 
-InputEncoder 将组内第 k 个神经元映射到 `floor(k×48/n)` 网格，依据索引顺序，不使用真实眼柱、突触位置或受体场。只有 4 / 9 个成员的 R16 两组分别只能采样 4 / 9 个网格位置。外部输入率控制随机触发概率，不等于神经元的实际放电率。[编码器](../src/cnsbridge/senses/encoder.py#L25)、[外部刺激](../src/cnsbridge/brain/lif.py#L181)
+InputEncoder 将组内第 k 个神经元映射到 `floor(k×48/n)` 网格，依据索引顺序，不使用真实眼柱、突触位置或受体场。只有 4 / 9 个成员的 R16 两组分别只能采样 4 / 9 个网格位置。外部输入率控制随机触发概率，不等于神经元的实际放电率。编码器（历史源码 `src/cnsbridge/senses/encoder.py#L25`）、外部刺激（历史源码 `src/cnsbridge/brain/lif.py#L181`）
 
-网络按真实有向连接与软件指定的递质符号传播，使用统一 LIF 参数和 0.5 ms 步长；DNg02 另有人工 8 mV 偏置。当前脑处理每次推进 50 ms 仿真时间，输出六个群组的每神经元平均 Hz。33 个输出单元参与动作读出；配置的 600 个记录单元只是光栅抽样数量，不会把仿真图裁成 600 个节点。[脑计算](../src/cnsbridge/brain/brain.py#L54)
+网络按真实有向连接与软件指定的递质符号传播，使用统一 LIF 参数和 0.5 ms 步长；DNg02 另有人工 8 mV 偏置。当前脑处理每次推进 50 ms 仿真时间，输出六个群组的每神经元平均 Hz。33 个输出单元参与动作读出；配置的 600 个记录单元只是光栅抽样数量，不会把仿真图裁成 600 个节点。脑计算（历史源码 `src/cnsbridge/brain/brain.py#L54`）
 
-光流单位是缩小图像的像素/处理帧，没有按实际帧间秒数归一化。`loom_speed` 是扩张信号的逐次变化量，也不是标定后的接近速度。另有一处编码差异：当前帧为 BGR，但灰度权重按 RGB 顺序使用，红蓝通道贡献会交换。本次仅记录。[灰度处理](../src/cnsbridge/senses/retina.py#L44)
+光流单位是缩小图像的像素/处理帧，没有按实际帧间秒数归一化。`loom_speed` 是扩张信号的逐次变化量，也不是标定后的接近速度。另有一处编码差异：当前帧为 BGR，但灰度权重按 RGB 顺序使用，红蓝通道贡献会交换。本次仅记录。灰度处理（历史源码 `src/cnsbridge/senses/retina.py#L44`）
 
 ### 现存动作读出
 
@@ -188,7 +190,7 @@ InputEncoder 将组内第 k 个神经元映射到 `floor(k×48/n)` 网格，依�
 | DNp01_L | 0 | 0.00007 | 0.00090 |
 | DNp01_R | 0 | 0.00028 | −0.00187 |
 
-DNp03_R 有神经元且被观测，只是没有参与这两轴的线性读出；它仍参与刹车。该情况不能称为“缺失神经元”。[现存读出](../readout_malecns.json)、[加载与计算](../src/cnsbridge/control/legacy.py#L48)
+DNp03_R 有神经元且被观测，只是没有参与这两轴的线性读出；它仍参与刹车。该情况不能称为“缺失神经元”。[现存读出](../readout_malecns.json)、加载与计算（历史源码 `src/cnsbridge/control/legacy.py#L48`）
 
 | 动作轴 | 当前来源与后处理 |
 |---|---|
@@ -197,11 +199,11 @@ DNp03_R 有神经元且被观测，只是没有参与这两轴的线性读出；
 | forward | 神经线性读出为空；cruise/full 使用固定 cruise=0.25，乘以由 DNp03/DNp01 增量率计算的刹车因子 |
 | lateral | gain=0、terms 为空，当前没有有效侧移驱动；full 放行该轴也不会自动产生非零动作 |
 
-线性轴经 ±1 裁剪、0.2 EMA 与 0.04 死区。逃逸来自 DNp01 率的平滑阈值，触发后固定持续 0.7 仿真秒，并将前进归零。这些动作含义和规则是工程设计。[动作与逃逸代码](../src/cnsbridge/control/legacy.py#L70)
+线性轴经 ±1 裁剪、0.2 EMA 与 0.04 死区。逃逸来自 DNp01 率的平滑阈值，触发后固定持续 0.7 仿真秒，并将前进归零。这些动作含义和规则是工程设计。动作与逃逸代码（历史源码 `src/cnsbridge/control/legacy.py#L70`）
 
 ### 校准与时间口径
 
-当前校准代码直接构造七类全视野均匀特征，跳过像素与 Retina，给每类指定 throttle/yaw 目标，只拟合读出。它不是让连接组自行学习动作语义。现存文件记录 throttle R²=0.892、yaw R²=0.492；按当前校准实现，该指标在拟合数据自身计算，没有独立留出，不能解释为真实视频或实飞准确率。[校准实现](../src/cnsbridge/control/calibration.py#L27)
+当前校准代码直接构造七类全视野均匀特征，跳过像素与 Retina，给每类指定 throttle/yaw 目标，只拟合读出。它不是让连接组自行学习动作语义。现存文件记录 throttle R²=0.892、yaw R²=0.492；按当前校准实现，该指标在拟合数据自身计算，没有独立留出，不能解释为真实视频或实飞准确率。校准实现（历史源码 `src/cnsbridge/control/calibration.py#L27`）
 
 现存 JSON 没有模型哈希、配置哈希、校准时间和原始响应矩阵，无法证明它对应当前图和配置。加载其 baseline 后，MotorDecoder 会把 `settle_s` 设为 0；配置中的 2 秒不会重新测量现场基线。试飞前 warmup 检查输出是否安静，不等于重新校准。
 
@@ -214,9 +216,9 @@ DNp03_R 有神经元且被观测，只是没有参与这两轴的线性读出；
 | trial cruise | 2.0 / 6.0 | 0.25 |
 | trial full | 1.2 / 8.0 | 0.25 |
 
-因此 cruise 与 full 不仅动作权限不同，视觉输入增益也不同。[配置覆盖逻辑](../src/cnsbridge/experiments/tello/trial.py#L50)
+因此 cruise 与 full 不仅动作权限不同，视觉输入增益也不同。配置覆盖逻辑（历史源码 `src/cnsbridge/experiments/tello/trial.py#L50`）
 
-trial 父进程按墙钟发送 RC，计算进程每次推进固定仿真窗口，计算慢时可能重复使用同一结果。日志中的 RC 次数不等于新脑计算次数，应按 `brain_job_id` 区分。throttle 正值最终要求上升，yaw 正值要求右转；归一化命令和 RC 数值都不等于测得的米每秒速度。模式放行、时间窗、遥测中止和 RC 限幅还会进一步改变动作。[计算调度](../src/cnsbridge/experiments/tello/trial.py#L184)、[RC 映射与监督](../src/cnsbridge/experiments/tello/policy.py#L48)
+trial 父进程按墙钟发送 RC，计算进程每次推进固定仿真窗口，计算慢时可能重复使用同一结果。日志中的 RC 次数不等于新脑计算次数，应按 `brain_job_id` 区分。throttle 正值最终要求上升，yaw 正值要求右转；归一化命令和 RC 数值都不等于测得的米每秒速度。模式放行、时间窗、遥测中止和 RC 限幅还会进一步改变动作。计算调度（历史源码 `src/cnsbridge/experiments/tello/trial.py#L184`）、RC 映射与监督（历史源码 `src/cnsbridge/experiments/tello/policy.py#L48`）
 
 SafetyGovernor 的所有机制也不能仅凭配置认定已生效：ShadowBrain 传 `flying=False`，无位置且不传非零 brain_age；trial 另有独立的遥测、图像、结果时限和高度/航向边界。完整代码条件见[通路审计笔记](../data/audits/malecns_20261016/pathway_notes.md)。
 

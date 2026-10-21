@@ -1,6 +1,6 @@
 # Acceptance — 完整连接组 MPS 实测 r1
 
-2026-10-19；未参与探针实施或本次运行的新独立验收者。依据 [Ready A 协议](mps-fullgraph-probe.md)、[Decision 013](../../.ai/decisions/013-mps-validation-before-migration.md)、[实施报告](implementation-mps-fullgraph-probe.md)、[软件验收](acceptance-mps-probe-software.md)及[实际报告](mps-fullgraph-run-20261019-r1.md)。
+2026-10-19；未参与探针实施或本次运行的新独立验收者。依据 [Ready A 协议](mps-fullgraph-probe.md)、[Decision 013](../../.ai/decisions/013-mps-validation-before-migration.md)、实施报告、[软件验收](acceptance-mps-probe-software.md)及[实际报告](mps-fullgraph-run-20261019-r1.md)。
 
 ## Result
 

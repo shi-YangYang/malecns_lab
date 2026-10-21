@@ -1,6 +1,6 @@
 # 架构与接口
 
-MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。当前可用的 V2 离线基线冻结连接组与神经元动力学，只训练输出读出；[Spec 008](../specs/spec-008-trainable-snn/spec.md) 正在实现完整 MaleCNS 网络内部训练，不能把该计划当作已训练成功的模型。
+MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。V2 离线基线冻结连接组和神经元动力学，只训练输出读出；完整图内部增益与读出联合训练也已有实际运行，但训练执行完成不等于控制成功。当前主线为[官方 X2 接入](AGIBOT.md)，研究结果见[实验记录](EXPERIMENT_RESULTS.md)。
 
 ## 信号诊断与控制链路
 
@@ -90,3 +90,14 @@ print(ground.adapt(motion).command)
 冻结基线的连接矩阵为 CSC 格式 `W[post, pre]`，以脉冲、延迟缓冲、膜电位和不应期推进。V2 视频每帧推进 50 ms 仿真；实际耗时单独记录。控制线程发包频率不代表模型更新频率，也不能把固定地面录像的诊断解释成飞行闭环。
 
 增加设备需分别实现数值适配与硬件控制；增加学习方法需保留来源、时间、动作单位及支持掩码。软件检查、离线任务效果和实体能力分别验证，测试不启动实机运动。
+
+## 环境迁移与历史来源
+
+项目、发行包、Python 包和 CLI 统一为 `malecns_lab`，不保留 `cnsbridge` 兼容入口。本机根目录为 `/Users/yang/project/malecns_lab`。移动目录后，既有虚拟环境的启动脚本、激活脚本和 editable 安装可能仍指向旧路径；应修复路径，并用各环境自己的 Python 更新安装：
+
+```bash
+.venv/bin/python -m pip install --no-deps --no-build-isolation --no-index --disable-pip-version-check -e .
+.venv-train/bin/python -m pip install --no-deps --no-build-isolation --no-index --disable-pip-version-check -e .
+```
+
+上述命令假定依赖和构建后端已安装。磁盘中的 `cnsbridge.*`、`flydrones.*` schema 和历史来源标识仍保留，不能机械替换存档字段。路径或源码变化会改变实验身份，格式可读不代表可以在新源码下精确续跑；复现旧实验需匹配的源码、环境与原始资产，不改写原 run 摘要绕过校验。Git、许可、模型、数据和日志独立保留。

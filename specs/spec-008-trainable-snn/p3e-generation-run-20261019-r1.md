@@ -1,6 +1,6 @@
 # P3e0 — 首次完整 R 生成成本实测
 
-状态：实际进程已终止，新的独立[实际PASS](acceptance-p3e-generation-run-r1.md)已全文读取处理，无返工项。执行依据为已提交 `9a6ee72` 的[Ready协议](p3e-generation-probe.md)，运行前协议已绑定SHA，保持其原字节。目录 `data/topology_generation_20261019_probe_r1/`；终端session24773已收取exit0，父`assessment.json`为passed。生成与重载都在同一受监督worker中，未运行神经网络、训练或硬件。
+状态：实际进程已终止，新的独立实际PASS已全文读取处理，无返工项。执行依据为已提交 `9a6ee72` 的[Ready协议](p3e-generation-probe.md)，运行前协议已绑定SHA，保持其原字节。目录 `data/topology_generation_20261019_probe_r1/`；终端session24773已收取exit0，父`assessment.json`为passed。生成与重载都在同一受监督worker中，未运行神经网络、训练或硬件。
 
 ## 规模、变换与来源
 

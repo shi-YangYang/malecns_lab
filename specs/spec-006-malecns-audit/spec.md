@@ -1,6 +1,6 @@
 # Spec — MaleCNS 数据过滤与输入输出审计
 
-状态：Done。独立验收 AC1–AC4 PASS，见 [acceptance.md](acceptance.md)。
+状态：Done。独立验收 AC1–AC4 PASS，见 acceptance。
 
 ## 背景
 

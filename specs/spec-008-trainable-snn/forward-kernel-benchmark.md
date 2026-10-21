@@ -1,6 +1,6 @@
 # 完整图前向内核候选实测
 
-状态：Done。软件提交2a3979a后，实际B/C已获新独立[PASS](acceptance-forward-kernel-run-r1.md)，见[实测报告](forward-kernel-run-20261019-r1.md)。此子批只比较同一完整权重的计算成本，生产模型仍使用已有 Torch 实现。
+状态：Done。软件提交2a3979a后，实际B/C已获新独立PASS，见[实测报告](forward-kernel-run-20261019-r1.md)。此子批只比较同一完整权重的计算成本，生产模型仍使用已有 Torch 实现。
 
 ## 目标与范围
 

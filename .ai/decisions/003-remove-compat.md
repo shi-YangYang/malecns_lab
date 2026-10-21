@@ -18,4 +18,4 @@
 
 旧导入与脚本路径停止支持，文档和入口测试同步更新。序列化的 flydrones.* 标识、人工读出基线和实验资产保留。过去的 Spec/验收记录保持历史事实，当前规则按本决策更新。
 
-详见 [Spec 003](../../specs/spec-003-remove-compat/spec.md)和[Plan](../../specs/spec-003-remove-compat/plan.md)。
+详见 [Spec 003](../../specs/spec-003-remove-compat/spec.md)和Plan。

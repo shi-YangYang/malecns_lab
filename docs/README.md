@@ -1,37 +1,27 @@
-# MaleCNS Lab 文档索引
+# 文档索引
 
-当前 Python 包和 CLI 为 `malecns_lab`。新用户从[项目首页](../README.md)和[架构与动作契约](ARCHITECTURE.md)开始；旧环境先读[命名迁移](MIGRATION.md)。
+从[项目首页](../README.md)开始。当前交付方向为 **官方 X2 仿真闭环 → 上海现场设备适配**；Mac 上的 Docker 方案尚待搭建验证。
 
-## 数据与神经活动
+## 当前入口
 
-- [研究与数据](RESEARCH.md)：数据来源、建模假设、结论边界与对照。
-- [V2 完整参考模型](MODEL_V2.md)：完整发布数据的边界、参考图和第二版设计。
-- [V2 重放与信号报告](MODEL_V2_USAGE.md)：真实录像、标准刺激、记录和静态图表。
-- [本地三维脑图](NEURAL_ATLAS.md)：胞体点云、六类刺激回放、群组活动曲线及显示语义。
-- [配对信号诊断](OBSERVABILITY.md)：同一状态下比较刺激与空白响应。
-- [早期数据与通路审计](MALECNS_AUDIT.md)：历史过滤图、旧输入输出选择和审计时的证据。保留当时名称及代码定位，不作为当前安装命令。
+- [神经活动图谱](NEURAL_ATLAS.md)：查看记录、设置刺激并运行完整脑响应。
+- [X2 官方接入](AGIBOT.md)：官方组件、Mac Docker 尝试范围和现场对齐事项。
+- [架构与动作接口](ARCHITECTURE.md)：模块职责、坐标单位和旧环境迁移。
+- [已有实验结果](EXPERIMENT_RESULTS.md)：完整图实测、训练结果及已停止的单轴稳向实验。
 
-## 网络学习与验证
+## 数据与模型
 
-- [可训练 SNN](TRAINABLE_SNN.md)、[神经输入输出映射](NEURAL_INTERFACE.md)、[有状态策略](NEURAL_POLICY.md)：方程、可训练参数、感觉映射与读出。
-- [目标跟随环境](FOLLOW_TASK.md)、[训练数据](NEURAL_TRAINING_DATA.md)：现有仿真实验与教师序列，未代表真实设备泛化。
-- [GPU 训练](MPS_TRAINING.md)：当前全 GPU 分支及旧 MPS 分支的区别。
-- [联合更新探针](JOINT_PROBE.md)、[连续训练](TRAINING_RUNNER.md)：已登记的资源探针与训练窗口协议。
-- [策略参数](POLICY_CHECKPOINT.md)、[训练状态](TRAINING_CHECKPOINT.md)：部署参数与可恢复训练存档的区别。
-- [闭环评估](EVALUATION_SNN.md)：来源准入和独立测试；不能将训练过程指标代替最终策略成绩。
-- [重连生成](BOUNDED_REWIRING.md)、[研究策略准入](RESEARCH_POLICY.md)：拓扑对照资产与严格身份验证。
-- [V2 冻结脑读出](LEARNING_V2.md)、[V2 研究对照](EXPERIMENT_V2.md)：保留的冻结脑对照流程。
+- [研究与来源](RESEARCH.md)、[完整参考图设计](MODEL_V2.md)、[历史过滤审计](MALECNS_AUDIT.md)。
+- [录像与标准刺激诊断](MODEL_V2_USAGE.md)、[配对信号诊断](OBSERVABILITY.md)。
+- [可训练 SNN](TRAINABLE_SNN.md)、[神经输入输出映射](NEURAL_INTERFACE.md)、[有状态策略](NEURAL_POLICY.md)。
 
-## 设备与后续方向
+## 保留的研究工具
 
-- [Tello 实验](TELLO.md)：连接、录像、旧读出试飞及实体证据边界。
-- [智元 G2／X2 资料](AGIBOT.md)：SDK 和仿真文档入口；当前尚无对应机器人适配器。
-- WebGL 页面当前用于既有神经记录回放，三维果蝇是形态示意；机器人闭环、果蝇运动仿真和跨设备控制仍待验证。
+- [GPU 训练](MPS_TRAINING.md)、[联合更新探针](JOINT_PROBE.md)、[连续训练](TRAINING_RUNNER.md)、[参数与状态存档](CHECKPOINTS.md)。
+- [目标跟随环境](FOLLOW_TASK.md)、[训练数据](NEURAL_TRAINING_DATA.md)、[闭环评估](EVALUATION_SNN.md)。
+- [冻结脑读出](LEARNING_V2.md)、[拓扑研究对照](EXPERIMENT_V2.md)、[重连生成](BOUNDED_REWIRING.md)、[研究策略准入](RESEARCH_POLICY.md)。
+- [Tello 实验](TELLO.md)：已有地面采集与受限试飞；不代表新模型或 X2 控制成果。
 
-## 项目与历史证据
+研究工具不是 X2 接入的前置任务；不因文档保留而自动续训。历史记录中的路径、命令和阶段状态按当时源码解释，当前操作以本索引为准。
 
-- [命名迁移](MIGRATION.md)：新入口、editable 安装、持久化格式和旧实验恢复限制。
-- [路线与证据](../constitution/roadmap.md)、[Spec 索引](../specs/README.md)、[任务交接](../.ai/prompts/task-handoff.md)：阶段记录与验收。
-- [第三方来源](../THIRD_PARTY.md)：代码、数据及研究方法出处。
-
-旧 Spec、Decision 和已完成的实验报告记录当时事实，保留历史名称、路径、命令及结果。其命令不保证适用于改名后的 checkout；使用当前操作文档，精确复现旧实验则回到报告对应提交。
+[阶段设计与实测报告](../specs/README.md) · [来源与许可](../THIRD_PARTY.md)

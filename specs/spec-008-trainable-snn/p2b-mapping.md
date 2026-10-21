@@ -1,6 +1,6 @@
 # P2b — 完整输入输出集合与工程空间编码
 
-状态：Done，独立[验收 PASS](acceptance-p2b.md)。本批完成软件接口，没有运行完整脑、训练动作或添加背景驱动。背景静默问题见 [可观测性记录](signal-observability.md)。
+状态：Done，独立验收 PASS。本批完成软件接口，没有运行完整脑、训练动作或添加背景驱动。背景静默问题见 [可观测性记录](signal-observability.md)。
 
 ## 目标与身份
 

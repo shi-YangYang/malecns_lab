@@ -1,6 +1,6 @@
 # 首轮完整图配对神经响应实测
 
-日期：2026-10-19（北京时间）。父进程结果 **protocol_complete**，实际证据已获[新独立 PASS](acceptance-observability-r1.md)，报告已读取处理，无返工项。完整执行两种动力学、全部七条件和5,400神经步，没有优化参数或控制设备。
+日期：2026-10-19（北京时间）。父进程结果 **protocol_complete**，实际证据已获新独立 PASS，报告已读取处理，无返工项。完整执行两种动力学、全部七条件和5,400神经步，没有优化参数或控制设备。
 
 ## 结论与限制
 
@@ -10,7 +10,7 @@
 
 ## 协议与身份
 
-按已提交的[冻结协议](observability-plan.md)执行，代码版本为 `1635a77`（核心缓存实现在 `3f68a09`）：
+按已提交的冻结协议执行，代码版本为 `1635a77`（核心缓存实现在 `3f68a09`）：
 
 ```sh
 PYTHONPATH=src .venv-train/bin/python -m cnsbridge.diagnostics.observability \

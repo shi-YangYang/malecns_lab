@@ -1,6 +1,6 @@
 # 正式 R 研究策略工厂
 
-> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](ARCHITECTURE.md#环境迁移与历史来源)。
 
 `learning.research_policy.from_terminal_research_run` 只用于离线拓扑对照。它构造精确现有 `NeuralPolicy` / `LaminaTonicLIF`，以真正的 R 整数图构建正向 CSR、全细胞伴随 CSR 和共享正向存储的 SciPy 缓存。它不训练、不生成参数档、不执行神经前向，也没有设备入口。
 

@@ -1,6 +1,6 @@
 # GPU训练与状态恢复
 
-> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](ARCHITECTURE.md#环境迁移与历史来源)。
 
 ## 当前全GPU修复入口
 
@@ -34,7 +34,7 @@ gate是可丢弃的一次负标签联合更新，检查真实内部梯度、参�
 
 历史入口为 `malecns_lab.learning.train_mps`，以下内容用于解释和恢复既有来源，当前修复训练使用上面的新入口。历史神经网络和读出前向/反向使用 MPS float32，感觉事件仍由原 NumPy float64 相位生成，小参数使用原 CPU Adam 与 float64 范数裁剪。后端名称是 `mps_forward_backward_cpu_adam`，不能称为所有运算都在 GPU。
 
-当前 `data/neural_training_mps_20261019_r3` 已完成既定160/160窗（CPU继承60＋GPU累计100）。本批从62续至160，新增98窗用时50分46.55秒，每窗计算均值26.97秒；见[完整轮次实测](../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新增98窗的[独立保存证据验收](../specs/spec-008-trainable-snn/acceptance-mps-finish98-actual.md)已通过。最初迁移及两次失败记录保留在[迁移实测](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。本轮预算已耗尽，不再对该run执行续训命令；新增epoch或实验需另行登记。
+当前 `data/neural_training_mps_20261019_r3` 已完成既定160/160窗（CPU继承60＋GPU累计100）。本批从62续至160，新增98窗用时50分46.55秒，每窗计算均值26.97秒；见[完整轮次实测](../specs/spec-008-trainable-snn/implementation-mps-finish98.md)。新增98窗的独立保存证据验收已通过。最初迁移及两次失败记录保留在[迁移实测](../specs/spec-008-trainable-snn/mps-continuation-run-20261019.md)。本轮预算已耗尽，不再对该run执行续训命令；新增epoch或实验需另行登记。
 
 仅在另建实验时，从旧joint完整存档迁移（输出目录必须不存在）：
 

@@ -57,7 +57,7 @@ session20537和99503均已收取exit0；两个段的父复核均为`completed / 
 
 首档`5141e8a40af41127d2035a8b07558466f1e9b52821029c54b24e5dfe3b723edd`；末档`48d2a7c54810f606a3ccab3a44e3c970960c34bc0dfcd24f5fa19fb3e8fecd55`，路径`segments/000002/windows/000002/checkpoint`。前缀SHA为`d49c3340211cefbf0bae1fcad307b0b1b6ee9fd18a53dfbc4e459f98ca535b8b`，游标combined next_frame4、completed_windows=2、optimizer_steps=2、epoch_complete=false。
 
-已完成4帧/2窗，冻结脑还余158窗。首两窗已获新的[独立实际PASS](acceptance-p3c-frozen-run-r1.md)，完整报告已读取处理，无返工项；可以显式续同run最多四窗；不以两帧损失变化声称学习成功、不将本对照替代joint内部训练。完整joint/frozen终档、闭环、拓扑比较与部署/实飞仍未完成，AC3–AC6保持开放。
+已完成4帧/2窗，冻结脑还余158窗。首两窗已获新的独立实际PASS，完整报告已读取处理，无返工项；可以显式续同run最多四窗；不以两帧损失变化声称学习成功、不将本对照替代joint内部训练。完整joint/frozen终档、闭环、拓扑比较与部署/实飞仍未完成，AC3–AC6保持开放。
 
 ## Segment 3：首次四窗续段，累计6/160窗
 

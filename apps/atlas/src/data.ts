@@ -6,8 +6,11 @@ function requireData(condition: unknown, message: string): asserts condition {
 }
 function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function count(value: unknown): value is number { return finite(value) && Number.isInteger(value) && value >= 0; }
-function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
+function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function values(value: unknown): value is unknown[] { return Array.isArray(value); }
+function named(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
+function notes(value: unknown): boolean { return values(value) && value.every(note => typeof note === 'string'); }
+function close(a: number, b: number): boolean { return Math.abs(a - b) < 1e-8; }
 function schema(value: unknown, label: string): asserts value is Record<string, unknown> {
   requireData(object(value) && value.schema === SCHEMA, `${label} 的 schema 应为 ${SCHEMA}`);
 }
@@ -23,13 +26,14 @@ async function readJson(url: string): Promise<unknown> {
 }
 function catalogData(raw: unknown): Catalog {
   schema(raw, 'catalog');
-  requireData(object(raw.graph) && count(raw.graph.node_count) && count(raw.graph.edge_count), '参考图计数缺失');
-  requireData(object(raw.model) && typeof raw.model.name === 'string' && raw.model.trained === false, '必须使用已记录的固定诊断模型');
-  requireData(object(raw.recording) && finite(raw.recording.frame_hz) && raw.recording.frame_hz > 0, '记录帧率缺失');
+  requireData(object(raw.graph) && count(raw.graph.node_count) && count(raw.graph.edge_count) && named(raw.graph.source_id) && named(raw.graph.graph_sha256), '参考图计数或身份缺失');
+  requireData(object(raw.model) && named(raw.model.name) && named(raw.model.source_id) && typeof raw.model.description === 'string' && raw.model.trained === false, '必须使用已记录的固定诊断模型');
+  requireData(object(raw.recording) && named(raw.recording.name) && named(raw.recording.source_path) && finite(raw.recording.frame_hz) && raw.recording.frame_hz > 0, '记录来源或帧率缺失');
+  requireData(object(raw.provenance) && notes(raw.notes), '目录来源或备注无效');
   requireData(typeof raw.atlas_url === 'string' && values(raw.runs) && raw.runs.length > 0, '未找到图谱或刺激记录');
   const ids = new Set<string>();
   for (const entry of raw.runs) {
-    requireData(object(entry) && typeof entry.id === 'string' && typeof entry.url === 'string' && typeof entry.label === 'string' && typeof entry.stimulus === 'string' && count(entry.frame_count) && finite(entry.duration_s) && finite(entry.warmup_s), '刺激索引不完整');
+    requireData(object(entry) && named(entry.id) && named(entry.url) && named(entry.label) && named(entry.stimulus) && count(entry.frame_count) && finite(entry.duration_s) && entry.duration_s >= 0 && finite(entry.warmup_s) && entry.warmup_s >= 0, '刺激索引不完整');
     requireData(!ids.has(entry.id), '刺激 ID 重复'); ids.add(entry.id);
   }
   return raw as unknown as Catalog;
@@ -39,12 +43,14 @@ function atlasData(raw: unknown, catalog: Catalog): Atlas {
   requireData(raw.node_count === catalog.graph.node_count && count(raw.positioned_count) && count(raw.missing_count) && raw.positioned_count + raw.missing_count === raw.node_count, '节点及位置覆盖计数不一致');
   requireData(values(raw.positions) && raw.positions.length === raw.positioned_count * 3 && raw.positions.every(finite), '胞体坐标长度或数值不正确');
   requireData(values(raw.body_ids) && raw.body_ids.length === raw.positioned_count && raw.body_ids.every(id => typeof id === 'string'), '胞体 ID 与坐标不匹配');
+  requireData(object(raw.coordinate_transform), '坐标变换说明缺失');
   requireData(values(raw.groups), '缺少群组索引');
   const names = new Set<string>();
   for (const group of raw.groups) {
     requireData(object(group) && typeof group.name === 'string' && !names.has(group.name), '群组名称无效或重复'); names.add(group.name);
     requireData(count(group.total_neurons) && count(group.positioned_neurons) && group.positioned_neurons <= group.total_neurons, '群组计数无效');
     requireData(values(group.point_indices) && group.point_indices.length === group.positioned_neurons && group.point_indices.every(index => count(index) && index < (raw.positioned_count as number)), '群组坐标索引越界');
+    requireData(group.centroid === null || (values(group.centroid) && group.centroid.length === 3 && group.centroid.every(finite)), '群组中心坐标无效');
   }
   return raw as unknown as Atlas;
 }
@@ -57,6 +63,7 @@ function runData(raw: unknown, entryId: string, atlas: Atlas): Run {
   requireData(values(raw.time_s) && raw.time_s.every((time, index, times) => finite(time) && (index === 0 || time > (times[index - 1] as number))), '时间必须有限且严格递增');
   const frames = raw.time_s.length;
   requireData(finite(raw.frame_hz) && raw.frame_hz > 0 && finite(raw.warmup_s) && raw.warmup_s >= 0, '回放帧率或预热时长无效');
+  requireData(named(raw.source_id) && named(raw.model_source_id) && object(raw.provenance) && notes(raw.notes), '回放来源或备注无效');
   requireData(values(raw.valid) && raw.valid.length === frames && raw.valid.every(value => typeof value === 'boolean'), '有效性掩码不匹配');
   requireData(values(raw.group_rates_hz) && raw.group_rates_hz.length === frames && raw.group_rates_hz.every(row => values(row) && row.length === (raw.groups as unknown[]).length && row.every(rate => rate === null || (finite(rate) && rate >= 0))), '群组 Hz 数组不匹配');
   for (const key of ['network_spikes', 'network_active_neurons']) {
@@ -64,18 +71,21 @@ function runData(raw: unknown, entryId: string, atlas: Atlas): Run {
   }
   if (raw.stimulus_preview !== null && raw.stimulus_preview !== undefined) {
     const preview = raw.stimulus_preview;
-    requireData(object(preview) && typeof preview.url === 'string' && count(preview.width) && preview.width > 0 && count(preview.height) && preview.height > 0 && preview.frames === frames && preview.layout === 'vertical' && preview.kind === 'reconstructed', '刺激重建格式无效');
+    requireData(object(preview) && typeof preview.url === 'string' && count(preview.width) && preview.width > 0 && count(preview.height) && preview.height > 0 && preview.frames === frames && preview.layout === 'vertical' && (preview.kind === 'reconstructed' || preview.kind === 'generated'), '刺激预览格式无效');
   }
-  for (const key of ['simulation_start_s', 'simulation_end_s', 'frame_index']) {
+  for (const key of ['simulation_start_s', 'simulation_end_s']) {
     if (raw[key] !== undefined) requireData(values(raw[key]) && raw[key].length === frames && raw[key].every(finite), `${key} 数组不匹配`);
   }
+  if (raw.frame_index !== undefined) requireData(values(raw.frame_index) && raw.frame_index.length === frames && raw.frame_index.every((value, index) => count(value) && (index === 0 || value > (raw.frame_index as number[])[index - 1])), '帧序号无效');
   for (const key of ['prediction_valid', 'initialization']) {
     if (raw[key] !== undefined) requireData(values(raw[key]) && raw[key].length === frames && raw[key].every(value => typeof value === 'boolean'), `${key} 掩码不匹配`);
   }
+  if (raw.invalid_reason !== undefined) requireData(values(raw.invalid_reason) && raw.invalid_reason.length === frames && raw.invalid_reason.every(value => value === null || typeof value === 'string'), '无效帧原因不匹配');
   return raw as unknown as Run;
 }
-export async function loadDataset(): Promise<Dataset> {
-  const catalogUrl = new URL('/data/catalog.json', location.href).href;
+
+export async function loadDataset(path = '/data/catalog.json'): Promise<Dataset> {
+  const catalogUrl = localUrl(path, location.href);
   const catalog = catalogData(await readJson(catalogUrl));
   const atlas = atlasData(await readJson(localUrl(catalog.atlas_url, catalogUrl)), catalog);
   const previewUrls = new Map<string, string>();
@@ -83,6 +93,7 @@ export async function loadDataset(): Promise<Dataset> {
     const url = localUrl(entry.url, catalogUrl);
     const run = runData(await readJson(url), entry.id, atlas);
     requireData(run.time_s.length === entry.frame_count, '目录帧数与回放记录不一致');
+    requireData(close(entry.duration_s, entry.frame_count / run.frame_hz), '目录时长与帧数不一致');
     requireData(run.model_source_id === catalog.model.source_id, '回放模型与目录模型来源不一致');
     requireData(run.stimulus === entry.stimulus && run.frame_hz === catalog.recording.frame_hz && run.warmup_s === entry.warmup_s, '回放刺激、帧率或预热时间与目录不一致');
     if (run.stimulus_preview) previewUrls.set(run.id, localUrl(run.stimulus_preview.url, url));

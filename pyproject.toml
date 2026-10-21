@@ -26,6 +26,7 @@ dependencies = [
 vision = ["opencv-python>=4.8"]
 analysis = ["opencv-python>=4.8", "matplotlib>=3.7"]
 data = ["pyarrow>=14", "pandas>=2.0"]
+atlas = ["psutil>=5.9", "pyarrow>=14"]
 tello = ["djitellopy>=2.5", "opencv-python>=4.8"]
 dev = ["pytest>=7", "ruff>=0.4"]
 train = ["torch==2.14.1", "psutil>=5.9"]

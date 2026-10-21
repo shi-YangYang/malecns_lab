@@ -1,6 +1,6 @@
 # P2c — 有界早期视觉背景变体
 
-状态：Done。53项直接相关检查通过，独立[验收PASS](acceptance-p2c.md)；见[实施报告](implementation-p2c.md)。范围仅为数值模型候选与持久化保护；未运行完整图，不改变 P1 协议，未接设备。依据 [Decision 010](../../.ai/decisions/010-lamina-tonic-variant.md)。
+状态：Done。53项直接相关检查通过，独立验收PASS；见实施报告。范围仅为数值模型候选与持久化保护；未运行完整图，不改变 P1 协议，未接设备。依据 [Decision 010](../../.ai/decisions/010-lamina-tonic-variant.md)。
 
 ## 目标 / 当前行为
 

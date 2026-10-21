@@ -1,6 +1,6 @@
 # Acceptance — 完整连接组 MPS 探针 A 软件
 
-2026-10-19；新的独立验收者。依据 [Ready A 协议](mps-fullgraph-probe.md)、[Decision 013](../../.ai/decisions/013-mps-validation-before-migration.md)及[实施报告](implementation-mps-fullgraph-probe.md)。
+2026-10-19；新的独立验收者。依据 [Ready A 协议](mps-fullgraph-probe.md)、[Decision 013](../../.ai/decisions/013-mps-validation-before-migration.md)及实施报告。
 
 ## Result
 

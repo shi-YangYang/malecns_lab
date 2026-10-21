@@ -26,4 +26,4 @@
 
 兼容文件保留明确迁移用途，不复制实现。内部调用及文档转向新路径；未来删除兼容入口需另定范围。本次按 S3 验证导入、路径、spawn、控制与数据行为；不把离线回归当作实飞认证。
 
-详见 [Spec](../../specs/spec-002-business-layout/spec.md)和[Plan](../../specs/spec-002-business-layout/plan.md)。
+详见 [Spec](../../specs/spec-002-business-layout/spec.md)和Plan。

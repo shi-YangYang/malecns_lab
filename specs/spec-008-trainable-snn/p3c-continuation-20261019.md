@@ -1,6 +1,6 @@
 # P3c2连续训练进度 — 2026-10-19
 
-冻结run为`data/neural_training_joint_20261019_r1`，身份/模型/数据/训练规则沿用[首次实测](p3c-run-20261019-r1.md)。首两窗已有[独立实际PASS](acceptance-p3c-run-r1.md)；此记录按真实后续段追加，不重写既有运行。当前不是完整epoch或学习收益结论。
+冻结run为`data/neural_training_joint_20261019_r1`，身份/模型/数据/训练规则沿用[首次实测](p3c-run-20261019-r1.md)。首两窗已有独立实际PASS；此记录按真实后续段追加，不重写既有运行。当前不是完整epoch或学习收益结论。
 
 ## Segment 3：首次单段四窗
 
@@ -26,7 +26,7 @@ PYTHONPATH=src .venv-train/bin/python -m cnsbridge.learning.train_snn \
 
 段ID为`7556780de150bcadbbfac75542960b2d7f1eea1ae96099252a528762ffe39af1`。最后完整checkpoint ID为`f85f5376019778d40a50db68f0ab10b58b92d00ece21d51616dd2637a2cb7be9`，位于`segments/000003/windows/000006/checkpoint`。游标next_frame=12、completed_windows=6、optimizer_steps=6；epoch_complete=false，joint仍余154窗，frozen尚未开始。没有活跃模型进程。
 
-该首次多窗段已获新的[独立实际PASS](acceptance-p3c-four-windows.md)，完整报告已读取处理，无返工项。独立复算一阶矩和参数全部exact；readout.weight二阶矩在step4/6有4.44e−16/5.68e−14最大差，满足冻结容差，未宣称所有矩逐位一致。后续保持同run，从frame12按1–4窗显式推进，不重跑已完成窗口、缩图或放宽阈值。完整训练、跨场景实际边界、独立对照与闭环仍待完成。
+该首次多窗段已获新的独立实际PASS，完整报告已读取处理，无返工项。独立复算一阶矩和参数全部exact；readout.weight二阶矩在step4/6有4.44e−16/5.68e−14最大差，满足冻结容差，未宣称所有矩逐位一致。后续保持同run，从frame12按1–4窗显式推进，不重跑已完成窗口、缩图或放宽阈值。完整训练、跨场景实际边界、独立对照与闭环仍待完成。
 
 ## Segment 4：窗口7–10
 

@@ -14,7 +14,7 @@
 
 ## 实际计算与内存
 
-神经和读出前反向为MPS float32；原感觉事件使用CPU NumPy相位，稳定裁剪和少量主参数Adam仍在CPU。固定50神经步分段重算降低中间张量保存量，跨块/跨帧梯度和逐步DN加法顺序保留；每窗仍两帧、1000神经步。小型实际MPS直接/重算对照的输出、末态及raw梯度精确一致，见[内存修正实施](implementation-mps-activation-memory.md)与[独立软件验收](acceptance-mps-activation-memory.md)。它不构成CPU/GPU全图轨迹等价证明。
+神经和读出前反向为MPS float32；原感觉事件使用CPU NumPy相位，稳定裁剪和少量主参数Adam仍在CPU。固定50神经步分段重算降低中间张量保存量，跨块/跨帧梯度和逐步DN加法顺序保留；每窗仍两帧、1000神经步。小型实际MPS直接/重算对照的输出、末态及raw梯度精确一致，见内存修正实施与独立软件验收。它不构成CPU/GPU全图轨迹等价证明。
 
 | 实测项 | 第61窗 | 第62窗 |
 |---|---:|---:|
@@ -47,4 +47,4 @@ RSS约1.42–1.58GiB，MPS driver约1.48GiB，口径不同不能相加。实际�
 2. 改为canonical CSR→COO并独立验收后，r2使用984dfc2，session76638 exit1：完整图构造3.3063s、精确迁移0.6628s通过，但前向保存中间张量触发约2.01GiB MPS限额；worker11.2548s，无完成窗口。原源在Git及 `source-984dfc2.tar`。
 3. 分段重算经两个相关MPS检查与新独立软件验收后，提交e4908ac，以新r3登记并得到上述第61/62窗结果。失败不计作训练进度，没有覆盖旧产物或临时降低预留。
 
-独立实际复核见 [Acceptance](acceptance-mps-continuation-actual.md)；软件与实际证据分别报告。续训命令见 [MPS使用说明](../../docs/MPS_TRAINING.md)。当前两个worker均已终止，后续应继续r3，勿重新从CPU60启动替代已有GPU进度。
+独立实际复核见 Acceptance；软件与实际证据分别报告。续训命令见 [MPS使用说明](../../docs/MPS_TRAINING.md)。当前两个worker均已终止，后续应继续r3，勿重新从CPU60启动替代已有GPU进度。

@@ -28,4 +28,4 @@
 
 后续任务需维护对应 Spec 与重要决策，实施和验收各司其职。治理接入不代表新读出通过实飞、可靠避障或底盘迁移验证；这些研究结论仍需要单独证据。
 
-相关记录：[Spec](../../specs/spec-001-agent-workflow/spec.md)、[Plan](../../specs/spec-001-agent-workflow/plan.md)、[项目规则](../rules/project.md)。
+相关记录：[Spec](../../specs/spec-001-agent-workflow/spec.md)、Plan、[项目规则](../rules/project.md)。

@@ -28,7 +28,7 @@ export interface Run {
   warmup_s: number; frame_hz: number; source_id: string; model_source_id: string;
   stimulus_preview: {
     url: string; width: number; height: number; frames: number;
-    layout: 'vertical'; kind: 'reconstructed';
+    layout: 'vertical'; kind: 'reconstructed' | 'generated';
   } | null;
   frame_index?: number[]; prediction_valid?: boolean[]; initialization?: boolean[];
   invalid_reason?: (string | null)[]; simulation_start_s?: number[]; simulation_end_s?: number[];

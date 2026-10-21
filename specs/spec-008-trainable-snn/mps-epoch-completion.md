@@ -26,6 +26,6 @@
 
 ## 实际结果
 
-2026-10-19已沿同一r3从62续至160，25个新段全部exit0、父registered_mps_windows_verified；新增98窗墙钟3046.550231秒。CPU继承60、GPU累计100，最终checkpoint为 `fd3019989892f86bac44faefd5230ffff91891dbde9e813956c0945eb7b1e8b1`。详见[实施实测](implementation-mps-finish98.md)与新的[独立实际验收PASS](acceptance-mps-finish98-actual.md)。只读复核新增保存数组，无模型重放或软件测试重复；所有训练已终态。
+2026-10-19已沿同一r3从62续至160，25个新段全部exit0、父registered_mps_windows_verified；新增98窗墙钟3046.550231秒。CPU继承60、GPU累计100，最终checkpoint为 `fd3019989892f86bac44faefd5230ffff91891dbde9e813956c0945eb7b1e8b1`。详见[实施实测](implementation-mps-finish98.md)与新的独立实际验收PASS。只读复核新增保存数组，无模型重放或软件测试重复；所有训练已终态。
 
 本批完成不改变前进饱和、强梯度裁剪、未完成对照及固定策略闭环的结论，Spec008整体研究目标仍未完成。报告、入口文档和交接随本批提交；无需继续本run或额外epoch。

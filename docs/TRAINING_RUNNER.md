@@ -1,14 +1,14 @@
 # 完整连接组的有界连续训练
 
-> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](MIGRATION.md)。
+> 命名迁移：本文操作入口已更新为 `malecns_lab`。涉及旧 run／checkpoint 的目录保留为参数示例和历史证据；不能直接用新源码续跑或重新登记旧实验。须使用匹配的源码身份与新输出目录，精确恢复旧实验需原 commit。见[迁移说明](ARCHITECTURE.md#环境迁移与历史来源)。
 
-`python -m malecns_lab.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；[首两个完整图跨进程窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已独立验收，尚无完整epoch、神经闭环跟随、收益或实飞结论。
+`python -m malecns_lab.learning.train_snn` 每次处理明确登记的 1–4 个两帧窗口，然后退出。生产入口只加载完整 `full_reference`，使用已封存的四个 train 场景（combined、forward、vertical、yaw，各 80 帧），一个 epoch 共 160 窗。它训练固定教师轨迹上的离线模仿；[首两个完整图跨进程窗口](../specs/spec-008-trainable-snn/p3c-run-20261019-r1.md)已有独立执行记录。本页描述早期 CPU runner；后续 GPU 分支已完成整轮，最新进度与失败边界见[实验记录](EXPERIMENT_RESULTS.md)，不据本页启动旧 run 续训。
 
-规格：[P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)。完整状态格式：[训练存档](TRAINING_CHECKPOINT.md)。父入口、登记与证据复核不导入 Torch；脑计算全部在受监督子进程内。
+规格：[P3c2](../specs/spec-008-trainable-snn/p3c-training-runner.md)。完整状态格式：[训练存档](CHECKPOINTS.md#训练续跑)。父入口、登记与证据复核不导入 Torch；脑计算全部在受监督子进程内。
 
 ## 首两个实际窗口
 
-以下保留已完成首段与续段的参数示例，模块名已更新；原命令和两段[独立验收证据](../specs/spec-008-trainable-snn/acceptance-p3c-run-r1.md)以对应历史提交为准。不要在新源码下重建或续跑这些目录。新实验输出目录必须不存在，不覆盖历史或失败记录。
+以下保留已完成首段与续段的参数示例，模块名已更新；原命令和两段独立验收证据以对应历史提交为准。不要在新源码下重建或续跑这些目录。新实验输出目录必须不存在，不覆盖历史或失败记录。
 
 ```bash
 PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.train_snn \
@@ -25,7 +25,7 @@ PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.train_snn \
 
 这两个实际窗口另经独立验收后，才在同一 run 显式继续，每次指定 `--windows 1` 至 `4`；剩余不足 4 窗时相应减少，不能超过 160 窗。没有自动完整 epoch 循环或失败重试。
 
-独立冻结脑对照使用一个新的目录和 `--mode frozen_brain`，其余图和数据相同。它从原始 theta=0、相同读出种子重新开始，保留完整脑动态，仅训练读出；不能沿用 joint 的最终参数或状态。恢复时只接受 `--run` 和 `--windows`，不能换图、数据、模式或源版本。2026-10-19已完成[首两个完整图冻结脑窗口](../specs/spec-008-trainable-snn/p3c-frozen-run-20261019-r1.md)并获新的独立实际PASS：theta/gain保持，读出和Adam真实更新，全部跨进程状态恢复一致；当前2/160窗，不是完整基线结果。
+独立冻结脑对照使用一个新的目录和 `--mode frozen_brain`，其余图和数据相同。它从原始 theta=0、相同读出种子重新开始，保留完整脑动态，仅训练读出；不能沿用 joint 的最终参数或状态。恢复时只接受 `--run` 和 `--windows`，不能换图、数据、模式或源版本。2026-10-19已完成[首两个完整图冻结脑窗口](../specs/spec-008-trainable-snn/p3c-frozen-run-20261019-r1.md)并获新的独立实际PASS：theta/gain保持，读出和Adam真实更新，全部跨进程状态恢复一致；该报告记录首段2/160窗；后续CPU对照停在10/160窗，仍不是完整基线结果。
 
 ## 计算和资源
 

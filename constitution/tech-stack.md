@@ -1,60 +1,37 @@
 # 技术栈与工程约束
 
-项目模式为 `EXISTING`，业务代码目录为 `src/malecns_lab/`。沿用 Python src layout；按用户授权的 [Spec 002](../specs/spec-002-business-layout/spec.md) 将包内业务按控制、学习和 Tello 实验重组，并按 [Spec 003](../specs/spec-003-remove-compat/spec.md) 统一为新的模块入口。
+项目模式 EXISTING。业务源码位于 src/malecns_lab，沿用 Python src layout；包、分发与 CLI 均为 malecns_lab，不保留旧包入口。已有数据 schema 与研究来源保持原身份。
 
-2026-10-20 用户在 [Spec 009](../specs/spec-009-malecns-lab/spec.md) 授权包目录迁移；当前展示名 MaleCNS Lab，发行包、导入与 CLI 均为 `malecns_lab`，不保留旧入口。旧科研 schema、来源记录和历史文档保持；迁移后旧 hash-bound run 不保证原位恢复，见 [迁移说明](../docs/MIGRATION.md)。
+## 当前技术
 
-## 已有技术
-
-| 项目 | 当前事实 |
+| 部分 | 实际实现 |
 |---|---|
-| 语言与运行时 | Python >= 3.11；项目声明以 `pyproject.toml` 为准 |
-| 构建与安装 | setuptools >= 68、wheel，构建后端 `setuptools.build_meta`；pip 与 venv |
-| 核心依赖 | NumPy >= 1.24、SciPy >= 1.10、PyYAML >= 6.0 |
-| 可选依赖 | `vision`：OpenCV；`analysis`：OpenCV、Matplotlib；`data`：pandas、pyarrow；`tello`：DJITelloPy、OpenCV；`dev`：pytest、Ruff |
-| 独立训练环境 | `.venv-train`；`train` 可选依赖为 PyTorch 2.14.1、psutil；原 CPU 与混合 MPS 实验保留，最新[全 GPU 训练入口](../docs/MPS_TRAINING.md)将感觉、前反向、损失、裁剪与 Adam 放到 MPS，固定50步分段重算、100步递归反向；不承诺实时性 |
-| CLI | `malecns_lab` → `malecns_lab.cli:main`；download、build-brain、inspect、calibrate、bench |
-| 测试与检查 | pytest，测试目录 `tests/`；Ruff 配置在 `pyproject.toml`，目标 Python 3.11，行长 130 |
-| 数据与持久化 | 本地连接组、NPZ、JSON、CSV 和视频；没有数据库服务 |
-| WebGL 前端 | `apps/atlas/`，Vite + TypeScript + Three.js；npm 与 package-lock.json；Python 只读导出已有记录，浏览器本地回放 |
-| 服务与部署 | 本地工具与设备实验；脑图由本地 Vite/static server 提供，无云部署、外部 AI/LLM 服务或设备控制 API |
-| 新方向 | WebGL 第一版按 [Spec 010](../specs/spec-010-neural-atlas/spec.md) 完成并验收 PASS；智元 G2/X2 尚未接入，资料见 [智元开发入口](../docs/AGIBOT.md) |
-| 工程设施 | 前端有 npm 锁文件与 build/dev/preview 脚本；没有 CI、Docker 配置或既定全仓库格式化流程 |
+| Python | >=3.11，setuptools/pip/venv；依赖以 [pyproject.toml](../pyproject.toml) 为准 |
+| 神经计算 | NumPy、SciPy；完整 MaleCNS 参考图、LIF 及输入编码 |
+| 学习 | .venv-train、PyTorch 2.14.1/MPS、psutil；CPU 与全 GPU 研究分支，不承诺实时性 |
+| 图谱 | apps/atlas，Vite + TypeScript + Three.js；npm/package-lock.json |
+| 本地服务 | 网页 127.0.0.1:8765，Python 刺激任务服务 127.0.0.1:8766；单计算子进程 |
+| 设备 | 已有 Tello 工具；X2 官方 SDK、MC 与仿真尚未安装或接通 |
+| 数据 | 本地 NPZ/JSON/CSV/视频，没有数据库；data/logs 不随源码分发 |
+| 检查 | tests 下 pytest；前端 npm run build；不默认全量测试或格式化 |
 
-依据：[pyproject.toml](../pyproject.toml)、[安装说明](../README.md)。不要把当前本机 Python 版本变成比项目声明更严格的最低要求，也不要为补齐表格创建新的工程设施。
+## 模块边界
 
-## 路径与职责
+- brain/、senses/：连接组、数值仿真与感觉编码。
+- diagnostics/：离线活动记录与信号报告。
+- control/：动作契约、数值适配、旧读出及限制。
+- learning/：读出与内部学习、协议、存档与评估；其中 yaw/ 为停止推进的历史研究，数值源码保留。
+- drones/：历史目标跟随与单轴简化环境，不是 X2 物理仿真。
+- visualization/ 与 apps/atlas/：胞体图谱、已有记录和可调刺激实验；单轴网页与未验证部署接口已清理。
+- experiments/tello/：现有 Tello 地面与受限飞行工具。
+- configs/、examples/、tests/：配置、数值性能研究脚本与相关测试。
 
-- [src/malecns_lab/brain/](../src/malecns_lab/brain/) 与 [senses/](../src/malecns_lab/senses/)：连接组仿真与视觉编码，仅加载真实连接组 NPZ。移除合成网络后的源码身份变化见 [Decision 005](../.ai/decisions/005-remove-minifly.md)，不伪装为旧特征来源。
-- [control/](../src/malecns_lab/control/)：动作契约、设备数值适配、旧读出/校准、控制限制。
-- [learning/](../src/malecns_lab/learning/)：新解码器、数据准备、离线拟合与评估；依赖 control，反向依赖不允许。
-- [diagnostics/](../src/malecns_lab/diagnostics/)：离线录像重放、模拟神经活动记录与刺激比较；不产生设备动作。见 [Decision 004](../.ai/decisions/004-neural-activity.md)。
-- [visualization/](../src/malecns_lab/visualization/)：已有神经记录与胞体坐标导出；[apps/atlas/](../apps/atlas/)：浏览器三维展示，见 [Decision 017](../.ai/decisions/017-local-neural-atlas.md)。导出数据位于忽略的 `apps/atlas/public/data/`，不改旧研究资产。
-- [experiments/tello/](../src/malecns_lab/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
-- [drones/](../src/malecns_lab/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
-- 实验与学习命令直接运行包内模块，例如 `python -m malecns_lab.experiments.tello.trial --help` 和 `python -m malecns_lab.learning.train_v2 --help`。
-- V2 完整参考实验使用 `brain.reference`、`diagnostics.replay_v2` / `report_v2` 和 `learning.train_v2` 的独立入口与模式；V1 重复离线流程按 [清理子批](../specs/spec-008-trainable-snn/cleanup-v1.md)移除，过滤资产仅作历史证据，不混用特征缓存。具体命令见 [V2 诊断](../docs/MODEL_V2_USAGE.md)和[学习工具](../docs/LEARNING_V2.md)。
-- `brain.trainable` / `trainable_graph` 提供独立可训练核心及完整图身份，数值契约见 [TRAINABLE_SNN](../docs/TRAINABLE_SNN.md)。核心实现与数值检查不代表完整图训练或任务学习成功；阶段证据见 Spec 008。
-- [configs/](../configs/) 与包内 [defaults.yaml](../src/malecns_lab/defaults.yaml)：实验参数。
-- [tests/](../tests/)、[docs/](../docs/)、[examples/](../examples/)：测试、使用与研究文档、离线示例。
-- `data/`、`logs/`、`readout*.json`、`.venv/`、`.venv-train/`：本地实验资产及环境，按 [.gitignore](../.gitignore) 留在源码提交之外。
-- `AGENTS.md`、`constitution/`、`specs/`、`.ai/`：Agent 治理；不替代业务目录。
+## 后续官方 X2 环境
 
-## 命令参考与使用条件
+用户确定先在 Apple Silicon Mac 的独立 linux/amd64 Docker 中尝试官方 Ubuntu 22.04 Sim + MC + AimDK，保留脑模型在 macOS 运行的能力。转译、图形、接口时延及现场版本匹配均待验证；当前尚无该 Docker 配置或设备适配器，见 [AGIBOT](../docs/AGIBOT.md)。不要把计划写成已实现能力。
 
-以下是供对应任务选用的命令，不是每次修改的必跑清单：
+## 本地约束
 
-| 用途 | 在项目根目录执行 | 条件 |
-|---|---|---|
-| 建立环境 | `python3 -m venv .venv` | 仅在尚无所需环境时 |
-| 安装开发与实验依赖 | `.venv/bin/python -m pip install -e '.[tello,data,dev]'` | 安装或依赖确需更新时 |
-| 查看 CLI | `.venv/bin/malecns_lab --help` | 需要核对命令入口时 |
-| 完整图诊断 | `.venv/bin/python -m malecns_lab.diagnostics.replay_v2 --help` | 查看现行入口；实际重放按已登记协议执行 |
-| 定向测试 | `.venv/bin/python -m pytest tests/test_universal_decoder.py` | 共享动作或新读出发生相关改动时，按风险调整范围 |
-| 全部测试 | `.venv/bin/python -m pytest` | 只有明确的跨模块风险或任务要求才使用 |
-| 定向静态检查 | `.venv/bin/python -m ruff check <本次相关路径>` | 存在相关需要时；尖括号内容须替换 |
-| 构建 wheel | `.venv/bin/python -m pip wheel --no-deps . --wheel-dir dist` | 仅打包变更需要时；不是已有独立脚本，也不是本次执行记录 |
+本地根目录为 /Users/yang/project/malecns_lab。数据和环境保持原样；运行前核实实际资源。Noria 正在运行，不可为本项目停止其服务或重启 Docker。后续完整脑任务沿用用户要求的 1 GiB 系统预留并重新测量资源，不并行启动多个完整脑。
 
-文档修改按 S0 阅读差异即可，不默认执行上述命令。源码工程根由 `paths.source_project_root()` 按实际 src layout 定位；配置、模型和日志位置不依赖启动 cwd。实验工具要求源码 checkout 和 editable 安装，不假定普通 wheel 内包含工作区数据。
-
-实体设备步骤见 [Tello 文档](../docs/TELLO.md)，不能将地面采集或实飞当成自动化验证命令。
+旧 run 的源码身份可能与当前 checkout 不同，不能跳过 hash 校验恢复；已有 sources 快照与模型保留。数值与研究说明见 [MODEL_V2](../docs/MODEL_V2.md)、[MPS_TRAINING](../docs/MPS_TRAINING.md) 和[历史结果](../docs/EXPERIMENT_RESULTS.md)。
