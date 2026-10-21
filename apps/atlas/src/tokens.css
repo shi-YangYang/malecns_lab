@@ -1,0 +1,16 @@
+:root {
+  color-scheme: dark;
+  --page: #101516;
+  --panel: #141c1e;
+  --line: #293331;
+  --line-light: #35423e;
+  --text: #d6ddd6;
+  --bright: #eef5ec;
+  --muted: #8d9c93;
+  --subtle: #61766e;
+  --mint: #94d9b7;
+  --mint-muted: #82a895;
+  --amber: #d1ad6e;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}

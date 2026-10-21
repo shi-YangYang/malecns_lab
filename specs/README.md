@@ -24,6 +24,8 @@ Spec 统一位于 `specs/spec-XXX-short-name/`，编号递增，名称用小写�
 
 ## 当前记录
 
+- [spec-010-neural-atlas](spec-010-neural-atlas/spec.md)：Done，独立验收 PASS；本地 WebGL 胞体图谱、六种刺激回放、群组活动曲线和三维果蝇示意；使用已有诊断记录，不启动训练或设备。
+
 - [spec-009-malecns-lab](spec-009-malecns-lab/spec.md)：Done，已通过[独立验收](spec-009-malecns-lab/acceptance.md)；统一展示名 MaleCNS Lab、包与 CLI `malecns_lab`，保留科研资产与历史来源，整理文档和机器人资料入口。
 
 - [spec-001-agent-workflow](spec-001-agent-workflow/spec.md)：已有项目接入 Agent 开发流程。当前阶段以 [Plan](spec-001-agent-workflow/plan.md) 和[任务交接](../.ai/prompts/task-handoff.md)为准。

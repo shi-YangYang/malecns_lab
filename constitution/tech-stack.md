@@ -16,9 +16,10 @@
 | CLI | `malecns_lab` → `malecns_lab.cli:main`；download、build-brain、inspect、calibrate、bench |
 | 测试与检查 | pytest，测试目录 `tests/`；Ruff 配置在 `pyproject.toml`，目标 Python 3.11，行长 130 |
 | 数据与持久化 | 本地连接组、NPZ、JSON、CSV 和视频；没有数据库服务 |
-| 服务与部署 | 本地工具与设备实验；没有前后端服务、外部 AI/LLM 服务或既定服务部署流程 |
-| 新方向 | WebGL 神经展示与智元 G2/X2 接入尚未实现；资料见 [智元开发入口](../docs/AGIBOT.md)，SDK/仿真运行条件不等于本机已经配置 |
-| 工程设施 | 当前没有 lockfile、CI、Docker 配置或专用构建脚本；没有明确既定的格式化命令流程 |
+| WebGL 前端 | `apps/atlas/`，Vite + TypeScript + Three.js；npm 与 package-lock.json；Python 只读导出已有记录，浏览器本地回放 |
+| 服务与部署 | 本地工具与设备实验；脑图由本地 Vite/static server 提供，无云部署、外部 AI/LLM 服务或设备控制 API |
+| 新方向 | WebGL 第一版按 [Spec 010](../specs/spec-010-neural-atlas/spec.md) 完成并验收 PASS；智元 G2/X2 尚未接入，资料见 [智元开发入口](../docs/AGIBOT.md) |
+| 工程设施 | 前端有 npm 锁文件与 build/dev/preview 脚本；没有 CI、Docker 配置或既定全仓库格式化流程 |
 
 依据：[pyproject.toml](../pyproject.toml)、[安装说明](../README.md)。不要把当前本机 Python 版本变成比项目声明更严格的最低要求，也不要为补齐表格创建新的工程设施。
 
@@ -28,6 +29,7 @@
 - [control/](../src/malecns_lab/control/)：动作契约、设备数值适配、旧读出/校准、控制限制。
 - [learning/](../src/malecns_lab/learning/)：新解码器、数据准备、离线拟合与评估；依赖 control，反向依赖不允许。
 - [diagnostics/](../src/malecns_lab/diagnostics/)：离线录像重放、模拟神经活动记录与刺激比较；不产生设备动作。见 [Decision 004](../.ai/decisions/004-neural-activity.md)。
+- [visualization/](../src/malecns_lab/visualization/)：已有神经记录与胞体坐标导出；[apps/atlas/](../apps/atlas/)：浏览器三维展示，见 [Decision 017](../.ai/decisions/017-local-neural-atlas.md)。导出数据位于忽略的 `apps/atlas/public/data/`，不改旧研究资产。
 - [experiments/tello/](../src/malecns_lab/experiments/tello/)：设备实验；policy、worker、session 分别负责纯策略、脑计算子进程、共享遥测与清理。
 - [drones/](../src/malecns_lab/drones/)：离线仿真。详细边界见[架构](../docs/ARCHITECTURE.md)。
 - 实验与学习命令直接运行包内模块，例如 `python -m malecns_lab.experiments.tello.trial --help` 和 `python -m malecns_lab.learning.train_v2 --help`。

@@ -33,4 +33,6 @@ LIF 参数参考 Shiu P. K. 等人的 *A Drosophila computational brain model re
 
 依赖通过 Python 包管理器安装，各自保留原许可；本项目的 MIT 许可不替代它们的许可。当前依赖范围包括 numpy、scipy、PyYAML，以及可选的 OpenCV、pyarrow、pandas、DJITelloPy、pytest 和 Ruff。具体安装声明以 [pyproject.toml](pyproject.toml) 为准。
 
-原浏览器演示及其随附 three.js 资源已从当前项目移除，不再作为本项目发布内容。
+原浏览器演示及其随附 three.js 资源已从当前项目移除。新的 `apps/atlas/` 通过 npm 安装 Three.js（MIT）、Vite（MIT）和 TypeScript（Apache-2.0）等依赖，以 `package.json` 与锁文件为准；依赖保留各自许可。新果蝇示意模型由程序化几何构建，不使用原演示资产。
+
+脑图所用胞体坐标来自 MaleCNS 官方注释；派生展示数据保留 CC-BY 4.0 署名、来源和居中缩放说明。神经色彩来自项目 LIF 模型的记录，不是原数据集中测得的活体神经活动。
