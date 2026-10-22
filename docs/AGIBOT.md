@@ -1,8 +1,10 @@
 # X2 官方仿真与现场接入
 
-当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac 上的独立 `linux/amd64` Docker 已完成官方仿真显示、MC 启动和 Python AimDK 查询通信。[官方站立、短时前进与停止](../specs/spec-016-x2-motion-mvp/implementation.md)已实测，独立验收已通过；精确速度映射、MaleCNS 闭环与真机适配尚未验证。按用户要求仅在需要时启动 GPU，当前 GPU 容器、私有 VM 和 CPU 仿真均已关闭。
+当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac GPU 仿真已完成官方动作验证和[项目动作适配器验收](../specs/spec-018-x2-motion-adapter/acceptance.md)：受控意图经自定义输入源前进，归零后结合里程计与MC确认停稳。官方SDK、MC、Sim与模型未改；完整MaleCNS闭环、精确速度映射与真机适配尚未完成。仿真按需启动，当前GPU容器、私有VM和CPU仿真均已关闭。
 
-速度与停车的后续核对见 [Spec 017](../specs/spec-017-x2-motion-contract/implementation.md)：当前目标 0.2 对应稳定段约 0.49–0.50 m/s，归零后最大观察水平偏移约 0.237 m；这是单次仿真样本，不能当作通用校准或停车上限。下一阶段适配器结合里程计与 MC 状态确认停止。
+[最终适配器实测](../specs/spec-018-x2-motion-adapter/implementation.md)：约2秒非零目标带来整轮约0.901m前向位移，首零至确认停车约5.09秒；最终连续1.007秒的最大水平速度0.0173m/s。目标0.2不是实测速度，这一轮的位移与停车时间不是通用校准或刹停保证。失败集成与修复证据均保留。
+
+下一阶段为[完整脑冻结推理基线](../specs/spec-019-x2-neural-inference/spec.md)，先在仿真关闭时核对最终训练参数、实测完整图前向时延与资源，再制定真实反馈联调协议。当前官方配置没有相机图像发布；计划使用明确标注的里程计驱动虚拟标记，不冒称真实相机。
 
 ## 官方组件
 
@@ -225,4 +227,4 @@ docker compose -f deploy/x2/compose.yaml exec -T x2 bash -lc 'cd /workspace/aimd
 3. 接入感知 → MaleCNS → 动作解码 → AimDK → MC → X2 的反馈闭环；明确相机、坐标、控制周期、时延和失效停止。
 4. 与上海现场的具体 X2 型号、固件、MC/AimDK 版本及接口权限对齐，再进行现场适配。
 
-既有 `BodyVelocity` 是 FLU 坐标的 SI 速度目标，不能不经核对直接当作 AimDK 参数。平衡和步态由官方 MC 负责；MaleCNS 的任务输出需要独立验证。单轴稳向实验已停止作为接入前置，结果见[历史实验](EXPERIMENT_RESULTS.md)。当前已建立官方组件运行环境，项目内的神经输出适配器与真机验证尚未完成。
+既有 `BodyVelocity` 是 FLU 坐标的 SI 速度目标，不能不经核对直接当作 AimDK 参数。平衡和步态由官方 MC 负责；MaleCNS 的任务输出需要独立验证。单轴稳向实验已停止作为接入前置，结果见[历史实验](EXPERIMENT_RESULTS.md)。当前受控STOP/FORWARD适配器已通过；神经输出接入与真机验证尚未完成。
