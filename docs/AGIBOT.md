@@ -1,6 +1,8 @@
 # X2 官方仿真与现场接入
 
-当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac 上的独立 `linux/amd64` Docker 已完成官方仿真显示、MC 启动和 Python AimDK 查询通信。尚未验证站立、行走、MaleCNS 闭环或真机适配；不把组件启动成功当作机器人控制成功。
+当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac 上的独立 `linux/amd64` Docker 已完成官方仿真显示、MC 启动和 Python AimDK 查询通信。[官方站立、短时前进与停止](../specs/spec-016-x2-motion-mvp/implementation.md)已实测，独立验收已通过；精确速度映射、MaleCNS 闭环与真机适配尚未验证。按用户要求仅在需要时启动 GPU，当前 GPU 容器、私有 VM 和 CPU 仿真均已关闭。
+
+速度与停车的后续核对见 [Spec 017](../specs/spec-017-x2-motion-contract/implementation.md)：当前目标 0.2 对应稳定段约 0.49–0.50 m/s，归零后最大观察水平偏移约 0.237 m；这是单次仿真样本，不能当作通用校准或停车上限。下一阶段适配器结合里程计与 MC 状态确认停止。
 
 ## 官方组件
 
@@ -10,7 +12,7 @@
 | `mc` | 官方运动控制，将高层运动目标转换为关节指令 |
 | AimDK | 应用侧感知与运动接口；具体可用接口以对应版本为准 |
 
-官方仿真文档要求 **x86_64 Ubuntu 22.04**。Apple Silicon Mac 的容器默认架构为 ARM，本项目使用 `linux/amd64` 转译及容器内软件渲染。当前没有验证 Mac 与官方 Linux 部署等价，也没有更换第三方步态控制器。
+官方仿真文档要求 **x86_64 Ubuntu 22.04**。Apple Silicon Mac 的容器默认架构为 ARM，本项目使用 `linux/amd64` 转译，已有软件渲染与私有 GPU 图形路径。当前没有验证 Mac 与官方 Linux 部署等价，也没有更换第三方步态控制器。
 
 - [官方开发站](https://x2-aimdk.agibot.com/zh-cn/latest/)。
 - [官方仿真部署](https://x2-aimdk.agibot.com/zh-cn/latest/sim_contents.html)。

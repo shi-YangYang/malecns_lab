@@ -1,6 +1,6 @@
 # 设计与实测记录
 
-当前工作是[官方 X2 Docker 环境](spec-015-x2-docker/spec.md)；GPU 兼容层重建已通过，当前按用户要求运行 GPU 仿真，CPU 仿真已停止。[仓库清理](spec-014-x2-repository-cleanup/spec.md)已完成；单轴稳向不再是接入前置。日常操作从[文档索引](../docs/README.md)进入，实验结论见[已有结果](../docs/EXPERIMENT_RESULTS.md)。
+当前工作是[X2 速度与停车契约核对](spec-017-x2-motion-contract/spec.md)，离线分析已完成，独立验收已通过。[官方动作 MVP](spec-016-x2-motion-mvp/spec.md)已通过，现已明确实际速度与目标不同、停车需等待 STAND 后稳定；下一阶段按[最小动作接口决定](spec-017-x2-motion-contract/interface-decision.md)实施适配器。仿真按需启动，本轮未启动任何环境。此前[官方 Docker/GPU 环境](spec-015-x2-docker/spec.md)与[仓库清理](spec-014-x2-repository-cleanup/spec.md)已完成。日常操作从[文档索引](../docs/README.md)进入。
 
 本目录保留阶段设计、独有数值协议和实际实验报告，删除重复实施、返工和验收流水。历史报告描述当时状态，不是当前待办清单；过程文件中已经提交的版本可从 Git 历史查看，未提交且被精简的过程说明不保证另有副本。原始数据、参数、源码快照和日志没有删除。
 
@@ -18,6 +18,10 @@
 | [013](spec-013-yaw-learning/spec.md) | 历史单轴学习：两分支各 80 窗完成、固定模型验证失败；后续支线已停止 |
 
 ## 关键实测
+
+- [X2 速度与停车离线核对](spec-017-x2-motion-contract/implementation.md)。
+
+- [官方 X2 站立、前进与停止](spec-016-x2-motion-mvp/implementation.md)。
 
 - [完整参考图构建](spec-007-model-v2/implementation-p0.md)。
 - [CPU/MPS 数值差异](spec-008-trainable-snn/mps-fullgraph-run-20261019-r1.md)。
