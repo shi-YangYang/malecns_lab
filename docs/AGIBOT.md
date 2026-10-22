@@ -1,10 +1,10 @@
 # X2 官方仿真与现场接入
 
-当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac GPU 仿真已完成官方动作验证和[项目动作适配器验收](../specs/spec-018-x2-motion-adapter/acceptance.md)：受控意图经自定义输入源前进，归零后结合里程计与MC确认停稳。官方SDK、MC、Sim与模型未改；完整MaleCNS闭环、精确速度映射与真机适配尚未完成。仿真按需启动，当前GPU容器、私有VM和CPU仿真均已关闭。
+当前选择 **智元官方 X2 Sim + MC + AimDK**。Mac GPU仿真已完成[完整MaleCNS纵向反馈MVP实测](../specs/spec-021-x2-neural-loop/implementation.md)：真实odom形成虚拟标记输入，完整脑输出触发两轮有界前进，实际位移0.419m和0.429m，每轮结合odom与MC确认水平停稳，最后参数与状态封存成功。[最终独立验收PASS](../specs/spec-021-x2-neural-loop/acceptance.md)。官方SDK、MC、Sim与模型未改；GPU容器、私有VM、CPU仿真及脑进程均已关闭。
 
 [最终适配器实测](../specs/spec-018-x2-motion-adapter/implementation.md)：约2秒非零目标带来整轮约0.901m前向位移，首零至确认停车约5.09秒；最终连续1.007秒的最大水平速度0.0173m/s。目标0.2不是实测速度，这一轮的位移与停车时间不是通用校准或刹停保证。失败集成与修复证据均保留。
 
-[完整脑冻结推理优化](../specs/spec-020-x2-frozen-optimization/implementation.md)已通过：完整状态和输出逐元素一致，预热加三帧计算耗时下降62.3%，单帧约2.3秒，RSS峰值约1.54GiB；这仍不是实时控制频率。正在按[纵向反馈MVP协议](../specs/spec-021-x2-neural-loop/spec.md)连接脑与官方运动链路。当前官方配置没有相机图像发布；使用明确标注的里程计驱动虚拟标记，不冒称真实相机。
+[完整脑冻结推理优化](../specs/spec-020-x2-frozen-optimization/implementation.md)已通过：完整状态和输出逐元素一致，预热加三帧计算耗时下降62.3%，单帧约2.3秒，RSS峰值约1.54GiB；这仍不是实时控制频率。本次与仿真共驻留时，两帧各约3.68秒，第二帧之前另等待27.60秒姿态稳定；不能将单独运行约2.3秒或GUI60FPS当作闭环周期。当前官方配置没有相机图像发布，使用里程计驱动虚拟标记；尚未证明学习目标跟随、连续实时行走、真实相机导航或真机能力。初始站立仍需官方SD和GUI重置，最终STOPPED沿用水平停稳语义，并不代表角速度完全为零。
 
 ## 官方组件
 

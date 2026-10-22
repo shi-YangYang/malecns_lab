@@ -1,32 +1,32 @@
-# 当前交接 — 冻结推理优化通过，准备X2神经反馈联调
+# 当前交接 — 完整MaleCNS到X2纵向MVP与冻结优化完成
 
 更新：2026-10-23。工作目录 `/Users/yang/project/malecns_lab`。
 
-## 用户目标与授权
+## 当前结论
 
-持续目标：跑完MVP并完成优化；每阶段完成后可本地commit，自行决策，不逐项询问。不push、不接真机、不训练。完整MaleCNS使用真实参考资产，固定意图、重放和人工规则不能冒充脑控制。完整脑保留至少1GiB系统available，单完整脑进程，先测资源再制定仿真联调边界。不操作Noria或重启Docker。
+用户授权的“跑完MVP并完成优化，每阶段可本地commit、自行决策”已达到约定的纵向工程范围；不push、不训练、不接真机。本轮[Spec021独立验收](../../specs/spec-021-x2-neural-loop/acceptance.md) PASS，必要检查与实际验证完成后停止追加运行。源代码和报告本地提交，data/logs/模型/来源快照不入Git。
 
-仿真仅在需要的有界验证窗口开启，准备、编码、分析和结束后关闭，减少发热；CPU仿真保持停止。
+完整166700节点、25582938非零边、124177617连接计数的冻结脑，通过实际里程计驱动的虚拟标记输入与官方Sim + MC + AimDK完成两轮反馈。原始vx按固定>0.03门限触发每轮1秒MC目标0.2，实际前进0.41884m和0.42901m，两轮均确认水平STOPPED。第二输入变化368像素；参数与图计数不变，完整状态600/1100/1600步封存，worker/监督/host_ack/桥清理关联齐全。
 
-## 已完成
+## 已完成阶段
 
-- [Spec016](../../specs/spec-016-x2-motion-mvp/acceptance.md)：官方站立、前进与最终停止PASS，提交 `2c14c31`。
-- [Spec017](../../specs/spec-017-x2-motion-contract/acceptance.md)：速度语义与停车核对PASS，提交 `65aae55`。0.2为MC目标，不能当实测速率或通用校准。
-- [Spec018](../../specs/spec-018-x2-motion-adapter/acceptance.md)：STOP/FORWARD核心、显式ROS仿真入口及第四轮实测独立PASS，106项定向检查通过，提交 `2865d5d`。第四轮前向净位移0.90069m；归零后5.09292秒确认停稳，最终连续1.00677秒最大水平速度0.01723m/s。相关通过检查不再重复。
-- [Spec019](../../specs/spec-019-x2-neural-inference/acceptance.md)：唯一完整图冻结推理基线独立PASS，提交 `5c8be07`。三个输入与四个完整状态边界保存于 `data/x2_neural_inference_20261023_r1/`；预热7.276秒，三帧6.541/6.011/5.947秒，总30.448秒。RSS峰值1.53GiB，最低系统available5.34GiB；参数未更新，worker已退出，VM未启动。
-- [Spec020](../../specs/spec-020-x2-frozen-optimization/acceptance.md)：独立PASS。唯一优化对照在 `data/x2_neural_inference_20261023_optimized_r1/`，四边界完整状态与三组输出全部精确一致；计算25.7747→9.7080秒，下降62.3351%，单帧2.289–2.305秒。RSS峰值1.54GiB、最低available4.90GiB；worker已退出，VM未启动。基线和优化都不再重复。
-- 外围GPU兼容层提交 `5a26a7c`；官方SDK、MC、Sim及模型未修改。历史60FPS是GUI渲染读数。
+- Spec016官方动作PASS，`2c14c31`；Spec017速度与停车契约PASS，`65aae55`；Spec018动作适配器PASS，`2865d5d`。固定意图动作只算这些阶段，不冒充脑控制。
+- [Spec019](../../specs/spec-019-x2-neural-inference/acceptance.md)完整脑冻结基线PASS，`5c8be07`；[Spec020](../../specs/spec-020-x2-frozen-optimization/acceptance.md)精确等价优化PASS，`a2108a4`。完整状态与输出精确一致，计算25.7747→9.7080秒，下降62.3351%；单独运行单帧约2.30秒。相关已通过检查不重复。
+- Spec021最终54项定向检查一次通过，新独立验收r4 PASS。联调与VM共驻留时单帧3.6775/3.6744秒；第二输入前另等27.5958秒姿态稳定，不能用其计算耗时或GUI60FPS冒充闭环频率。
+- 外围GPU兼容层 `5a26a7c`；官方SDK、MC、Sim及模型未修改。r1入口环境错误、r2姿态漂移拒绝、r3姿态等待超时均保留，详见本Spec实际报告与失败验收。
 
-## 当前阶段
+## 最终协议与限制
 
-[Spec021](../../specs/spec-021-x2-neural-loop/spec.md) 已Ready，实施完整脑与官方X2的纵向反馈MVP。原始vx>0.03才请求固定0.2 MC目标，1秒脉冲、最多3轮，每轮停稳后再推理；保留未执行的vz/wz。实际odom投影虚拟标记，输出消费前检查新反馈与位置/姿态漂移，不将旧观测重标为新鲜。仅此必要联调可驻留一个脑和一个私有VM，仍保留1GiB系统available、共享锁、0.1秒监督，脑240秒/仿真120秒上限；准备分析时关VM。实施者不启动脑/仿真，协调者只执行一次有界联调。
+最终执行两轮，初始和下一输入均要求既有站立/水平低速条件外，再有1秒角速度范数<=0.005rad/s、姿态变化<=0.005rad的新双流窗口。等待姿态最多40秒，下一观测45秒，脑计算30秒、停车12秒，宿主240秒、含准备的VM120秒。输出消费前仍检查更新反馈及0.02m/0.03rad漂移。全程等待/思考发零，失败不续走。vz/wz原样记录但未执行。
 
-后续闭环计划采用实际odom驱动的虚拟标记，因为当前官方配置没有图像发布；必须明确传感来源，不能称真实相机导航。脑原始三轴输出保留，纵向离散意图门限事先固定；若模型不驱动任务，记录行为失败，不能用人工距离控制替代后宣称脑成功。完整图推理优化另登记后比较完整状态与动作，不裁图。
+这是虚拟标记、纵向离散动作、单次有界工程闭环；两轮均FORWARD，未证明反馈改变决策、学会目标跟随、连续实时导航或真机能力。初始站姿仍需官方SD及GUI Pause→Reset→Run；最终STOPPED是水平停稳，并非角速度全零。HAL持续角漂移内部根因未定位，但输入前与响应接纳门槛均未放宽。
 
 ## 环境与证据
 
-- GPU runtime `data/x2_sim/gpu_probe/runtime-rebuild/`，独立LIGHTER_HOME/docker.sock；容器 `malecns-x2-gpu-trial`，6081，VM8CPU/6GiB、容器4GiB。当前已停止。
-- 最新关闭证据 `logs/x2_docker/20261023_motion_adapter/shutdown-stop-window.txt`：GPU容器exited、VM Stopped、CPU容器exited、默认context仍desktop-linux。
-- Spec018最终原始目录 `data/x2_sim/agibot/data/var/x2-adapter-20261023-stop-window/`；前三轮失败/问题证据各自保留。源码散列、命令、分析、截图在 `logs/x2_docker/20261023_motion_adapter/`，不纳入Git。
-- 主动关闭后Sim有Publish type unregistered日志，不称优雅退出。站立准备仍需官方SD与GUI Pause→Reset→Run，非自主起身。noVNC点击需100ms按下并确认状态。
-- 已授权的动作阶段通过；完整脑感觉/动作闭环、实时性和现场版本匹配尚未完成。不得把阶段PASS写成整个持续目标完成。
+- 当前GPU容器、私有VM、CPU仿真均已停止，完整脑进程已退出；默认Docker context仍desktop-linux，未重启Docker或操作Noria。不用仿真时继续保持关闭，避免发热。
+- 最终原始目录 `data/x2_sim/agibot/data/var/x2-neural-loop-20261023-r4/`；编排、生命周期、分析、独立验收关联和截图 `logs/x2_docker/20261023_neural_loop_r4/`。VM开启至关闭95.553秒，ROS桥51.303秒，宿主101.204秒。
+- RSS峰值1.53GiB、最低系统available1.99GiB，保留至少1GiB；MPS driver峰值不与统一内存RSS相加。共享锁、单完整脑、0.1秒监督继续适用。
+- GPU runtime `data/x2_sim/gpu_probe/runtime-rebuild/`，独立LIGHTER_HOME/docker.sock；容器 `malecns-x2-gpu-trial`，6081，VM8CPU/6GiB、容器4GiB。CPU容器 `malecns-x2-x2-1` 保持停止。
+- 宿主完整脑入口必须用 `PYTHONPATH="$PWD/src" .venv-train/bin/python -m malecns_lab.experiments.x2_neural`；普通 `.venv`用于轻量检查，缺少Torch。默认仅预览，执行需显式sim-only与全新data输出。容器ROS环境需source后prepend transport_src到PYTHONPATH，不能覆盖ROS路径。
+
+没有未处理的本阶段验收问题或活动运行。后续真实相机、连续控制、动作轴扩展、训练或真机工作需要另定范围与验收，当前不自动启动。

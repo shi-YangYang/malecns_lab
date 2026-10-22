@@ -11,7 +11,7 @@
 | 学习 | .venv-train、PyTorch 2.14.1/MPS、psutil；CPU 与全 GPU 研究分支，不承诺实时性 |
 | 图谱 | apps/atlas，Vite + TypeScript + Three.js；npm/package-lock.json |
 | 本地服务 | 网页 127.0.0.1:8765，Python 刺激任务服务 127.0.0.1:8766；单计算子进程 |
-| 设备 | 已有 Tello 工具；官方 X2 Docker 环境已显示仿真并完成 Python AimDK → MC 查询，运动与脑闭环待验证 |
+| 设备 | 已有 Tello 工具；官方X2 Sim + MC + AimDK已完成两轮纵向神经反馈MVP实测，使用里程计驱动虚拟标记，真机待适配 |
 | 数据 | 本地 NPZ/JSON/CSV/视频，没有数据库；data/logs 不随源码分发 |
 | 检查 | tests 下 pytest；前端 npm run build；不默认全量测试或格式化 |
 
@@ -28,7 +28,7 @@
 
 ## 后续官方 X2 环境
 
-Apple Silicon Mac 使用 `deploy/x2/` 的独立 linux/amd64 Docker：ROS Humble、官方 MC/Sim v1.0.0-20260522、源码构建 AimDK 1.1.0 的 aimdk_msgs/py_examples，Xvfb + llvmpipe + noVNC。图形、状态发布和模式查询已实测；仍有调度延迟，运动控制、MaleCNS 适配和现场版本匹配待验证，见 [AGIBOT](../docs/AGIBOT.md)。保留脑模型在 macOS 运行的能力，不把环境可用写成闭环成果。
+Apple Silicon Mac 使用 `deploy/x2/` 的独立 linux/amd64 Docker：ROS Humble、官方 MC/Sim v1.0.0-20260522、源码构建 AimDK 1.1.0 的 aimdk_msgs/py_examples，当前采用私有Lighter VM与VirtualGL/Mesa/Venus/MoltenVK接入Mac GPU渲染、noVNC显示；旧llvmpipe CPU仿真保持停止。macOS MPS完整脑与官方运动链路已完成两轮纵向反馈实测，模型与官方组件未改；传感器为里程计虚拟标记，连续实时控制与现场版本匹配待验证，见 [AGIBOT](../docs/AGIBOT.md)。保留脑模型在 macOS 运行的能力，不把环境可用写成闭环成果。
 
 ## 本地约束
 
