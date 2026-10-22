@@ -176,10 +176,10 @@ def test_execute_holds_lock_and_passes_bounded_budget_to_supervisor(tmp_path, mo
         path.write_text("# wrapper serialization fixture\n")
     monkeypatch.setattr(inference, "simulator_preflight", lambda root: {"cpu_status": "exited"})
     monkeypatch.setattr(inference, "read_anchors", lambda root: {
-        "run": {"implementation_sha256": {}, "runtime": {}, "graph": {"path": "historical/path"}},
+        "run": {"implementation_sha256": {}, "runtime": {}, "graph": {"path": "historical/path"}, "policy": {"policy_id": "fixture"}},
         "cpu": {}, "checkpoint": {}, "window": {}})
     monkeypatch.setattr(inference, "export_sources", lambda *args: {"registered_source_count": 54})
-    monkeypatch.setattr(inference, "runtime", lambda: {"backend": "test-no-numerical-work"})
+    monkeypatch.setattr(inference, "runtime", lambda backend="baseline": {"backend": "test-no-numerical-work"})
     monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(available=3*inference.GIB))
     calls = []
     def supervised(command, directory, **budget):
@@ -262,3 +262,92 @@ def test_actual_fixed_metadata_and_all_registered_sources_without_brain(tmp_path
     finally:
         if directory.exists():
             make_writable(directory)
+
+
+def test_optimized_cli_is_explicit_and_preview_stays_inert(tmp_path):
+    output = tmp_path / "no-output"
+    preview = subprocess.run([sys.executable, "-m", "malecns_lab.experiments.x2_inference", "--backend", "optimized",
+                              "--baseline", str(tmp_path / "absent"), "--output", str(output)],
+                             capture_output=True, text=True)
+    assert preview.returncode == 0 and json.loads(preview.stdout)["backend"] == "optimized"
+    assert not output.exists()
+    missing = subprocess.run([sys.executable, "-m", "malecns_lab.experiments.x2_inference", "--execute", "--backend",
+                              "optimized", "--output", str(output)], capture_output=True, text=True)
+    assert missing.returncode != 0 and not output.exists()
+    with pytest.raises(ValueError, match="requires a baseline"):
+        inference.execute(output, tmp_path, backend="optimized")
+    with pytest.raises(ValueError, match="must not modify"):
+        inference.execute(tmp_path / "data/base/nested", tmp_path, backend="optimized", baseline=tmp_path / "data/base")
+
+
+@pytest.mark.parametrize("actual,expected,equal,different", [
+    (np.array([1., 2.], np.float32), np.array([1., 2.], np.float32), True, 0),
+    (np.array([1., 3.], np.float32), np.array([1., 2.], np.float32), False, 1),
+    (np.array([1., 2.], np.float64), np.array([1., 2.], np.float32), False, 0),
+    (np.array([1, 2], np.int64), np.array([1, 3], np.int64), False, 1),
+    (np.array([1, 2], np.int64), np.array([[1, 2]], np.int64), False, None),
+    (np.array([np.nan], np.float32), np.array([np.nan], np.float32), False, 1),
+])
+def test_exact_array_comparison_never_uses_error_tolerance(actual, expected, equal, different):
+    record = inference.compare_array(actual, expected)
+    assert record["exact_equal"] is equal and record["different_elements"] == different
+    assert record["actual_dtype"] == actual.dtype.str
+    if different == 1 and record["finite"]:
+        assert record["max_absolute_error"] == 1
+        assert record["rms_error"] == pytest.approx(np.sqrt(.5))
+
+
+def comparison_files(directory):
+    # Only archive/comparator fixtures; no network or neural update is created.
+    (directory / "states").mkdir(parents=True)
+    (directory / "frames").mkdir()
+    for index in range(4):
+        np.savez(directory / f"states/{index:03d}.npz", **{
+            "brain.v": np.array([index, 2], np.float32), "brain.g": np.array([0, 1], np.float32),
+            "brain.refractory_until": np.array([index, 0], np.int64), "brain.pending": np.zeros((2, 2), np.float32),
+            "drive.phase": np.array([.5], np.float32), "drive.event_counts": np.array([index], np.int64)})
+        (directory / f"states/{index:03d}.json").write_text(json.dumps({"metadata": {"brain": {"step": 600+500*index},
+                                                                                           "frame_index": index}}))
+        if index:
+            np.save(directory / f"frames/{index-1:03d}.npy", np.full((2, 2, 3), index, np.uint8), allow_pickle=False)
+            np.savez(directory / f"frames/{index-1:03d}-output.npz", action=np.ones(3, np.float32),
+                     features_mv=np.ones(2, np.float32), logits=np.zeros(3, np.float32))
+
+
+def test_compare_all_four_boundaries_and_three_outputs_and_performance(tmp_path):
+    actual, prior = tmp_path / "new", tmp_path / "baseline"
+    comparison_files(actual)
+    comparison_files(prior)
+    binding = {"path": str(prior), "registration_id": "fixture", "files_sha256": {
+        str(path.relative_to(prior)): inference.sha256(path) for path in prior.rglob("*") if path.is_file()},
+        "compute_seconds": 10., "phase_compute_seconds": [4., 2., 2., 2.]}
+    timing = {"precondition_seconds": 2., "frame_forward_seconds": [1., 1., 1.]}
+    result = inference.compare_evidence(actual, binding, timing)
+    assert result["status"] == "PASS" and len(result["comparisons"]) == 7
+    assert result["first_difference"] is None and result["compute_reduction_fraction"] == .5
+    boundary = inference.compare_evidence(actual, binding, {"precondition_seconds": 2., "frame_forward_seconds": [2., 2., 2.]})
+    assert boundary["status"] == "PASS" and boundary["performance_pass"] is True
+    slower = inference.compare_evidence(actual, binding, {"precondition_seconds": 4., "frame_forward_seconds": [2., 2., 2.]})
+    assert slower["status"] == "FAIL" and slower["exact_equal"] is True and slower["performance_pass"] is False
+    state = actual / "states/002.npz"
+    with np.load(state, allow_pickle=False) as archive:
+        arrays = {name: archive[name].copy() for name in archive.files}
+    arrays["brain.pending"][1, 1] = np.nextafter(np.float32(0), np.float32(1))
+    np.savez(state, **arrays)
+    failed = inference.compare_evidence(actual, binding, timing)
+    assert failed["status"] == "FAIL" and failed["first_difference"]["frame_index"] == 2
+    assert failed["first_difference"]["arrays"] == ["brain.pending"]
+    assert failed["comparisons"][3]["arrays"]["brain.pending"]["different_elements"] == 1
+    prior.joinpath("states/000.json").write_text("{}")
+    with pytest.raises(ValueError, match="changed during execution"):
+        inference.compare_evidence(actual, binding, timing)
+
+
+@pytest.mark.skipif(not (inference.ROOT / "data/x2_neural_inference_20261023_r1/summary.json").exists(), reason="Saved baseline absent")
+def test_actual_completed_baseline_binding_allows_new_wrapper_sources():
+    anchors = inference.read_anchors()
+    binding = inference.baseline_evidence(inference.ROOT / "data/x2_neural_inference_20261023_r1", anchors)
+    assert binding["checkpoint_id"] == inference.CHECKPOINT_ID
+    assert binding["compute_seconds"] == pytest.approx(25.774687707889825)
+    assert all(f"states/{index:03d}.npz" in binding["files_sha256"] for index in range(4))
+    assert all(f"frames/{index:03d}.npy" in binding["files_sha256"] for index in range(3))

@@ -12,6 +12,7 @@ import hashlib
 from importlib.metadata import version
 import io
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -72,11 +73,12 @@ def read_json(path):
     return value
 
 
-def runtime():
+def runtime(backend="baseline"):
     return {"python": platform.python_version(), "numpy": version("numpy"), "scipy": version("scipy"),
             "torch": version("torch"), "machine": platform.machine(), "system": platform.system(),
             "num_threads": 4, "num_interop_threads": 1, "device": "mps", "dtype": "float32",
-            "fallback": "0", "backend": "historical_GPUPolicy_no_grad_frozen_inference"}
+            "fallback": "0", "backend": ("historical_GPUPolicy_no_grad_frozen_inference" if backend == "baseline"
+                                           else "historical_GPUPolicy_optimized_sticky50_comparison")}
 
 
 def read_anchors(root=ROOT):
@@ -149,6 +151,132 @@ def verify_sources(directory, manifest):
         require(sha256(directory / relative) == digest, f"Snapshot changed: {name}")
 
 
+def baseline_evidence(directory, anchors):
+    """Authenticate completed evidence without loading a model or accepting new sources as old."""
+    directory = Path(directory).resolve()
+    reg, summary, supervisor, worker, timings, policy = [read_json(directory / name) for name in
+        ("registration.json", "summary.json", "result.json", "worker_result.json", "timing.json", "actual_policy.json")]
+    bound(reg, "registration_id")
+    bound(policy, "policy_id")
+    require(reg.get("backend", "baseline") == "baseline" and reg["checkpoint_id"] == CHECKPOINT_ID
+            and summary["status"] == worker["status"] == supervisor["status"] == "completed"
+            and supervisor["returncode"] == 0 and supervisor["worker_status"] == "completed"
+            and summary["registration_id"] == worker["registration_id"] == reg["registration_id"]
+            and summary["supervisor"] == supervisor, "Baseline is not a completed supervised baseline")
+    require(worker["checkpoint_id"] == CHECKPOINT_ID and worker["policy_id"] == policy["policy_id"]
+            and policy == anchors["run"]["policy"] and worker["completed_frames"] == 3
+            and worker["saved_state_boundaries"] == 4 and reg["inputs_m"] == [2., 1.5, 1.]
+            and reg["state_boundaries"] == [0, 1, 2, 3], "Baseline policy, checkpoint or probe inventory differs")
+    require(worker["parameters_unchanged"] is True and worker["raw_counts_sha256_before"]
+            == worker["raw_counts_sha256_after"] == policy["model"]["graph"]["raw_ordered_counts_sha256"],
+            "Baseline complete graph or frozen parameters differ")
+    parameters = read_json(directory / "parameters.json")
+    require(parameters["unchanged"] is True and parameters["before"] == parameters["after"], "Baseline parameters changed")
+    sources = read_json(directory / "sources.json")
+    require(sha256(directory / "sources.json") == reg["source_manifest_sha256"]
+            and sources["registered_sha256"] == anchors["run"]["implementation_sha256"], "Baseline old sources differ")
+    verify_sources(directory / "sources", sources)
+    for name, digest in reg["wrapper_sha256"].items():
+        require(not Path(name).is_absolute() and ".." not in Path(name).parts
+                and sha256(directory / "wrapper_sources" / name) == digest, "Baseline wrapper archive changed")
+    require(timings == worker["timing"] and len(timings["frame_forward_seconds"]) == 3, "Baseline timings differ")
+    durations = [timings["precondition_seconds"], *timings["frame_forward_seconds"]]
+    require(all(type(value) in (float, int) and math.isfinite(value) and value > 0 for value in durations),
+            "Invalid baseline compute durations")
+    files = {name: sha256(directory / name) for name in ("registration.json", "summary.json", "result.json", "worker_result.json",
+             "timing.json", "actual_policy.json", "parameters.json", "sources.json")}
+    for index in range(4):
+        name = f"states/{index:03d}.json"
+        record = read_json(directory / name)
+        require(record == worker["boundaries"][index] and record["frame_index"] == index
+                and record["file"] == f"states/{index:03d}.npz", "Baseline state boundary differs")
+        require(sha256(directory / record["file"]) == record["file_sha256"], "Baseline state file hash differs")
+        files[name], files[record["file"]] = sha256(directory / name), record["file_sha256"]
+    for index, distance in enumerate((2., 1.5, 1.)):
+        name = f"frames/{index:03d}.json"
+        record = read_json(directory / name)
+        require(record == worker["frames"][index] and record["distance_m"] == distance
+                and record["frame_index"] == index+1 and record["source"] == "offline_static_input_probe"
+                and record["input_file"] == f"frames/{index:03d}.npy"
+                and record["output_file"] == f"frames/{index:03d}-output.npz", "Baseline frame sequence differs")
+        require(sha256(directory / record["input_file"]) == record["input_file_sha256"]
+                and sha256(directory / record["output_file"]) == record["output_file_sha256"], "Baseline frame file hash differs")
+        files[name] = sha256(directory / name)
+        files[record["input_file"]], files[record["output_file"]] = record["input_file_sha256"], record["output_file_sha256"]
+    return {"path": str(directory), "registration_id": reg["registration_id"], "policy_id": policy["policy_id"],
+            "checkpoint_id": CHECKPOINT_ID, "files_sha256": files, "compute_seconds": sum(durations),
+            "phase_compute_seconds": durations}
+
+
+def compare_array(actual, expected):
+    """Exact admission plus descriptive error metrics; no tolerance fallback."""
+    import numpy as np
+    same_shape, same_dtype = actual.shape == expected.shape, actual.dtype == expected.dtype
+    finite = bool(np.isfinite(actual).all() and np.isfinite(expected).all())
+    result = {"actual_shape": list(actual.shape), "baseline_shape": list(expected.shape),
+              "actual_dtype": actual.dtype.str, "baseline_dtype": expected.dtype.str,
+              "exact_equal": bool(same_shape and same_dtype and finite and np.array_equal(actual, expected)),
+              "finite": finite, "different_elements": None, "max_absolute_error": None, "rms_error": None}
+    if same_shape:
+        result["different_elements"] = int(np.count_nonzero(actual != expected))
+        if finite:
+            # Float64 errors are reporting only; exact comparison uses original dtypes.
+            delta = actual.astype(np.float64) - expected.astype(np.float64)
+            result["max_absolute_error"] = float(np.max(np.abs(delta), initial=0.))
+            result["rms_error"] = float(np.sqrt(np.mean(delta*delta))) if delta.size else 0.
+    return result
+
+
+def compare_evidence(directory, baseline, timing):
+    """Compare every saved recurrent boundary and output, retaining all differences."""
+    import numpy as np
+    directory, prior = Path(directory), Path(baseline["path"])
+    for name, digest in baseline["files_sha256"].items():
+        require(sha256(prior / name) == digest, f"Baseline evidence changed during execution: {name}")
+    records, inputs = [], []
+    for index in range(3):
+        actual_path, prior_path = directory / f"frames/{index:03d}.npy", prior / f"frames/{index:03d}.npy"
+        inputs.append({"frame_index": index+1, **compare_array(np.load(actual_path, allow_pickle=False),
+                                                              np.load(prior_path, allow_pickle=False)),
+                       "actual_file_sha256": sha256(actual_path), "baseline_file_sha256": sha256(prior_path)})
+    for index in range(4):
+        actual_meta = read_json(directory / f"states/{index:03d}.json")
+        prior_meta = read_json(prior / f"states/{index:03d}.json")
+        with np.load(directory / f"states/{index:03d}.npz", allow_pickle=False) as actual, \
+                np.load(prior / f"states/{index:03d}.npz", allow_pickle=False) as expected:
+            names = sorted(set(actual.files) | set(expected.files))
+            arrays = {name: compare_array(actual[name], expected[name]) if name in actual and name in expected
+                      else {"exact_equal": False, "reason": "array_inventory_differs"} for name in names}
+        records.append({"kind": "state", "frame_index": index, "metadata_equal": actual_meta["metadata"] == prior_meta["metadata"],
+                        "arrays": arrays, "exact_equal": actual_meta["metadata"] == prior_meta["metadata"]
+                        and all(value["exact_equal"] for value in arrays.values())})
+        if index > 0:
+            frame = index - 1
+            with np.load(directory / f"frames/{frame:03d}-output.npz", allow_pickle=False) as actual, \
+                    np.load(prior / f"frames/{frame:03d}-output.npz", allow_pickle=False) as expected:
+                names = sorted(set(actual.files) | set(expected.files))
+                arrays = {name: compare_array(actual[name], expected[name]) if name in actual and name in expected
+                          else {"exact_equal": False, "reason": "array_inventory_differs"} for name in names}
+            records.append({"kind": "output", "frame_index": index, "arrays": arrays,
+                            "exact_equal": all(value["exact_equal"] for value in arrays.values())})
+    compute = timing["precondition_seconds"] + sum(timing["frame_forward_seconds"])
+    require(math.isfinite(compute) and compute > 0, "Invalid optimized compute duration")
+    reduction = 1 - compute / baseline["compute_seconds"]
+    exact = all(record["exact_equal"] for record in [*inputs, *records])
+    performance = compute <= .8 * baseline["compute_seconds"]
+    return {"schema": "malecns_lab.x2_inference_comparison.v1", "baseline_registration_id": baseline["registration_id"],
+            "baseline_path": baseline["path"], "exact_equal": exact, "inputs": inputs, "comparisons": records,
+            "first_difference": next(({"kind": record["kind"], "frame_index": record["frame_index"],
+                                       "arrays": [key for key, value in record["arrays"].items() if not value["exact_equal"]],
+                                       "metadata_equal": record.get("metadata_equal")} for record in records if not record["exact_equal"]), None),
+            "baseline_compute_seconds": baseline["compute_seconds"], "optimized_compute_seconds": compute,
+            "baseline_phase_compute_seconds": baseline["phase_compute_seconds"],
+            "optimized_phase_compute_seconds": [timing["precondition_seconds"], *timing["frame_forward_seconds"]],
+            "compute_reduction_fraction": reduction, "required_reduction_fraction": .2, "performance_pass": performance,
+            "status": "PASS" if exact and performance else "FAIL",
+            "interpretation": "One synchronized run against the saved baseline; not a statistical speed or real-time guarantee"}
+
+
 def simulator_preflight(root=ROOT):
     """Read only: never start/stop a service or change the Docker context."""
     runtime_path = root / "data/x2_sim/gpu_probe/runtime-rebuild"
@@ -176,11 +304,15 @@ def numerical_lock(root=ROOT):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def execute(output, root=ROOT):
+def execute(output, root=ROOT, *, backend="baseline", baseline=None):
     """Prepare a new evidence directory and run exactly one supervised worker."""
     from .resource_guard import resource_budget, supervise, write_json
     import psutil
     root, output = Path(root).resolve(), Path(output).resolve()
+    require(backend in ("baseline", "optimized") and (baseline is not None) == (backend == "optimized"),
+            "Optimized execution requires a baseline; baseline execution cannot take one")
+    baseline_path = Path(baseline).resolve() if baseline is not None else None
+    require(baseline_path is None or not output.is_relative_to(baseline_path), "Output must not modify the baseline directory")
     require(any(output.is_relative_to(root / name) and output != root / name for name in ("data", "logs")),
             "Output must be a new directory beneath this project's data/ or logs/")
     output.mkdir(parents=True, exist_ok=False)
@@ -193,23 +325,33 @@ def execute(output, root=ROOT):
             write_json(output / "simulator_preflight.json", preflight)
             write_json(output / "phase.json", {"phase": "validate_metadata_and_export_sources"})
             anchors = read_anchors(root)
+            baseline_binding = baseline_evidence(baseline_path, anchors) if baseline_path is not None else None
+            if baseline_binding is not None:
+                write_json(output / "baseline_binding.json", baseline_binding)
             sources = export_sources(output / "sources", anchors["run"]["implementation_sha256"], root)
             write_json(output / "sources.json", sources)
             provenance = output / "provenance"
             provenance.mkdir()
             for key, value in anchors.items():
                 write_json(provenance / f"{key}.json", value)
-            wrapper = {name: sha256(root / "src/malecns_lab" / name) for name in WRAPPER_FILES}
-            for name in WRAPPER_FILES:
+            wrapper_files = WRAPPER_FILES + (("learning/x2_frozen.py",) if backend == "optimized" else ())
+            wrapper = {name: sha256(root / "src/malecns_lab" / name) for name in wrapper_files}
+            for name in wrapper_files:
                 path = output / "wrapper_sources" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("xb") as stream:
                     stream.write((root / "src/malecns_lab" / name).read_bytes())
                 path.chmod(0o444)
             resources = resource_budget(psutil.virtual_memory().available, rss_bytes=6*GIB, reserve_bytes=GIB)
-            current = runtime()
+            current = runtime(backend)
             historical = anchors["run"]["runtime"]
+            execution = {"schema": "malecns_lab.x2_inference_execution.v1", "backend": backend,
+                         "source_policy_id": anchors["run"]["policy"]["policy_id"], "checkpoint_id": CHECKPOINT_ID,
+                         "wrapper_sha256": wrapper, "runtime": current,
+                         "baseline_registration_id": baseline_binding["registration_id"] if baseline_binding else None}
+            execution["execution_id"] = canonical_hash(execution)
             registration = {"schema": result["schema"], "created_utc": datetime.now(timezone.utc).isoformat(),
+                            "backend": backend, "execution_identity": execution, "baseline_binding": baseline_binding,
                             "parent_pid": os.getpid(), "root": str(root), "output": str(output), "resources": resources,
                             "wall_limit_seconds": WALL_SECONDS, "parent_started_monotonic": started,
                             "checkpoint_id": CHECKPOINT_ID, "checkpoint_path": str(root / CHECKPOINT),
@@ -233,7 +375,11 @@ def execute(output, root=ROOT):
             require(supervision["status"] == "completed" and worker.get("status") == "completed"
                     and worker.get("completed_frames") == 3 and worker.get("saved_state_boundaries") == 4,
                     f"Incomplete baseline: {supervision['reason']}; {worker.get('reason', 'no worker result')}")
-            result.update(status="completed", reason="three_frozen_input_probes_sealed", registration_id=registration["registration_id"])
+            if backend == "optimized":
+                require(worker.get("comparison_status") == "PASS", "Optimized comparison did not pass")
+            result.update(status="completed", reason=("optimized_exact_comparison_passed" if backend == "optimized"
+                                                       else "three_frozen_input_probes_sealed"),
+                          registration_id=registration["registration_id"], execution_id=execution["execution_id"])
     except BaseException as error:
         result["reason"] = f"{type(error).__name__}:{error}"
         traceback.print_exc()
@@ -282,6 +428,7 @@ def run_worker(directory):
     directory = Path(directory).resolve()
     reg = read_json(directory / "registration.json")
     bound(reg, "registration_id")
+    backend = reg.get("backend", "baseline")
     require(os.getppid() == reg["parent_pid"] and str(directory) == reg["output"], "Worker requires its supervising parent")
     root = Path(reg["root"])
     with (root / "data/.continuous-training.lock").open("a+") as lock:
@@ -312,6 +459,16 @@ def run_worker(directory):
             require(sha256(root / "src/malecns_lab" / name) == digest, f"Inference wrapper changed: {name}")
         anchors = read_anchors(root)
         require(sources["registered_sha256"] == anchors["run"]["implementation_sha256"], "Snapshot registration differs")
+        execution = reg["execution_identity"]
+        bound(execution, "execution_id")
+        require(execution["backend"] == backend and execution["source_policy_id"] == anchors["run"]["policy"]["policy_id"]
+                and execution["checkpoint_id"] == CHECKPOINT_ID and execution["wrapper_sha256"] == reg["wrapper_sha256"]
+                and execution["runtime"] == reg["runtime"], "Execution identity differs")
+        baseline = reg["baseline_binding"]
+        require(backend in ("baseline", "optimized") and (baseline is not None) == (backend == "optimized"),
+                "Execution backend/baseline differs")
+        if baseline is not None:
+            require(baseline_evidence(baseline["path"], anchors) == baseline, "Registered baseline evidence changed")
         require(not any(name == "cnsbridge" or name.startswith("cnsbridge.") for name in sys.modules),
                 "Historical namespace was already imported")
         snapshot = directory / "sources/src/cnsbridge"
@@ -333,7 +490,7 @@ def run_worker(directory):
         torch.set_num_threads(4)
         torch.set_num_interop_threads(1)
         require_mps()
-        require(runtime() == reg["runtime"], "Worker runtime differs from registration")
+        require(runtime(backend) == reg["runtime"], "Worker runtime differs from registration")
         timing["imports_seconds"] = time.monotonic() - began
         sampler = MPSMemorySampler(directory / "mps_memory.csv", reg["resources"]["effective_rss_limit_bytes"])
         write_json(directory / "mps_budget.json", sampler.budget)
@@ -357,6 +514,27 @@ def run_worker(directory):
         # Historical validation requires requires_grad=True. no_grad and absence
         # of an optimizer freeze computation without changing historical source.
         timing["construction_and_restore_seconds"] = clock() - began
+        phase("configure_execution_backend", backend=backend)
+        began = clock()
+        executor = policy
+        if backend == "optimized":
+            from .x2_frozen import FrozenInference
+            executor = FrozenInference(policy, checkpoint_id=CHECKPOINT_ID)
+            backend_identity = executor.execution_identity
+            bound(backend_identity, "execution_id")
+            require(backend_identity["checkpoint_id"] == CHECKPOINT_ID
+                    and backend_identity["source_policy_id"] == policy.policy_id
+                    and backend_identity["implementation_sha256"] == reg["wrapper_sha256"]["learning/x2_frozen.py"],
+                    "Actual optimized execution identity differs")
+        else:
+            backend_identity = {"schema": "malecns_lab.x2_original_execution.v1", "backend": backend,
+                                "source_policy_id": policy.policy_id, "checkpoint_id": CHECKPOINT_ID,
+                                "source_files_sha256": sources["registered_sha256"], "mode": "torch.no_grad"}
+            backend_identity["execution_id"] = canonical_hash(backend_identity)
+        write_json(directory / "execution_identity.json", {"registration_execution": execution, "backend_execution": backend_identity})
+        result.update(execution_id=execution["execution_id"], backend_execution_id=backend_identity["execution_id"],
+                      execution_identity_sha256=sha256(directory / "execution_identity.json"))
+        timing["execution_setup_seconds"] = clock() - began
         result["raw_counts_sha256_before"] = raw_counts_digest(policy.brain.graph)
         require(result["raw_counts_sha256_before"] == policy.identity["model"]["graph"]["raw_ordered_counts_sha256"],
                 "Actual complete graph differs")
@@ -382,17 +560,26 @@ def run_worker(directory):
         with torch.no_grad():
             phase("new_scene_blank_precondition", neural_steps=600)
             began = clock()
-            state = policy.initial_state()
+            state = executor.initial_state()
             timing["precondition_seconds"] = clock() - began
             save_state(state)
             for index, sample in enumerate(probe_inputs()):
                 phase("render_input", index=index)
                 frame = marker_frame(sample["camera_position_m"], sample["camera_orientation_xyzw"], sample["target_world_m"])
+                if baseline is not None:
+                    prior = Path(baseline["path"])
+                    original = np.load(prior / f"frames/{index:03d}.npy", allow_pickle=False)
+                    original_info = read_json(prior / f"frames/{index:03d}.json")
+                    require(np.array_equal(frame, original) and original.dtype == np.uint8
+                            and _array_declaration(original) == original_info["input"]
+                            and all(original_info[key] == value for key, value in sample.items()),
+                            "Baseline input differs from the preregistered pixel probe")
+                    frame = original
                 path = directory / "frames" / f"{index:03d}.npy"
                 np.save(path, frame, allow_pickle=False)
                 phase("forward", index=index, sample_id=sample["sample_id"], neural_steps=500)
                 began = clock()
-                output = policy.forward_tensor(frame, state)
+                output = executor.forward_tensor(frame, state)
                 elapsed = clock() - began
                 state = output.state
                 action = output.action.detach().cpu().numpy().copy()
@@ -423,8 +610,16 @@ def run_worker(directory):
         _assert_snapshot_imports(snapshot)
         write_json(directory / "parameters.json", {"before": before, "after": after, "unchanged": True,
                                                    "autograd_enabled_for_inference": False, "optimizer_constructed": False})
-        result.update(status="completed", reason="frozen_full_reference_three_probes", frames=frames,
-                      boundaries=boundaries, policy_id=policy.policy_id, parameters_unchanged=True)
+        result.update(frames=frames, boundaries=boundaries, policy_id=policy.policy_id, parameters_unchanged=True)
+        if baseline is not None:
+            phase("compare_saved_baseline")
+            began = clock()
+            comparison = compare_evidence(directory, baseline, timing)
+            write_json(directory / "comparison.json", comparison)
+            result.update(comparison_status=comparison["status"], comparison_sha256=sha256(directory / "comparison.json"))
+            timing["comparison_seconds"] = clock() - began
+            require(comparison["status"] == "PASS", "Optimized exactness or 20 percent performance gate failed; see comparison.json")
+        result.update(status="completed", reason="frozen_full_reference_three_probes")
         phase("sealed")
     except BaseException as error:
         result["reason"] = f"{type(error).__name__}:{error}"

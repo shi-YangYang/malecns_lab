@@ -1,6 +1,6 @@
 # Spec 020 — 完整脑冻结推理优化
 
-状态：Ready（实际比较须等Spec019基线完成）。2026-10-23。用户已授权完成MVP和优化、阶段本地commit。
+状态：Completed / 独立验收 PASS。2026-10-23。唯一实际对照精确一致、计算耗时下降62.3351%，见 implementation.md 与 acceptance.md。用户已授权完成MVP和优化、阶段本地commit。
 
 ## 范围
 

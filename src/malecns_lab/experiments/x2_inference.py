@@ -11,15 +11,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true", help="Run one bounded frozen full-brain baseline")
     parser.add_argument("--output", type=Path, help="A new directory beneath this project's data/ or logs/")
+    parser.add_argument("--backend", choices=("baseline", "optimized"), default="baseline")
+    parser.add_argument("--baseline", type=Path, help="Completed baseline evidence; required for optimized execution")
     parser.add_argument("--_worker", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args._worker is not None:
-        if args.execute or args.output is not None:
+        if args.execute or args.output is not None or args.backend != "baseline" or args.baseline is not None:
             parser.error("Worker invocation cannot include public execution options")
         from malecns_lab.learning.x2_inference import run_worker
         return 0 if run_worker(args._worker)["status"] == "completed" else 1
+    if args.backend == "baseline" and args.baseline is not None:
+        parser.error("--baseline is only valid with --backend optimized")
     if not args.execute:
         print(json.dumps({"mode": "preview", "execute": False, "brain_loaded": False,
+                          "backend": args.backend, "baseline": str(args.baseline) if args.baseline is not None else None,
                           "inputs_m": [2.0, 1.5, 1.0], "new_scene_blank_steps": 600,
                           "steps_per_frame": 500, "wall_limit_seconds": 240,
                           "requested_rss_gib": 6, "system_reserve_gib": 1,
@@ -28,9 +33,11 @@ def main(argv=None):
         return 0
     if args.output is None:
         parser.error("--execute requires --output pointing to a new directory")
+    if args.backend == "optimized" and args.baseline is None:
+        parser.error("--backend optimized requires --baseline")
     try:
         from malecns_lab.learning.x2_inference import execute
-        result = execute(args.output)
+        result = execute(args.output, backend=args.backend, baseline=args.baseline)
     except Exception as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
         return 1
