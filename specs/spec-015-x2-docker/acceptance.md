@@ -55,3 +55,15 @@
 - `private-runtime-final.log` 显示 Lighter 未运行；前后运行快照的默认 context 均为 `desktop-linux`，两个无关容器的 ID、状态、起止时间和重启次数一致，仅本项目容器重启。记录与恢复没有发现阻塞问题，性能和站立/行走能力仍未解决。
 
 除另注外，本节日志均在 `logs/x2_docker/20261022_threads_gpu/`；各组统计与原图在 `data/x2_sim/agibot/data/var/x2-threads{4,6}/`。没有重复已通过的验证、全仓测试、训练或 commit/push。
+
+## 同日 GPU 兼容层重建（未通过）
+
+独立只读审查（子代理，未构建、未操作 Docker/VM、未改文件）核对补丁、构建、崩溃与恢复证据，结论 **FAIL（记录一致性）；GPU 功能仍 FAIL**。主要问题：`vkCreatePipelineCache → readData` 的 backtrace 当时未落盘；文档引用的 MoltenVK/Lighter 散列是中间构建；查询结果无原始日志；`spirv_reflect` 缺失导致的首次链接失败输出未保留。审查确认补丁库与离线 Metal 回归、`-ObjC` 崩溃复现、`user(locn1_3)` 转储、CPU 恢复和官方组件未改均成立，未发现把失败写成成功。
+
+已按审查意见补证据并更正：新增 `machine-cache-readdata-backtrace.log`（同次复现含 sampler 报错）、`final-cpu-query.log`；文档改用最终产物散列（MoltenVK `71612cc9...`、Lighter `9ac09c87...`、app 内副本 `d42190ba...`）并注明调试探针；`spirv-build-provenance.json` 更新 library 散列并保留补 reflect 前的值；误导性的 `spirv-rebuild-with-reflect.log` 改名为 `.stdout.json`。未再次送审；随后继续修复并跑通，见下一节。
+
+## GPU 图形链路修复（2026-10-23，通过；未再送审）
+
+在上一节记录修正后继续修复，最终原版 X2 在 `zink Vulkan 1.2 (Virtio-GPU Venus (Apple M5))` 上正常显示，Info **60 FPS**；同一 GPU 容器内 MC 查询返回 `PASSIVE_DEFAULT / 100`；成功运行无 `ring fatal`/`Aborted`，缓存重建后的再次启动正常。修复包括：`sampler` 保留字、补编 `spirv_reflect.cpp`、`-ObjC` 链接 category、fragment 分量 varying 打包、清空 Mesa/zink 磁盘缓存。关键证据：`spirv-result.json`、`component-fix-fs.metal`、`machine-cache-readdata-backtrace.log`、`gpu-sim-componentfix.log`、`gpu-sim-cleancache.log`、`gpu-sim-warmcache.log`、`gpu-query-clean.log`、`final-artifact-hashes.txt`；截图在 `data/x2_sim/agibot/data/var/`。
+
+限制：被动倒地，无站立/行走/速度指令，无 MaleCNS 闭环；60 FPS 为 GUI Info 读数，非端到端时延。结束时 GPU VM/容器停止，CPU 容器、Sim、MC 恢复并查询 `PASSIVE_DEFAULT / 100`。按用户要求未再送独立验收；没有训练、动作指令或 commit/push。

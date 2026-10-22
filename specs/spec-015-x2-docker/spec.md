@@ -67,6 +67,12 @@ GPU 定向验证限定两层多重采样：首先 VirtualGL `VGL_SAMPLES=0 / -ms
 
 ## 后续修复：隔离重建 GPU 图形兼容层
 
-状态：Ready。用户明确要求继续推进。针对已定位的 SPIRV-Cross MSL 保留字缺失，在项目内固定上游版本、记录补丁与散列，重建必要的静态库及私有 Lighter 可执行文件。官方 X2 SDK、MC、Sim、模型和物理参数不修改，保留原运行时二进制供回退，不切换默认 Docker context、不停止无关服务、不重启 Docker Desktop。使用项目内构建依赖，不安装宿主全局工具。
+状态：Done（GPU 图形链路）；无动作/闭环。用户明确要求继续推进。针对已定位的 SPIRV-Cross MSL 保留字缺失，在项目内固定上游版本、记录补丁与散列，重建必要的静态库及私有 Lighter 可执行文件。官方 X2 SDK、MC、Sim、模型和物理参数不修改，保留原运行时二进制供回退，不切换默认 Docker context、不停止无关服务、不重启 Docker Desktop。使用项目内构建依赖，不安装宿主全局工具。
 
 按 S2 检查受影响的图形链路：先验证相同命名冲突的着色器能够正确转换，再用原版 X2 检验真实 GPU 画面、MC 查询与短帧率观测；关闭阴影、反射、天空和雾霭。构建限制并发，运行 GPU VM 时暂停本项目 CPU 容器。新故障保留日志并按明确原因处理，不重复已失败的环境变量绕行。若未得到可用 GPU 环境则恢复 CPU 仿真和特效关闭状态。独立验收只审已有证据，不重跑已通过检查；不训练、不发送机器人运动命令、不 commit/push。
+
+实际结果：补丁版 SPIRV-Cross 解决了 `sampler` 保留字冲突；随后修复四个集成问题：（1）静态库漏编 `spirv_reflect.cpp`，`CompilerReflection` 未定义；（2）Lighter 需 `-ObjC` 链接 MoltenVK 的 ObjC category，否则创建 sampler 时崩溃；（3）Zink 生成的分量 varying 在同一 location 同时有 `float4` 与 `float` 输入，补丁对 fragment 输入启用分量打包并让带 `Component` 的变量先生成，真实转储着色器由两个成员变为单个 `float4 m_location_1`；（4）Mesa/zink 磁盘缓存保存了补丁前 MSL，清空一次后补丁版翻译器重新生成有效缓存。完成后原版 X2 在 `zink Vulkan 1.2 (Virtio-GPU Venus (Apple M5))` 上正常显示，Info 为 **60 FPS**；同一 GPU 容器内启动 MC，查询返回 `PASSIVE_DEFAULT / 100`；成功运行无 `ring fatal`/`Aborted`，缓存重建后的再次启动正常。
+
+限制：机器人保持被动倒地，没有发送站立、行走或速度指令；没有 MaleCNS→AimDK→MC 闭环；60 FPS 是 MuJoCo GUI 的 Info 读数，不是端到端控制时延；仍是 amd64 转译 + Venus/Zink 实验路径，不代表现场性能。结束时 GPU VM 与容器停止，CPU 容器、Sim、MC 恢复并查询 `PASSIVE_DEFAULT / 100`；CPU 侧特效默认开启、未重新关闭，CPU 帧率未复测。
+
+证据在 `logs/x2_docker/20261022_gpu_rebuild/`（补丁回归、分量 varying 转储对比、缓存 backtrace、成功与重复启动日志、MC 查询、最终散列）与忽略目录 `data/x2_sim/gpu_probe/rebuild/`、`runtime-rebuild/`；关键截图在 `data/x2_sim/agibot/data/var/`。按用户要求未再送独立验收。未训练、未发送运动指令、未 commit/push。

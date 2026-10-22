@@ -129,6 +129,50 @@ GPU 容器与私有 VM 已停止，恢复原 CPU 环境、4 线程并重新关�
 
 证据位于 `logs/x2_docker/20261022_threads_gpu/`：协议、`comparison.json`、`threads4/`、`threads6/`、`threads6-runtime.json`、`gpu-investigation.json`、`no-msaa-overlay.json`、两次 GPU 启动参数与日志、最终机器日志及恢复记录。两组原图和统计在 `data/x2_sim/agibot/data/var/x2-threads4/` 与 `x2-threads6/`；独立配置副本在 `data/x2_sim/agibot/data/var/x2_no_msaa/`，仅供复现失败，不作为正式入口。
 
+## GPU 图形兼容层重建（2026-10-22，通过）
+
+用户要求继续推进。在项目内重建外围图形栈后，**原版 X2 已在 Apple M5 GPU 路径上显示并稳定运行**；官方 SDK、MC、Sim、模型和物理参数未修改。补丁与构建在忽略目录 `data/x2_sim/gpu_probe/rebuild/`，证据在 `logs/x2_docker/20261022_gpu_rebuild/`。最终二进制含调试探针（着色器转储、崩溃 backtrace、跳过缓存的开关），属于实验构建，不是发布产物。
+
+| 步骤 | 结果 |
+|---|---|
+| SPIRV-Cross 补丁 | `sampler` 加入 MSL 保留字；补入遗漏的 `spirv_reflect.cpp`；针对 fragment 输入的分量 varying 增加打包；静态库 `2b1bd3...` |
+| MoltenVK 1.4.2 | 源码重建并链接补丁版 SPIRV-Cross，`0a7469...` |
+| Lighter 0.13.7 | 重编主机程序，必须带 `-ObjC` 链接 ObjC category；二进制 `b90247...` |
+| 原版 X2 画面 | `zink Vulkan 1.2 (Virtio-GPU Venus (Apple M5))`，场景正常；Info 显示 **60 FPS** |
+| MC | 同一 GPU 容器内启动 MC，查询返回 `PASSIVE_DEFAULT / 100` |
+| 稳定性 | 成功运行中无 `ring fatal`/`Aborted`，Sim 持续运行；重复启动（缓存已重建）同样正常 |
+
+修复链（按发现顺序）：
+
+1. **保留字冲突**：SPIRV-Cross 的 MSL 输出把纹理变量命名为 `sampler`，遮蔽 Metal 类型。补丁将其重命名为 `sampler0`，离线回归由 FAIL 变 PASS。
+2. **静态库遗漏**：首次重建漏编 `spirv_reflect.cpp`，Lighter 链接时报 `CompilerReflection` 未定义；补入后通过。
+3. **ObjC category**：静态链接 MoltenVK 时需 `-ObjC`，否则 `MTLSamplerDescriptor setBorderColorMVK:` 未加载，VM 创建 sampler 时崩溃。
+4. **分量 varying**：Zink 生成的 fragment SPIR-V 在同一 location 同时有 `float4` 与 `float` 分量输入（`slot_4` / `slot_4_c3`），SPIRV-Cross 输出两个 MSL 成员，Metal 拒绝。补丁对 fragment 输入启用分量打包，并让带 `Component` 的变量先于整向量变量生成，复用单个 `float4 m_location_N` 成员；真实转储着色器已验证为单一成员。
+5. **持久化缓存**：X2 首次运行仍报旧 `sampler` 错误，backtrace 为 `vkCreatePipelineCache → MVKPipelineCache::readData → MVKShaderLibraryCache::addShaderLibrary → compile failed`。数据来自 **Mesa/zink 的磁盘着色器缓存**，其中保存了补丁前生成的 MSL；清空 `/root/.cache/mesa_shader_cache*` 一次（或设置 `MESA_SHADER_CACHE_DISABLE=true`）后，补丁版翻译器重新生成有效缓存，后续启动无需再清。
+
+复现（在项目根目录，GPU VM 与 CPU 容器不同时运行）：
+
+```bash
+docker stop malecns-x2-x2-1
+cd data/x2_sim/gpu_probe
+LIGHTER_HOME=$PWD/runtime-rebuild ./runtime-rebuild/bin/lighter start
+docker --host unix://$PWD/runtime-rebuild/docker.sock start malecns-x2-gpu-trial
+printf '0\n' | docker --host unix://$PWD/runtime-rebuild/docker.sock exec -i \
+  -e DRI_NO_MSAA=1 -e VGL_SAMPLES=0 -e LIBGL_KOPPER_DISABLE=true \
+  malecns-x2-gpu-trial /opt/VirtualGL/bin/vglrun -d egl0 -ms 0 /usr/local/bin/x2-component sim
+```
+
+首次切换到新二进制时，若仍出现 `sampler` 报错，先执行一次：
+
+```bash
+docker --host unix://$PWD/runtime-rebuild/docker.sock exec malecns-x2-gpu-trial \
+  rm -rf /root/.cache/mesa_shader_cache /root/.cache/mesa_shader_cache_db
+```
+
+限制：机器人保持被动倒地，没有发送站立/行走/速度指令；没有实现 MaleCNS→AimDK→MC 闭环；60 FPS 是 MuJoCo GUI 的 Info 读数（vsync 上限），不是端到端控制时延；私有 VM 8 CPU/6 GiB、GPU 容器 4 GiB，仍是 amd64 转译 + Venus/Zink 实验路径，不等于现场性能。结束时 GPU VM 与容器已停止，CPU 容器、Sim、MC 恢复，查询 `PASSIVE_DEFAULT / 100`；CPU 侧特效默认开启、未重新关闭。
+
+证据：`logs/x2_docker/20261022_gpu_rebuild/` 的 `spirv-result.json`、`component-fix-fs.metal`、`machine-cache-readdata-backtrace.log`、`machine-gpu-success.log`、`gpu-sim-componentfix.log`、`gpu-sim-cleancache.log`、`gpu-sim-warmcache.log`、`gpu-query-clean.log`、`final-artifact-hashes.txt`、`compiled-msl/`；截图 `data/x2_sim/agibot/data/var/x2-gpu-componentfix-1.png`、`x2-gpu-fps-info.png`、`x2-gpu-ui-effects-off.png`、`x2-gpu-cleancache.png`、`x2-gpu-clean-fps.png`、`x2-gpu-warmcache.png`。没有训练、动作指令或 commit/push。
+
 ## 本机启动与停止
 
 在项目根目录运行。已安装的包位于 `data/x2_sim/packages/{aimdk,mc,sim_mujoco}`；仅本项目容器使用这些目录。当前部署配置限制 8 CPU、6 GiB、512 MiB 共享内存，llvmpipe 使用 4 个渲染线程；不发布 ROS 端口，不停止其他服务。

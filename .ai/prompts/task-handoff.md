@@ -1,51 +1,53 @@
-# 当前交接 — X2 已关闭特效、保留 4 线程；GPU 绕行仍失败
+# 当前交接 — GPU 仿真运行中；CPU 仿真已停止
 
-更新：2026-10-22。工作目录 `/Users/yang/project/malecns_lab`；部分工具默认 cwd 仍旧路径，运行命令显式指定工作目录。
+更新：2026-10-23。工作目录 `/Users/yang/project/malecns_lab`；运行命令显式指定工作目录。
 
 ## 当前任务
 
-用户授权开始线程对照及 GPU 兼容验证，并要求关闭阴影等。已关闭 Shadow、Reflection、Skybox、Haze；4/6 线程各测一次 30 秒，正式区间不截图，两组相同默认相机并在 GUI Reset 后观察被动状态。两组 Info 均为 7 FPS，CPU 4.89/5.06 核，MC 迟到日志 158/628 次、最大 26.219/41.866 ms，均无容器 CPU 限流；没有 6 线程收益，保留 4 线程。单次顺序样本不构成线程数与告警的严格因果结论。详见 [AGIBOT](../../docs/AGIBOT.md)。
+2026-10-23 按用户最新要求切换到 GPU 并保持运行：CPU 容器 `malecns-x2-x2-1` 已停止；私有 GPU VM、`malecns-x2-gpu-trial`、Sim 和 MC 已启动，浏览器画面已确认，MC 查询返回 `PASSIVE_DEFAULT / 100`。当前桌面为 `http://127.0.0.1:6081/vnc.html?autoconnect=true&resize=scale`。本次未重新测量 FPS，也未发送运动指令。启动与查询日志在 `logs/x2_docker/20261023_gpu_switch.frGXfA/`，组件日志在 `data/x2_sim/agibot/data/var/gpu-switch-20261023-frGXfA/`。
 
-GPU 复用原隔离环境，先关闭 VirtualGL/Mesa 窗口多重采样，再使用官方配置的独立副本仅设 `visual/quality offsamples=0`。两次均仍发生 Metal `texture2d_ms<float> sampler` 命名遮蔽、管线编译失败及内部 Sim 中止，未接通 X2 GPU。副本其余 49/50 文件逐字节相同，原包不改。GPU 容器及私有 VM 已停止，恢复原 CPU 容器 `malecns-x2-x2-1`、Sim、MC 和 4 线程；当前窗口重新关闭特效，重启 Sim 后须再次关闭。桌面为 `http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale`。没有站立/行走验收。下一候选是修补 SPIRV-Cross 保留字并重编外围静态库/私有运行时，本轮未做；不要重复已失败的环境变量绕行或本次有效 A/B。
+此前修复结果：
+
+用户要求继续推进 GPU。外围图形栈已重建并修好，**原版 X2 已在 Apple M5 GPU 路径上正常显示**：`zink Vulkan 1.2 (Virtio-GPU Venus (Apple M5))`，Info **60 FPS**；同一 GPU 容器内 MC 查询返回 `PASSIVE_DEFAULT / 100`；成功运行无 `ring fatal`/`Aborted`，缓存重建后再次启动正常。详见 [AGIBOT](../../docs/AGIBOT.md) 的「GPU 图形兼容层重建」与 [Spec 015](../../specs/spec-015-x2-docker/spec.md)。
+
+修复的五个问题：
+
+1. SPIRV-Cross 的 `sampler` 保留字冲突；补丁后 MSL 使用 `sampler0`。
+2. 静态库漏编 `spirv_reflect.cpp`，`CompilerReflection` 未定义。
+3. Lighter 链接 MoltenVK 必须带 `-ObjC`，否则 ObjC category 未加载，VM 创建 sampler 时崩溃。
+4. Zink 的 fragment 分量 varying（同一 location 的 `float4` + `float`）；补丁启用 fragment 输入的分量打包，真实转储着色器变为单个 `float4 m_location_1`。
+5. Mesa/zink 磁盘缓存保存了补丁前 MSL；清空一次 `/root/.cache/mesa_shader_cache*` 后重新生成，之后无需再清。
 
 ## 环境与复现
 
-- 源配置 `deploy/x2/`，ROS Humble + Xvfb/llvmpipe/noVNC，8 CPU/6 GiB 限额、4 渲染线程、512 MiB 共享内存；仅发布本机 6080，ROS domain 47/localhost。Docker VM 当前总上限约 10 CPU/7.75 GiB，没有调整全局配置。
-- 下载资产 `data/x2_sim/`：MC/Sim v1.0.0-20260522，共同型号 `lx2501_3_t2d5`；AimDK v1.1.0-gfaf4c94。只源码构建 `aimdk_msgs` 与 `py_examples`，不是完整 C++ SDK 验收。
-- `manifest.json`、`downloads/*.provenance.json` 保留下载地址和本地 SHA-256；没有官方版本兼容矩阵，查询通过不代表全部接口兼容。
-- `x2-component sim` 按提示输入 0；随后 `x2-component mc`。两者都在本项目容器内执行，调用官方脚本。MC 启动器仅修复已观察到的生成 dump 文件权限并清除真机模式环境变量。
-- 安装日志 `logs/x2_docker/20261022_103048_install/`；资源调整记录 `logs/x2_docker/20261022_latency/`，含前后短样本、实际限额、启动日志和查询。首次基础探针记录仍保留。不要重复已通过的构建。
-- GPU 证据 `logs/x2_docker/20261022_gpu/`，包含发行包校验、真实齿轮截图、原始 X2 失败及恢复日志。`lighter-machine.log` 中已确认独立资源索引配置生效，但仍有 sampler 冲突。
-- 时序证据 `logs/x2_docker/20261022_timing/`：协议、采集脚本、主机前后快照、同区间 MC 日志和分析；统计及原图在 `data/x2_sim/agibot/data/var/x2-timing-baseline/`。GUI 时间用于近似实时倍率，ROS header 未用作物理时钟，MC `miss %` 未解释为丢包率。独立审查只使用已有证据。
-- 新线程/GPU 证据在 `logs/x2_docker/20261022_threads_gpu/`，含 `comparison.json`、两个线程组的原始 MC 日志、GPU 两次精确启动参数、源码调查、独立配置副本 diff/散列及恢复记录。截图、逐条 ROS 接收与资源统计在 `data/x2_sim/agibot/data/var/x2-threads{4,6}/`。`x2_no_msaa/` 副本仅供失败复现，不作为正式启动配置。
-- 私有运行时与资源均在忽略的 `data/x2_sim/gpu_probe/`；始终显式设置 `LIGHTER_HOME=.../runtime` 和 Docker `--host unix://.../runtime/docker.sock`，不改默认 context。当前私有 VM 已关闭，无自启动。GPU 部署草稿移到其中 `deployment-draft/`，未构建、不支持直接运行。
+- 正式 CPU 部署 `deploy/x2/`，8 CPU/6 GiB、4 个 llvmpipe 线程；桌面 `http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale`。
+- CPU 容器 `malecns-x2-x2-1` 当前已停止；`final-cpu-query.log` 是上一轮恢复时的 `PASSIVE_DEFAULT / 100` 历史记录。
+- GPU 使用独立运行时 `data/x2_sim/gpu_probe/runtime-rebuild/`（独立 `LIGHTER_HOME`，rootfs/data.img 为 APFS 克隆），未替换已安装签名 app bundle。GPU 容器 `malecns-x2-gpu-trial`，4 GiB，端口 6081。
+- 按用户最新要求保持 GPU 运行、CPU 停止；默认 Docker context 仍为 `desktop-linux`，未操作无关服务。
+- 复现命令与一次性缓存清理见 [AGIBOT](../../docs/AGIBOT.md) 的 GPU 一节。
 
-## 已确定方向
+## 证据与回滚
 
-- 设备为智元 **X2**，采用官方 Sim + MC + AimDK；随后赴上海现场适配。
-- 当前只有 Mac，没有远程 Ubuntu。独立 linux/amd64 下官方组件已启动并完成查询；不能据此宣称实时性能或现场版本匹配。
-- 不采用 RoboJuDo-Plus 等第三方运动控制器。先搭建 X2 官方环境并验证手动运动指令，再接 MaleCNS；单轴稳向不是前置门槛。
+- `logs/x2_docker/20261022_gpu_rebuild/`：SPIRV 补丁与回归、分量 varying 转储对比（`component-fix-fs.metal`）、缓存 backtrace、成功/重复启动日志、MC 查询、最终散列（`final-artifact-hashes.txt`）、`compiled-msl/`。
+- 成功截图在 `data/x2_sim/agibot/data/var/`：`x2-gpu-componentfix-1.png`、`x2-gpu-fps-info.png`、`x2-gpu-ui-effects-off.png`、`x2-gpu-cleancache.png`、`x2-gpu-clean-fps.png`、`x2-gpu-warmcache.png`。
+- `data/x2_sim/gpu_probe/rebuild/`：SPIRV-Cross 源码与两处补丁、MoltenVK 构建树、Lighter 源码与产物；`runtime-rollback/` 保留原安装二进制副本。
+- 最终散列：SPIRV `2b1bd3...`、MoltenVK `0a7469...`、Lighter `b90247...`。二进制含调试探针（转储、backtrace、跳过缓存的 env），不是发布产物。
 
-## 证据与资产
+## 已确定方向与边界
 
-- 完整参考为 166,700 节点、25,582,938 内部有向连接、124,177,617 突触计数；原始发布边界见 [MODEL_V2](../../docs/MODEL_V2.md)。
-- 目标跟随全 GPU 160 窗为历史训练过程结果，未证明最终策略可靠控制。
-- 单轴 joint/frozen 各 80 窗已完成，固定模型验证失败，锁定测试未开启。控制失败、原始 run 与数值源码快照仍保留；见[历史结果](../../docs/EXPERIMENT_RESULTS.md)。不重跑旧训练或诊断。
-- data/、logs/、apps/atlas/public/data/、.venv、.venv-train 均为本地忽略资产，不删、不提交、不改旧 run。
-- 单轴 run 在 data/yaw_joint_20261021_r1/ 与 data/yaw_frozen_20261021_r1/，含 sources 快照。
+- 设备为智元 **X2**，官方 Sim + MC + AimDK；随后赴上海现场适配。
+- 官方 SDK、MC、Sim、模型与物理参数未修改；GPU 路径仍是第三方兼容实验，不代表现场性能。
+- 被动场景：没有发送站立、行走或速度指令，没有 MaleCNS→AimDK→MC 闭环。
+- 不采用第三方运动控制器；下一步先验证官方站立/运动/停止，再接 MaleCNS。
 
 ## 环境与约束
 
-Noria 不得停止，Docker 不得为本项目重启或更换后端。本轮只重启本项目组件及项目私有 GPU VM，切换 GPU 探针时停 CPU 项目容器，随后恢复；默认 Docker context 不改。线程样本峰值内存为 3.68/3.61 GiB，6 GiB 只是上限。完整脑任务仍遵守 1 GiB 系统预留，不与仿真并行启动完整脑训练。
+Noria 不得停止，Docker 不得为本项目重启或更换后端。GPU VM 与 CPU 仿真容器不同时运行；当前按用户要求保持 GPU 运行。默认 context 不改；完整脑任务遵守 1 GiB 系统预留，不与仿真并行。
 
 ## 验证与提交
 
-此前 [Spec 014](../../specs/spec-014-x2-repository-cleanup/spec.md) 清理已提交为 `e81b2e5`，未推送。本次 S2 仅验证新部署链路：shell 语法、Compose 配置、镜像/接口构建、组件启动、画面与查询/odom通信；[独立验收](../../specs/spec-015-x2-docker/acceptance.md) PASS，没有运行全仓测试或训练。本次未 commit/push。
+此前重建按 S2：补丁离线回归、全栈重建、原版 X2 GPU 画面与 60 FPS、MC 查询、缓存重建后的重复启动、CPU 恢复查询。未做全仓测试或训练。按用户要求未再送独立验收；此前一次只读审查指出的记录问题已补证据并更正。
 
-同日资源配置变更按 S0 审 diff；另完成用户所需前后性能短样本及重启后查询。独立只读验收 PASS，保留卡顿未解决的限制，未追加构建或全仓检查。
+本次仅切换已有运行环境：CPU 停止、GPU 组件启动、浏览器画面和一次 MC 查询均已确认；交接更新为 S0，仅检查 diff，无代码修改、构建或训练。相关文档按用户要求本地提交，未推送；GPU 补丁源码、运行时、二进制和日志仍保留在本地忽略目录，本次提交不包含这些资产。
 
-同日 GPU 环境尝试按 S2 验证 Vulkan → 可见 OpenGL → 官方 X2；前两层通过，最后一层失败并停止。原 CPU 环境恢复检查通过。独立验收 PASS（记录与恢复），X2 GPU 功能仍 FAIL；不覆盖此前 CPU 组件安装的 PASS。未重复 live check、构建或全仓测试。
-
-同日时序诊断完成一次有效 30 秒采样；文档为 S0，只审 diff。独立验收 PASS（测量记录与结论边界），使用已有原始日志、截图和统计，没有重复运行。ROS 单条接收记录未落盘，最大接收间隔无法定位到具体时刻；当前结论限于被动场景。未 commit/push。
-
-同日关闭特效、4/6 线程对照和两次 GPU 多重采样绕行已结束。新隔离采集脚本 S1，一次 AST 检查通过；显示配置副本 XML 解析与字节 diff 通过；无全仓检查或训练。独立验收 PASS（关闭特效、CPU 选择、失败记录与恢复），GPU 功能仍 FAIL。最终截图为四特效关闭、7 FPS，恢复查询为 `PASSIVE_DEFAULT / 100`，4 个 llvmpipe 工作线程已确认；默认 context 和无关容器前后状态相同。以上部署、实测与文档随本次提交归档，未推送。
+下一步：在 GPU 或 CPU 环境验证官方站立/运动/停止并记录反馈，再设计 MaleCNS 到 AimDK 的接口。
