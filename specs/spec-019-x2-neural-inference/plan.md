@@ -1,6 +1,6 @@
 # Plan — 完整脑冻结推理基线
 
-状态：Ready。
+状态：Completed / 独立验收 PASS。唯一实际基线已完成，见 implementation.md 和 acceptance.md。
 
 1. 协调者固定模型、输入序列、来源和资源边界；保持仿真关闭。
 2. 同一实施者完成新 `experiments/x2_inference.py` 入口、必要的 `learning/x2_inference.py` / `senses/x2_marker.py` 及定向测试，复用既有监督与MPS采样。不改训练核心或历史契约，不自行启动完整脑。

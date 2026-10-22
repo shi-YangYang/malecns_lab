@@ -1,6 +1,6 @@
 # 设计与实测记录
 
-当前工作是[完整脑冻结推理基线](spec-019-x2-neural-inference/spec.md)，保持仿真关闭，准备最终参数与完整图的受监督前向测量。[X2最小动作适配器](spec-018-x2-motion-adapter/acceptance.md)已独立验收PASS：真实前进及连续反馈停稳，106项定向检查通过。此前[官方动作MVP](spec-016-x2-motion-mvp/spec.md)、[速度与停车核对](spec-017-x2-motion-contract/spec.md)、[Docker/GPU环境](spec-015-x2-docker/spec.md)均已完成；完整MaleCNS控制闭环尚未完成。日常操作从[文档索引](../docs/README.md)进入。
+当前工作是[完整脑冻结推理优化](spec-020-x2-frozen-optimization/spec.md)。[冻结推理基线](spec-019-x2-neural-inference/acceptance.md)已独立PASS，完整图约6秒/帧，四个完整状态边界已保存；优化须精确一致并实测提速。仿真保持关闭。[X2最小动作适配器](spec-018-x2-motion-adapter/acceptance.md)已独立PASS；完整MaleCNS到X2的感觉/动作闭环尚未完成。日常操作从[文档索引](../docs/README.md)进入。
 
 本目录保留阶段设计、独有数值协议和实际实验报告，删除重复实施、返工和验收流水。历史报告描述当时状态，不是当前待办清单；过程文件中已经提交的版本可从 Git 历史查看，未提交且被精简的过程说明不保证另有副本。原始数据、参数、源码快照和日志没有删除。
 
@@ -18,6 +18,8 @@
 | [013](spec-013-yaw-learning/spec.md) | 历史单轴学习：两分支各 80 窗完成、固定模型验证失败；后续支线已停止 |
 
 ## 关键实测
+
+- [完整脑冻结推理基线](spec-019-x2-neural-inference/implementation.md)。
 
 - [X2适配器前进与反馈停稳](spec-018-x2-motion-adapter/implementation.md)。
 

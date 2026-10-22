@@ -1,4 +1,4 @@
-# 当前交接 — X2动作适配器通过，准备完整脑推理
+# 当前交接 — 完整脑基线通过，准备冻结推理优化
 
 更新：2026-10-23。工作目录 `/Users/yang/project/malecns_lab`。
 
@@ -12,12 +12,13 @@
 
 - [Spec016](../../specs/spec-016-x2-motion-mvp/acceptance.md)：官方站立、前进与最终停止PASS，提交 `2c14c31`。
 - [Spec017](../../specs/spec-017-x2-motion-contract/acceptance.md)：速度语义与停车核对PASS，提交 `65aae55`。0.2为MC目标，不能当实测速率或通用校准。
-- [Spec018](../../specs/spec-018-x2-motion-adapter/acceptance.md)：STOP/FORWARD核心、显式ROS仿真入口及第四轮实测独立PASS，106项定向检查通过。第四轮前向净位移0.90069m；归零后5.09292秒确认停稳，最终连续1.00677秒最大水平速度0.01723m/s。相关通过检查不再重复。
+- [Spec018](../../specs/spec-018-x2-motion-adapter/acceptance.md)：STOP/FORWARD核心、显式ROS仿真入口及第四轮实测独立PASS，106项定向检查通过，提交 `2865d5d`。第四轮前向净位移0.90069m；归零后5.09292秒确认停稳，最终连续1.00677秒最大水平速度0.01723m/s。相关通过检查不再重复。
+- [Spec019](../../specs/spec-019-x2-neural-inference/acceptance.md)：唯一完整图冻结推理基线独立PASS，提交 `5c8be07`。三个输入与四个完整状态边界保存于 `data/x2_neural_inference_20261023_r1/`；预热7.276秒，三帧6.541/6.011/5.947秒，总30.448秒。RSS峰值1.53GiB，最低系统available5.34GiB；参数未更新，worker已退出，VM未启动。
 - 外围GPU兼容层提交 `5a26a7c`；官方SDK、MC、Sim及模型未修改。历史60FPS是GUI渲染读数。
 
 ## 当前阶段
 
-[Spec019](../../specs/spec-019-x2-neural-inference/spec.md) 已Ready，实施冻结完整脑前向基线。固定GPU训练最终checkpoint，仅继承theta/readout参数；使用校验后的旧来源快照复现原policy，新场景600步空白预热，三个预登记标记输入。单进程、240秒上限、6GiB申请和1GiB系统预留；由协调者显式运行，实施者不启动完整脑。无训练或ROS。
+[Spec020](../../specs/spec-020-x2-frozen-optimization/spec.md) 实施中：独立wrapper减少每步主机同步与重复常量，保持完整图、运算顺序和旧来源。27项定向小张量检查通过，尚未完成完整图比较；由Spec019原实施者在同一推理入口接入显式比较模式。复用已保存基线，不再重跑；四边界全部状态、三帧输出须逐元素精确一致，预热加三帧计算耗时须下降至少20%。单进程、240秒上限、6GiB申请和1GiB系统预留；由协调者显式运行，实施者不启动完整脑。无训练或ROS，VM保持关闭。
 
 后续闭环计划采用实际odom驱动的虚拟标记，因为当前官方配置没有图像发布；必须明确传感来源，不能称真实相机导航。脑原始三轴输出保留，纵向离散意图门限事先固定；若模型不驱动任务，记录行为失败，不能用人工距离控制替代后宣称脑成功。完整图推理优化另登记后比较完整状态与动作，不裁图。
 
