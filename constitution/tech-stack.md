@@ -11,7 +11,7 @@
 | 学习 | .venv-train、PyTorch 2.14.1/MPS、psutil；CPU 与全 GPU 研究分支，不承诺实时性 |
 | 图谱 | apps/atlas，Vite + TypeScript + Three.js；npm/package-lock.json |
 | 本地服务 | 网页 127.0.0.1:8765，Python 刺激任务服务 127.0.0.1:8766；单计算子进程 |
-| 设备 | 已有 Tello 工具；X2 官方 SDK、MC 与仿真尚未安装或接通 |
+| 设备 | 已有 Tello 工具；官方 X2 Docker 环境已显示仿真并完成 Python AimDK → MC 查询，运动与脑闭环待验证 |
 | 数据 | 本地 NPZ/JSON/CSV/视频，没有数据库；data/logs 不随源码分发 |
 | 检查 | tests 下 pytest；前端 npm run build；不默认全量测试或格式化 |
 
@@ -28,7 +28,7 @@
 
 ## 后续官方 X2 环境
 
-用户确定先在 Apple Silicon Mac 的独立 linux/amd64 Docker 中尝试官方 Ubuntu 22.04 Sim + MC + AimDK，保留脑模型在 macOS 运行的能力。转译、图形、接口时延及现场版本匹配均待验证；当前尚无该 Docker 配置或设备适配器，见 [AGIBOT](../docs/AGIBOT.md)。不要把计划写成已实现能力。
+Apple Silicon Mac 使用 `deploy/x2/` 的独立 linux/amd64 Docker：ROS Humble、官方 MC/Sim v1.0.0-20260522、源码构建 AimDK 1.1.0 的 aimdk_msgs/py_examples，Xvfb + llvmpipe + noVNC。图形、状态发布和模式查询已实测；仍有调度延迟，运动控制、MaleCNS 适配和现场版本匹配待验证，见 [AGIBOT](../docs/AGIBOT.md)。保留脑模型在 macOS 运行的能力，不把环境可用写成闭环成果。
 
 ## 本地约束
 

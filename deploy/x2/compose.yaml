@@ -1,0 +1,36 @@
+name: malecns-x2
+
+services:
+  x2:
+    platform: linux/amd64
+    build:
+      context: .
+    image: malecns-lab-x2:local
+    init: true
+    restart: "no"
+    cpus: 8
+    mem_limit: 6g
+    memswap_limit: 6g
+    shm_size: 512m
+    environment:
+      LP_NUM_THREADS: "4"
+    stop_grace_period: 15s
+    ports:
+      - "127.0.0.1:6080:6080"
+    volumes:
+      - type: bind
+        source: ../../data/x2_sim/packages
+        target: /workspace
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../../data/x2_sim/agibot
+        target: /agibot
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:6080/vnc.html"]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

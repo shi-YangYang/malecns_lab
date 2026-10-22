@@ -1,6 +1,6 @@
 # 设计与实测记录
 
-当前工作是[仓库清理与官方 X2 路线](spec-014-x2-repository-cleanup/spec.md)。随后尝试 Mac 上的官方 X2 Docker 环境；单轴稳向不再是接入前置。日常操作从[文档索引](../docs/README.md)进入，实验结论见[已有结果](../docs/EXPERIMENT_RESULTS.md)。
+当前工作是[官方 X2 Docker 环境](spec-015-x2-docker/spec.md)。[仓库清理](spec-014-x2-repository-cleanup/spec.md)已完成；单轴稳向不再是接入前置。日常操作从[文档索引](../docs/README.md)进入，实验结论见[已有结果](../docs/EXPERIMENT_RESULTS.md)。
 
 本目录保留阶段设计、独有数值协议和实际实验报告，删除重复实施、返工和验收流水。历史报告描述当时状态，不是当前待办清单；过程文件中已经提交的版本可从 Git 历史查看，未提交且被精简的过程说明不保证另有副本。原始数据、参数、源码快照和日志没有删除。
 
