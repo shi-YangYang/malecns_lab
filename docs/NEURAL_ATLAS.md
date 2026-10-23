@@ -66,6 +66,6 @@ npm run dev
 
 ## 后续接入
 
-当前链路为 `网页刺激参数 → 完整固定模型计算 → 活动记录 → WebGL 回放`。下一步为[官方 X2 仿真接入](AGIBOT.md)，机器人实际感知、运动控制和状态反馈尚未实现。已停止的单轴实验结果见[实验记录](EXPERIMENT_RESULTS.md)。
+本网页链路为 `刺激参数 → 完整固定模型计算 → 活动记录 → WebGL 回放`。[桌面应用](../apps/desktop/README.md)另行接入官方 X2 GPU 仿真与同次脑遥测；当前多行为按钮尚未验收。历史神经响应与单轴失败结果见 [history.md](../history.md)。
 
-展示与交互契约见 [Spec 010](../specs/spec-010-neural-atlas/spec.md)、[Spec 011](../specs/spec-011-interactive-atlas/spec.md)。原始数据来源与许可见 [THIRD_PARTY](../THIRD_PARTY.md)。
+展示与交互历史见 [图谱阶段](../history.md#spec-010)、[完整脑响应阶段](../history.md#spec-011)。原始数据来源与许可见 [THIRD_PARTY](../THIRD_PARTY.md)。

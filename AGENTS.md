@@ -8,26 +8,32 @@ multi_agent: AUTO
 
 ## 阅读入口
 
-先读[使命](constitution/mission.md)、[技术栈](constitution/tech-stack.md)、[项目规则](.ai/rules/project.md)与[当前交接](.ai/prompts/task-handoff.md)，再读当前 [Spec](specs/README.md) 和相关代码。历史报告描述当时事实，不覆盖用户最新决定。
+先读[使命](constitution/mission.md)、[架构与技术栈](docs/architecture/overview.md)和[当前交接](.ai/prompts/task-handoff.md)，再读相关代码。需要追溯时查看 [history.md](history.md)。历史记录不覆盖用户最新决定。
 
 ## 当前方向与边界
 
-- 基于完整 MaleCNS 的神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。Mac GPU仿真已有纵向动作实测；当前按[Spec024](specs/spec-024-x2-brain-control-mainline/spec.md)推进交互、脑行为选择、真实遥测到实机展示的主线。转向/挥手、多行为学习及现场版本匹配尚未验证，不把红目标前进/停止诊断当作主线。
+- 基于完整 MaleCNS 神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。旧 CPU 仿真部署已删除，只保留 GPU 部署。多行为按钮、挥手和现场版本匹配尚未验收；训练与实测按用户要求暂停，不把红目标前进/停止诊断当作主线。
 - 脑活动图谱与刺激响应保留；单轴稳向和目标跟随为历史研究，不作为接入 X2 的前置门槛。
-- 保留 Python src layout、apps/atlas、tests、docs、configs、examples 的职责，以及 constitution/specs/.ai 开发结构。仅在用户授权的范围内删改。
+- 保留 Python src layout，以及 apps、deploy、tests、docs、configs、examples 的职责；constitution 存使命，.ai/prompts 存精简交接。旧 specs 已汇总至 history.md，不恢复多文档任务目录。
 - data/、logs/、模型、录像、运行环境和旧 run 的 sources 快照是科研资产；清理文档不授权删除这些资产。
 - 保留 LICENSE、THIRD_PARTY.md、原始来源及已有序列化契约。缺连接组时报错，不用 MiniFly 或合成网络回退。
 
 ## 工作流程
 
 1. 查看 Git 状态并阅读已有修改；不 reset、覆盖或删除与任务无关的用户工作。用户已经明确的范围不重复请求批准。
-2. 重大改动先在 specs/spec-XXX-short-name/ 写清目标、边界与验收标准，信息足够后标记 Ready；只有影响结果且无法从现有信息判断的问题才澄清。
+2. 重大改动先在该任务唯一文档中写清目标、边界与验收标准；只有影响结果且无法从现有信息判断的问题才澄清。简单修改无需为了留痕额外建文档。
 3. 协调者维护规范与决策，实施者改业务代码。耦合模块交同一实施者；仅在文件与接口边界明确时并行。
-4. 实施报告记录实际修改、风险等级、真实检查、限制和遗留问题。新的独立验收者审查，不代替实施者改代码，不机械重复已通过检查。
-5. 验收 FAIL 时限定问题交新实施者返工，再由新验收者审查。PASS 后更新当前状态；存在未处理报告或活动任务时不宣称完成。
+4. 在同一任务文档中更新实际结果、必要检查和遗留问题。新的独立验收者只读审查实现，不代替实施者改代码，不机械重复已通过检查；结论更新到同一文档或直接回复，不另建验收报告。
+5. 验收 FAIL 时限定问题交新实施者返工，再由新验收者审查。PASS 后更新最终状态；仍有直接未解决问题时不宣称完成。
 6. 只有当前任务授权时 commit/push。提交为 `<type>: <中文说明>`；不改写 Git 历史，不提交数据、密钥、依赖或模型。
 
-保留当前 Spec/Plan 与最终验收；重复的实施、返工流水可合并。交接只写当前状态，历史科学证据放对应报告，不持续堆叠旧“当前任务”。恢复上下文时从现有状态继续，不重做已完成工作。
+## 文档留痕
+
+- **一个任务最多一份 Markdown 文档**。需要时放在 `docs/tasks/<任务名>.md`；目标、方案、结果和检查在同一文件原地更新，不预建空文件。
+- 不再分别创建 spec、plan、implementation、acceptance、repair、progress 等过程文件，不逐轮保存中间完成态或 Agent 分工流水。
+- 只保留有用的决策依据、最终结果、关键证据位置和未解决问题。完成后精简临时内容；简单任务可只用 Git diff 与最终回复。
+- 使用手册按主题维护一个权威入口，重复说明合并后删除旧文件，不为被删文件保留空转发文档。历史阶段统一查询 `history.md`。
+- 交接只写当前状态和下一步，引用权威文档，不复制整段历史。原始科学数据、日志与 sources 仍按资产规则保留，不能用精简文档改写失败为成功。
 
 ## 验证与停止规则
 
@@ -50,7 +56,13 @@ multi_agent: AUTO
 
 ## 工程与安全
 
-遵循现有技术栈；不无故更换依赖、包管理器、锁文件或目录，不为拆分而建立空转发层。模块职责和研究约束见[项目规则](.ai/rules/project.md)。
+遵循现有技术栈；不无故更换依赖、包管理器、锁文件或目录，不为拆分而建立空转发层。模块职责见[架构](docs/architecture/overview.md)，研究约束见[研究边界](docs/RESEARCH.md)。
+
+- `learning → control`，control 不反向依赖 learning；brain/senses 负责神经计算与编码，runtime/x2 负责会话和 GPU 资源，experiments 保留设备实验及容器内协议。
+- `BodyVelocity` 使用 FLU `(vx, vy, vz, wx, wy, wz)`，平移 m/s、角速度 rad/s、正 wz 左转；旧 FlightCommand 横移/偏航正向右，转换属于适配器。目标值不能当作实测量。
+- `cnsbridge.*`、`flydrones.*` 及已存档的来源路径是旧数据身份。不得改写 checkpoint/source hash 伪装续跑；历史复现使用其封存源码与环境。
+- 保留完整发布神经元之间全部非零连接、自环、孤立节点与缺注释节点；简化另立受控实验。训练按完整场景隔离，不用相邻帧随机拆分造成泄漏。
+- 模拟时间、实际耗时、命令频率和显示帧率分别记录。教师标签、模型输出、物理运动和真机表现分别举证，不混作已实现成果。
 
 不输出密钥，不操作无关服务，不创建未授权收费资源，不从测试启动硬件。Noria 正在使用，禁止为本项目停止其服务或重启 Docker。大型完整脑运行、设备动作及环境改变必须在用户当前授权内；既有明确授权不重复索要。
 

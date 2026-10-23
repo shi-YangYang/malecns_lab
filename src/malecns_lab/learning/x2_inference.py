@@ -286,12 +286,8 @@ def simulator_preflight(root=ROOT):
     output = status.stdout + status.stderr
     socket_exists = (runtime_path / "docker.sock").exists()
     require("lighter is not running." in output and not socket_exists, "GPU simulation VM must be stopped")
-    cpu = subprocess.run(["docker", "--context", "desktop-linux", "inspect", "--format", "{{.State.Status}}",
-                          "malecns-x2-x2-1"], capture_output=True, text=True, timeout=8)
-    require(cpu.returncode == 0 and cpu.stdout.strip() == "exited", "CPU simulator must be stopped")
     return {"checked_utc": datetime.now(timezone.utc).isoformat(), "gpu_status_output": output.strip(),
-            "gpu_status_returncode": status.returncode, "gpu_socket_exists": socket_exists,
-            "cpu_container": "malecns-x2-x2-1", "cpu_context": "desktop-linux", "cpu_status": cpu.stdout.strip()}
+            "gpu_status_returncode": status.returncode, "gpu_socket_exists": socket_exists}
 
 
 @contextmanager

@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!scripts/
+!scripts/*.sh
+!keys/
+!keys/kisak-turtle.asc

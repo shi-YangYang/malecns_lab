@@ -26,7 +26,7 @@ export class ExperimentController {
     this.output = path.join(this.recordsRoot, `desktop-${stamp}-${randomBytes(4).toString('hex')}`);
     this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', message: '正在准备实验', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
     this.stderr = ''; this.protocolError = null; this.notify();
-    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.experiments.x2_behavior_desktop', '--execute', '--sim-only', '--qualification', '--output', this.output], {
+    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--output', this.output], {
       cwd: this.repo, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONPATH: path.join(this.repo, 'src'), PYTHONUNBUFFERED: '1' },
     });

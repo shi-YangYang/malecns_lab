@@ -1,22 +1,30 @@
-name: malecns-x2
+# Use manage.sh to target the private Lighter socket explicitly.
+name: malecns-x2-gpu
 
 services:
   x2:
     platform: linux/amd64
     build:
       context: .
-    image: malecns-lab-x2:local
+    image: malecns-lab-x2-gpu:local
+    container_name: malecns-x2-gpu-trial
     init: true
     restart: "no"
     cpus: 8
-    mem_limit: 6g
-    memswap_limit: 6g
+    mem_limit: 4g
+    memswap_limit: 4g
     shm_size: 512m
     environment:
-      LP_NUM_THREADS: "4"
+      LIBGL_ALWAYS_SOFTWARE: "0"
+      GALLIUM_DRIVER: zink
+      MESA_LOADER_DRIVER_OVERRIDE: zink
+      ZINK_DESCRIPTORS: lazy
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/virtio_icd.x86_64.json
+    devices:
+      - lighter.sh/gpu=all
     stop_grace_period: 15s
     ports:
-      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:6081:6080"
     volumes:
       - type: bind
         source: ../../data/x2_sim/packages
