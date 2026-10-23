@@ -42,6 +42,16 @@ def fixed_mps_matvec(matrix, adjoint, vector):
     return _Matvec.apply(matrix, adjoint, vector)
 
 
+def scale_spike_backward(spikes, gain):
+    """Keep the binary forward exactly; explicitly rescale its surrogate only."""
+    if type(gain) not in (int, float) or not math.isfinite(gain) or not 0 < gain <= 1:
+        raise ValueError("Spike backward gain must be finite and in (0, 1]")
+    if gain == 1.0:
+        return spikes
+    detached = spikes.detach()
+    return detached + gain * (spikes - detached)
+
+
 def checked_coo(matrix, weight):
     """Verify every ordered coordinate/value on the actual device, in chunks."""
     if not matrix.has_canonical_format:
@@ -148,7 +158,7 @@ class MPSLIF(nn.Module):
         if (value.shape != (self.graph.n,) or value.dtype != torch.int64 or value.device.type != "mps" or (value < 0).any()):
             raise ValueError("Invalid refractory state")
 
-    def step(self, voltage_increment, state):
+    def step(self, voltage_increment, state, *, spike_backward_gain=1.0):
         self._validate_state(state)
         if (self.theta.dtype != torch.float32 or self.theta.device.type != "mps" or not torch.isfinite(self.theta).all()
                 or self.rho.requires_grad or self.rho.device.type != "mps" or self.rho.dtype != torch.float32
@@ -170,6 +180,10 @@ class MPSLIF(nn.Module):
         v = torch.where(active, integrated_v, state.v) + voltage_increment * self.input_mask
         g = torch.where(active, arrival_g * b, arrival_g)
         spikes = surrogate_spike(v - cfg.v_threshold_mv, cfg.surrogate_scale_mv) * active
+        # The historical/default branch has no added tensor operation. Callers
+        # selecting a new estimator must bind this gain in their policy identity.
+        if spike_backward_gain != 1.0:
+            spikes = scale_spike_backward(spikes, spike_backward_gain)
         fired = spikes.detach().bool()
         next_v, next_g = torch.where(fired, cfg.v_reset_mv, v), torch.where(fired, 0., g)
         refractory = torch.where(fired & ~self.input_mask, state.step + self.refractory_steps, state.refractory_until)

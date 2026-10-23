@@ -15,7 +15,7 @@ test('launch uses only fixed executable and arguments; repeated prepare and star
   const controller = new ExperimentController('/test/repo', () => {}, (...args) => { calls.push(args); return child; });
   controller.prepare();
   assert.equal(calls[0][0], '/test/repo/.venv-train/bin/python');
-  assert.deepEqual(calls[0][1].slice(0, 7), ['-u', '-m', 'malecns_lab.experiments.x2_desktop', '--execute', '--sim-only', '--output', controller.output]);
+  assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.experiments.x2_behavior_desktop', '--execute', '--sim-only', '--qualification', '--output', controller.output]);
   assert.equal(calls[0][2].shell, false); assert.throws(() => controller.prepare()); assert.throws(() => controller.continue());
   send(child, status(controller, 'awaiting_simulation', { simulator_ready: true }));
   controller.continue(); assert.throws(() => controller.continue());
@@ -51,4 +51,20 @@ test('record replay only accepts sealed sessions and returns bounded sequence fi
   await writeFile(path.join(root, 'telemetry/batches/000001.json'), '{"batch_sequence":1}');
   assert.equal((await controller.listRecords()).length, 1); assert.deepEqual((await controller.openRecord(id)).sequences, [1]);
   assert.deepEqual(await controller.readBatch(id, 1), { batch_sequence: 1 }); await assert.rejects(controller.readBatch(id, '../'), /序号/);
+});
+
+test('task IPC admits only five enums during a ready running session; END remains a task', () => {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  assert.throws(() => controller.task('GREET'));
+  controller.prepare();
+  assert.throws(() => controller.task('GREET'));
+  send(child, status(controller, 'running', { phase: 'waiting_task', qualification_only: true }));
+  for (const task of ['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']) {
+    controller.task(task);
+    assert.equal(child.stdin.read().toString(), JSON.stringify({ command: 'task', task }) + '\n');
+  }
+  for (const bad of ['WAVE_RIGHT', 'rm -rf', '../checkpoint', { task: 'GREET' }, null]) assert.throws(() => controller.task(bad));
+  controller.stop();
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
+  assert.throws(() => controller.task('END_INTERACTION'));
 });

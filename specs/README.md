@@ -1,6 +1,10 @@
 # 设计与实测记录
 
-最新完成 [Spec022：Electron 仿真与脑活动工作台](spec-022-electron-workbench/spec.md)。同一冻结MPS控制脑的真实遥测、离线回放与官方GPU仿真生命周期已接入，原生桌面两轮实际前进0.381m/0.446m并逐轮停稳，32批遥测完整、资源自动关闭，[独立验收PASS](spec-022-electron-workbench/p1-p2-acceptance.md)。仅本机开发运行，安装包和仿真视频回放不在本阶段内。
+当前主线按[Spec024：X2脑控整体设计](spec-024-x2-brain-control-mainline/spec.md)：任务与身体反馈进入完整MaleCNS，脑选择待命、前进、左右转向和挥手，官方MC执行，桌面显示同次真实神经活动，最终到现场实机。设计Ready并[独立验收PASS](spec-024-x2-brain-control-mainline/acceptance.md)，用户已授权实施并运行整条[路线](spec-024-x2-brain-control-mainline/plan.md)；当前契约、官方技能、新脑策略分工实施，多行为产品尚未验收，实际证据见[进度](spec-024-x2-brain-control-mainline/progress.md)。真机暂缺，之后上海接入。小型目标跟随/前进停止筛查不是主线。
+
+最新实测 [Spec023：X2冻结脑任务能力评估](spec-023-x2-task-evaluation/spec.md) 已完成一次预登记离线运行。5场景15帧全部FORWARD，正确6/15（40%）、STOP命中0/9，任务行为FAIL；参数未变、210批真实遥测完整，未训练或启动仿真。详见[实测报告](spec-023-x2-task-evaluation/actual-evaluation.md)与[独立验收](spec-023-x2-task-evaluation/acceptance.md)。
+
+桌面基线 [Spec022：Electron 仿真与脑活动工作台](spec-022-electron-workbench/spec.md) 已完成并本地提交 `6ba3fb4`。同一冻结MPS控制脑的真实遥测、离线回放与官方GPU仿真生命周期已接入，原生桌面两轮实际前进0.381m/0.446m并逐轮停稳，32批遥测完整、资源自动关闭，[独立验收PASS](spec-022-electron-workbench/p1-p2-acceptance.md)。仅本机开发运行，安装包和仿真视频回放不在本阶段内。
 
 [完整脑到X2的纵向反馈MVP](spec-021-x2-neural-loop/implementation.md)已完成两轮实测并[独立PASS](spec-021-x2-neural-loop/acceptance.md)：实际前进0.419m和0.429m，逐轮水平停稳，模型参数未变，仿真已关闭。[冻结推理优化](spec-020-x2-frozen-optimization/acceptance.md)已独立PASS：完整状态与输出精确一致，计算耗时下降62.3%。MVP使用实际里程计驱动虚拟标记；尚未验证真实相机、学习目标跟随或真机。日常操作从[文档索引](../docs/README.md)进入。
 
@@ -20,6 +24,8 @@
 | [013](spec-013-yaw-learning/spec.md) | 历史单轴学习：两分支各 80 窗完成、固定模型验证失败；后续支线已停止 |
 
 ## 关键实测
+
+- [冻结脑5场景任务评估：停止命中0/9](spec-023-x2-task-evaluation/actual-evaluation.md)。
 
 - [Electron真实遥测配对、两轮闭环与回放](spec-022-electron-workbench/actual-integration.md)。
 

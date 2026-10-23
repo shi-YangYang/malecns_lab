@@ -1,7 +1,7 @@
 import type { Atlas } from '../../atlas/src/types';
 import { BrainView } from './brain';
-import { loadAtlas, validBatch, validManifest } from './data';
-import type { ExperimentStatus, OpenRecord, Snapshot, TelemetryBatch, TelemetryManifest, TelemetrySummary } from './types';
+import { loadAtlas, validBatch, validManifest, validCapture, replayAt, validReplayBatch } from './data';
+import type { ExperimentStatus, OpenRecord, Snapshot, TelemetryBatch, TelemetryManifest, TelemetrySummary, Task } from './types';
 import './style.css';
 
 const icons = {
@@ -15,14 +15,15 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T { return do
 function option(value: string, label: string): HTMLOptionElement { const item = document.createElement('option'); item.value = value; item.textContent = label; return item; }
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
-  <header class="titlebar"><div class="brand">${icon('brain')}<span>MaleCNS <b>Lab</b></span></div><span class="titlebar-divider"></span><span class="workspace-label">实验工作台</span><div class="titlebar-right"><span class="experiment-state" id="experiment-state">未运行</span><button class="tool-button primary" id="prepare">准备实验</button><button class="tool-button" id="start" disabled>开始</button><button class="tool-button stop" id="stop" disabled>停止</button><label class="select-shell record-shell"><span class="sr-only">实验记录</span><select id="record-select" aria-label="实验记录"><option value="">实时</option></select>${icon('arrow')}</label><button class="icon-button" id="refresh-records" aria-label="刷新实验记录" title="刷新记录">${icon('reset')}</button></div></header>
+  <header class="titlebar"><div class="brand">${icon('brain')}<span>MaleCNS <b>Lab</b></span></div><span class="titlebar-divider"></span><span class="workspace-label">实验工作台</span><div class="titlebar-right"><span class="experiment-state" id="experiment-state">未运行</span><button class="tool-button primary" id="prepare">准备验证</button><button class="tool-button" id="start" disabled>开始</button><button class="tool-button stop" id="stop" disabled>紧急停止</button><label class="select-shell record-shell"><span class="sr-only">实验记录</span><select id="record-select" aria-label="实验记录"><option value="">实时</option></select>${icon('arrow')}</label><button class="icon-button" id="refresh-records" aria-label="刷新实验记录" title="刷新记录">${icon('reset')}</button></div></header>
   <main>
     <div class="notice" id="notice" role="alert" hidden></div>
+    <div class="taskbar" id="taskbar" aria-label="互动任务"><div class="task-buttons"><button class="tool-button" data-task="GREET" disabled>打招呼</button><button class="tool-button" data-task="FACE_LEFT" disabled>向左致意</button><button class="tool-button" data-task="FACE_RIGHT" disabled>向右致意</button><button class="tool-button" data-task="SHOW_FORWARD" disabled>向前展示</button><button class="tool-button" data-task="END_INTERACTION" disabled>结束互动</button></div><span id="behavior-state" role="status">未运行</span></div>
     <div class="workspace" id="workspace">
       <section class="panel simulation-panel" aria-labelledby="simulation-title">
-        <div class="panel-heading"><div class="panel-title">${icon('robot')}<h2 id="simulation-title">X2 仿真</h2></div><span class="badge" id="simulation-state">未运行</span></div>
-        <div class="simulation-notice" id="simulation-notice" hidden>请在仿真中点击 Reset、Run，再点击顶部“开始”。</div>
-        <div class="simulation-stage" id="simulation-stage"><div class="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">准备实验后连接仿真</span></div></div>
+        <div class="panel-heading"><div class="panel-title">${icon('robot')}<h2 id="simulation-title">X2 仿真</h2></div><div class="panel-actions"><label class="select-shell" id="media-selector" hidden><select id="media-kind" aria-label="回放画面类型"><option value="sample">采样</option><option value="video">视频</option></select></label><button class="tool-button" id="video-play" hidden>播放</button><span class="badge" id="simulation-state">未运行</span></div></div>
+        <div class="simulation-notice" id="simulation-notice" hidden>先 Pause、Reset，确认直立暂停后 Run，再点击“开始”。</div>
+        <div class="simulation-stage" id="simulation-stage"><video id="recorded-video" class="recorded-frame" preload="metadata" muted playsinline disablepictureinpicture hidden></video><img id="recorded-frame" class="recorded-frame" alt="本次仿真采样画面" hidden/><div class="empty-simulation" id="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">准备实验后连接仿真</span></div></div>
       </section>
       <div class="splitter" id="splitter" role="separator" aria-label="调整仿真与脑图宽度" aria-orientation="vertical" aria-valuemin="35" aria-valuemax="65" aria-valuenow="48" tabindex="0"><span></span></div>
       <section class="panel brain-panel" aria-labelledby="brain-title">
@@ -41,9 +42,13 @@ let atlas: Atlas, brain: BrainView;
 let manifest: TelemetryManifest | null = null, current: TelemetryBatch | null = null;
 let summary: TelemetrySummary | null = null, lastStatusNotice = '';
 let history: TelemetryBatch[] = [], replay: OpenRecord | null = null, replayIndex = 0;
+let replayFrameSequence: number | null = null, replayPreviousBatch = false, replayCursor: string | null = null;
 let snapshot: Snapshot | null = null, displaySkipped = 0, lastSequence = 0;
 let ratio = 48, disposed = false, pending = false, modeVersion = 0;
 let lastVisible: boolean | null = null;
+let videoMode = false;
+const recordedVideo = element<HTMLVideoElement>('recorded-video');
+function clearVideo(): void { recordedVideo.pause(); recordedVideo.removeAttribute('src'); recordedVideo.load(); videoMode = false; element<HTMLSelectElement>('media-kind').value = 'sample'; }
 const activeStates = new Set(['preparing', 'awaiting_simulation', 'running', 'stopping']);
 const stateLabels: Record<ExperimentStatus['state'], string> = { idle: '未运行', preparing: '正在准备', awaiting_simulation: '等待仿真启动', running: '实验进行中', stopping: '正在停止', completed: '已完成', cancelled: '已停止', failed: '实验失败' };
 
@@ -84,7 +89,7 @@ function useManifest(value: TelemetryManifest): void {
 function useSummary(value: TelemetrySummary | null, runId?: string | null): void {
   summary = null;
   if (!value) return;
-  if (!manifest || value.schema !== 'malecns_lab.x2_telemetry_summary.v1' || value.run_id !== manifest.run_id || value.execution_id !== manifest.execution_id || (runId && value.run_id !== runId) || !['running', 'completed', 'failed'].includes(value.status) || typeof value.complete !== 'boolean' || !Number.isInteger(value.dropped_batches) || value.dropped_batches < 0 || !Array.isArray(value.errors) || !value.errors.every(error => typeof error === 'string') || (value.error !== null && typeof value.error !== 'string')) throw new Error('遥测汇总与当前控制脑记录不匹配');
+  if (!manifest || value.schema !== (manifest.schema === 'malecns_lab.x2_behavior_telemetry_manifest.v1' ? 'malecns_lab.x2_behavior_telemetry_summary.v1' : 'malecns_lab.x2_telemetry_summary.v1') || value.run_id !== manifest.run_id || value.execution_id !== manifest.execution_id || (runId && value.run_id !== runId) || !['running', 'completed', 'failed'].includes(value.status) || typeof value.complete !== 'boolean' || !Number.isInteger(value.dropped_batches) || value.dropped_batches < 0 || !Array.isArray(value.errors) || !value.errors.every(error => typeof error === 'string') || (value.error !== null && typeof value.error !== 'string')) throw new Error('遥测汇总与当前控制脑记录不匹配');
   summary = value;
 }
 function telemetryIssue(status: ExperimentStatus): string {
@@ -152,6 +157,16 @@ function drawActivity(): void {
   raster.innerHTML = `<path d="M32 3V69H546" class="chart-grid"/><path d="${marks}" class="spike-mark"/>`;
 }
 function updateStatus(value: ExperimentStatus): void {
+  element('media-selector').hidden = !replay?.video.complete;
+  element('video-play').hidden = !videoMode;
+  element('recorded-video').hidden = !videoMode;
+  element('video-play').textContent = recordedVideo.paused ? '播放' : '暂停';
+  const behaviorNames: Record<string, string> = { HOLD: '待命', ADVANCE: '前进', TURN_LEFT: '左转', TURN_RIGHT: '右转', WAVE_RIGHT: '挥手' };
+  const phaseNames: Record<string, string> = { computing: '脑正在计算', executing: '正在执行', rejected: '输出被拒绝', waiting_task: '等待任务' };
+  element('taskbar').hidden = Boolean(replay);
+  app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => { button.disabled = pending || Boolean(replay) || value.state !== 'running'; });
+  element('behavior-state').textContent = value.state === 'running' ? [value.qualification_only ? '候选验证' : '', phaseNames[value.phase ?? ''] ?? value.message, behaviorNames[value.behavior ?? ''] ?? ''].filter(Boolean).join(' · ') : stateLabels[value.state];
+  element('behavior-state').title = value.reason ?? (value.qualification_only ? '挥手尚未开放；本轮用于收集候选模型的实际证据。' : '');
   const busy = activeStates.has(value.state);
   const issue = telemetryIssue(value);
   element('experiment-state').textContent = stateLabels[value.state];
@@ -164,17 +179,27 @@ function updateStatus(value: ExperimentStatus): void {
   element('simulation-notice').hidden = value.state !== 'awaiting_simulation' || Boolean(replay);
   const visible = !replay && !document.hidden;
   if (api && visible !== lastVisible) { lastVisible = visible; void api.setSimulationVisible(visible).catch(showError); }
-  element('simulation-state').textContent = replay ? '回放无画面' : value.simulator_ready && !value.resources_stopped ? '实时画面' : stateLabels[value.state];
-  element('simulation-message').textContent = replay ? '脑活动回放' : stateLabels[value.state];
-  element('simulation-detail').textContent = replay ? '此记录未归档仿真视频' : value.state === 'idle' ? '准备实验后连接仿真' : value.message;
-  element('brain-state').textContent = issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : replay ? '回放' : current ? busy ? '实时' : '最后一批' : busy ? '等待遥测' : '未运行';
-  element('brain-state').classList.toggle('mint', !issue && !replay && busy && Boolean(current));
-  element('brain-state').title = issue || (!replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `最后一批距今 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : replay ? '已封存真实遥测；未播放仿真视频' : '尚无本次控制脑遥测');
-  for (const id of ['previous-batch', 'next-batch', 'batch-number']) element(id).hidden = !replay;
+  element('simulation-state').textContent = videoMode ? '原生视频' : replay ? replay.capture.replay ? '采样回放' : '回放无画面' : value.simulator_ready && !value.resources_stopped ? '实时画面' : stateLabels[value.state];
+  element('simulation-message').textContent = replay ? replay.capture.replay ? '此处未采集' : '脑活动回放' : stateLabels[value.state];
+  element('simulation-detail').textContent = replay ? replay.capture.state === 'absent' ? '此记录未归档画面' : replay.capture.replay ? '' : '画面档案不完整' : value.state === 'idle' ? '准备实验后连接仿真' : value.message;
+  const stale = !replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined && snapshot.transport_delay_ms > 2000;
+  element('brain-state').textContent = videoMode ? '视频未对齐' : issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : replay ? replayPreviousBatch ? '上一批' : current ? '回放' : '尚无批次' : current ? busy ? stale ? '等待新批次' : '实时' : '最后一批' : busy ? '等待遥测' : '未运行';
+  element('brain-state').classList.toggle('mint', !issue && !stale && !replay && busy && Boolean(current));
+  element('brain-state').title = videoMode ? '此视频没有经过验证的首帧时间锚点，脑活动不与视频配对。可切回采样查看同次主机时间记录。' : issue || (!replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `最后一批距今 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : replay ? replay.capture.replay ? '同次主机时间关联；像素没有仿真源时间，不代表物理帧同步。' : '已封存真实遥测；未归档画面' : '尚无本次控制脑遥测');
+  for (const id of ['previous-batch', 'next-batch', 'batch-number']) element(id).hidden = !replay || videoMode;
   element<HTMLButtonElement>('previous-batch').disabled = pending || !replay || replayIndex <= 0;
-  element<HTMLButtonElement>('next-batch').disabled = pending || !replay || replayIndex >= replay.sequences.length - 1;
-  if (replay) element('batch-number').textContent = `${replayIndex + 1}/${replay.sequences.length}`;
-  const statusNotice = [value.state === 'failed' ? value.message : '', issue].filter(Boolean).join('；');
+  element<HTMLButtonElement>('next-batch').disabled = pending || !replay || replayIndex >= (replay.capture.replay?.entries.length ?? replay.sequences.length) - 1;
+  if (replay) {
+    const count = replay.capture.replay?.entries.length ?? replay.sequences.length;
+    element('batch-number').textContent = `${replayIndex + 1}/${count}`;
+    element('batch-number').title = replayCursor ? `主机单调时间 ${replayCursor} ns；采样回放，不是连续视频` : '神经批次';
+    for (const [id, label] of [['previous-batch', '上一步'], ['next-batch', '下一步']]) { element(id).title = label; element(id).setAttribute('aria-label', label); }
+  }
+  element('recorded-frame').hidden = videoMode || !replay || replayFrameSequence === null;
+  element('empty-simulation').hidden = videoMode || Boolean(replay && replayFrameSequence !== null);
+  const captureIssue = replay && !['absent', 'sealed'].includes(replay.capture.state) ? `画面档案不完整：${replay.capture.reason ?? replay.capture.summary?.reason ?? '未完成封存'}` : !replay && snapshot?.capture && ['failed', 'incomplete'].includes(snapshot.capture.state) ? `画面采集失败：${snapshot.capture.reason}` : '';
+  const videoIssue = replay && !['absent', 'sealed'].includes(replay.video.state) ? `视频档案不完整：${replay.video.reason ?? '未完成封存'}` : !replay && snapshot?.video && snapshot.video.state === 'incomplete' ? `视频采集失败：${snapshot.video.reason}` : '';
+  const statusNotice = [value.state === 'failed' ? value.message : '', issue, captureIssue, videoIssue].filter(Boolean).join('；');
   if (statusNotice) showError(statusNotice);
   else if (element('notice').textContent === lastStatusNotice) clearError();
   lastStatusNotice = statusNotice;
@@ -198,15 +223,32 @@ async function action(kind: 'prepare' | 'start' | 'stop'): Promise<void> {
   finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
 }
 async function showReplay(index: number): Promise<void> {
-  if (!api || !replay) return;
+  if (!api || !replay || videoMode) return;
   const version = modeVersion;
   pending = true;
   try {
-    const batch = await api.readBatch(replay.id, replay.sequences[index]);
-    if (version !== modeVersion) return;
-    replayIndex = index; useBatch(batch, true);
-    const sequence = replay.sequences[index], previous = replay.sequences[index - 1] ?? 0;
-    if (sequence !== previous + 1) showError(`此处缺少 ${sequence - previous - 1} 批记录，未补造数据。`);
+    const captured = replay.capture.replay;
+    if (captured) {
+      const match = replayAt(captured, index);
+      const [batch, frame] = await Promise.all([
+        match.batch === null ? null : api.readBatch(replay.id, match.batch, index),
+        match.frame === null ? null : api.readRecordedFrame(replay.id, match.frame.sequence),
+      ]);
+      if (version !== modeVersion) return;
+      if (batch && !validReplayBatch(batch, replay.manifest, match)) throw new Error('脑批次与当前回放游标不匹配');
+      if (frame && (frame.identity.run_id !== replay.id || frame.identity.execution_id !== replay.manifest.execution_id || frame.sequence !== match.frame?.sequence || frame.jpeg_base64.length > 700000)) throw new Error('画面与当前回放不匹配');
+      replayIndex = index; replayPreviousBatch = match.previousBatch; replayCursor = match.cursor;
+      replayFrameSequence = frame?.sequence ?? null;
+      const image = element<HTMLImageElement>('recorded-frame');
+      if (frame) image.src = `data:image/jpeg;base64,${frame.jpeg_base64}`; else image.removeAttribute('src');
+      if (batch) useBatch(batch, true); else { current = null; history = []; drawActivity(); }
+    } else {
+      const batch = await api.readBatch(replay.id, replay.sequences[index]);
+      if (version !== modeVersion) return;
+      replayIndex = index; useBatch(batch, true);
+      const sequence = replay.sequences[index], previous = replay.sequences[index - 1] ?? 0;
+      if (sequence !== previous + 1) showError(`此处缺少 ${sequence - previous - 1} 批记录，未补造数据。`);
+    }
   } finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
 }
 async function poll(): Promise<void> {
@@ -229,33 +271,60 @@ async function poll(): Promise<void> {
   }
   if (!disposed) setTimeout(() => { void poll(); }, 250);
 }
+app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => button.addEventListener('click', async () => {
+  if (!api || pending || replay) return;
+  clearError(); pending = true;
+  try { await api.task(button.dataset.task as Task); }
+  catch (error) { showError(error); }
+  finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
+}));
 for (const kind of ['prepare', 'start', 'stop'] as const) element(kind).addEventListener('click', () => { void action(kind); });
 element('refresh-records').addEventListener('click', () => { void refreshRecords().catch(showError); });
 element('previous-batch').addEventListener('click', () => { void showReplay(replayIndex - 1).catch(showError); });
 element('next-batch').addEventListener('click', () => { void showReplay(replayIndex + 1).catch(showError); });
 recordSelect.addEventListener('change', async () => {
   if (!api) return;
-  const version = ++modeVersion; clearError(); pending = true;
+  const version = ++modeVersion; clearVideo(); clearError(); pending = true; replayFrameSequence = null; replayPreviousBatch = false; replayCursor = null; element<HTMLImageElement>('recorded-frame').removeAttribute('src');
   try {
+    if (recordSelect.value) { lastVisible = false; await api.setSimulationVisible(false); }
     const id = recordSelect.value;
     replay = null; manifest = null; summary = null; current = null; history = []; lastSequence = 0; displaySkipped = 0;
     if (id) {
       const opened = await api.openRecord(id); if (version !== modeVersion) return;
+      if (opened.video.complete && (!opened.video.manifest || opened.video.manifest.identity.run_id !== opened.id || opened.video.manifest.identity.execution_id !== opened.manifest.execution_id || opened.video.media_url !== `workbench://app/media/${opened.id}/recording.webm` || opened.video.manifest.media_anchor !== null)) throw new Error('视频身份或时间锚点无效');
+      if (!validCapture(opened.capture, opened)) throw new Error('画面回放身份或时间域无效');
       replay = opened; replayIndex = 0; useManifest(opened.manifest);
       useSummary(opened.summary, opened.session.run_id);
-      if (!opened.sequences.length) throw new Error('记录没有可回放的遥测批次');
+      if (!(opened.capture.replay?.entries.length ?? opened.sequences.length)) throw new Error('记录没有可回放的数据');
       await showReplay(0);
     } else if (snapshot?.manifest) { useManifest(snapshot.manifest); useSummary(snapshot.summary, snapshot.status.run_id); if (snapshot.batch) useBatch(snapshot.batch); updateDataQuality(); }
     else { brain.setGroups([]); groupSelect.replaceChildren(); groupSelect.disabled = true; drawActivity(); }
   } catch (error) { showError(error); }
   finally { pending = false; if (snapshot) updateStatus(snapshot.status); setBounds(); }
 });
-document.addEventListener('visibilitychange', () => { if (snapshot) updateStatus(snapshot.status); if (!document.hidden) setBounds(); });
+element('media-kind').addEventListener('change', async () => {
+  if (!replay || pending || (snapshot && activeStates.has(snapshot.status.state))) return;
+  ++modeVersion; recordedVideo.pause();
+  videoMode = element<HTMLSelectElement>('media-kind').value === 'video';
+  if (videoMode) {
+    if (!replay.video.complete || !replay.video.media_url) { videoMode = false; return; }
+    recordedVideo.src = replay.video.media_url;
+    current = null; history = []; drawActivity();
+  } else { recordedVideo.removeAttribute('src'); recordedVideo.load(); await showReplay(replayIndex).catch(showError); }
+  if (snapshot) updateStatus(snapshot.status);
+});
+element('video-play').addEventListener('click', () => {
+  if (!videoMode || !replay || (snapshot && activeStates.has(snapshot.status.state))) return;
+  if (recordedVideo.paused) void recordedVideo.play().catch(showError); else recordedVideo.pause();
+});
+for (const event of ['play', 'pause', 'ended']) recordedVideo.addEventListener(event, () => { element('video-play').textContent = recordedVideo.paused ? '播放' : '暂停'; });
+recordedVideo.addEventListener('error', () => { if (videoMode) { recordedVideo.pause(); showError('视频无法解码或档案校验失败'); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) recordedVideo.pause(); if (snapshot) updateStatus(snapshot.status); if (!document.hidden) setBounds(); });
 async function start(): Promise<void> {
   atlas = await loadAtlas(); brain = new BrainView(element('brain'), atlas);
   element('soma-count').textContent = `${atlas.positioned_count.toLocaleString('en-US')} 个`;
   element('reset-view').addEventListener('click', () => brain.reset()); groupSelect.addEventListener('change', drawActivity);
-  window.addEventListener('beforeunload', () => { disposed = true; brain.dispose(); });
+  window.addEventListener('beforeunload', () => { recordedVideo.pause(); disposed = true; brain.dispose(); });
   drawActivity();
   if (!api) { element<HTMLButtonElement>('prepare').disabled = true; showError('请在 Electron 桌面应用中使用实验操作。'); return; }
   await refreshRecords(); setBounds(); void poll();

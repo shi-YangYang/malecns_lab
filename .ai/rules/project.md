@@ -4,7 +4,7 @@
 
 - 包、CLI 为 malecns_lab，源码在 src/malecns_lab；learning 可依赖 control 动作契约，control 不反向依赖 learning。
 - brain/senses 负责神经计算与编码；diagnostics 负责离线神经观察；visualization/apps/atlas 提供刺激响应与记录回放；experiments/tello 是已有设备实验。
-- 当前设备方向按 [Decision 021](../decisions/021-official-x2-and-cleanup.md)：官方 X2 Sim + MC + AimDK，先尝试 Mac Docker。G2、第三方步态及单轴稳向前置不在当前主线。
+- 当前设备方向按 [Decision 021](../decisions/021-official-x2-and-cleanup.md) 和 [Decision 022](../decisions/022-x2-brain-control-mainline.md)：官方 X2 Sim + MC + AimDK，以完整脑多行为选择、交互展示及实机接入为主线。G2、第三方步态及单轴/红目标小任务前置不在当前主线。
 - data/、logs/、模型、录像、环境、run/sources 不因清理源码而删除或纳入 Git。保留 LICENSE 与 THIRD_PARTY.md。
 - cnsbridge.*、flydrones.* 序列化标识是旧数据契约，不是可删除的导入兼容层。模式、特征顺序与来源身份变化必须明确迁移。
 - 不改写旧 run/checkpoint/source 哈希以伪装续跑；旧实验使用其记录的源码与环境，新实验重新登记。
@@ -20,4 +20,4 @@
 
 ## 验证与设备
 
-按 [AGENTS](../../AGENTS.md) 的 S0–S3 和停止规则执行。硬件动作、大型完整脑运行只在当前授权内；离线测试不触发设备。Noria 不得停止，Docker 不得为本项目擅自重启。当前授权为独立容器中的官方 X2 安装与启动验证，不训练、不连接真机、不推送。
+按 [AGENTS](../../AGENTS.md) 的 S0–S3 和停止规则执行。硬件动作、大型完整脑运行只在当前授权内；离线测试不触发设备。Noria 不得停止，Docker 不得为本项目擅自重启。单次任务范围以用户最新决定和[当前交接](../prompts/task-handoff.md)为准，不将旧安装授权、设计完成或仿真通过视为无限训练或真机动作授权。

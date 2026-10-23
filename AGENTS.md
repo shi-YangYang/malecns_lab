@@ -12,7 +12,7 @@ multi_agent: AUTO
 
 ## 当前方向与边界
 
-- 基于完整 MaleCNS 的神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线；首先尝试 Mac 上的 linux/amd64 Docker。仿真、真机与版本匹配尚未验证。
+- 基于完整 MaleCNS 的神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。Mac GPU仿真已有纵向动作实测；当前按[Spec024](specs/spec-024-x2-brain-control-mainline/spec.md)推进交互、脑行为选择、真实遥测到实机展示的主线。转向/挥手、多行为学习及现场版本匹配尚未验证，不把红目标前进/停止诊断当作主线。
 - 脑活动图谱与刺激响应保留；单轴稳向和目标跟随为历史研究，不作为接入 X2 的前置门槛。
 - 保留 Python src layout、apps/atlas、tests、docs、configs、examples 的职责，以及 constitution/specs/.ai 开发结构。仅在用户授权的范围内删改。
 - data/、logs/、模型、录像、运行环境和旧 run 的 sources 快照是科研资产；清理文档不授权删除这些资产。

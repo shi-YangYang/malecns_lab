@@ -2,9 +2,12 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { readVideoArchive } from './video.mjs';
+import { readCaptureArchive, readCapturedFrame, readCapturedBatch } from './recording.mjs';
 import { JsonLineReader, MAX_ARCHIVE_BYTES, MAX_MANIFEST_BYTES, STATES, TERMINAL_STATES, readBoundedJson, recordIdAllowed } from './boundaries.mjs';
 
 const EVENT_SCHEMA = 'malecns_lab.desktop_event.v1';
+const TASKS = new Set(['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']);
 export class ExperimentController {
   constructor(repo, onChange = () => {}, launch = spawn) {
     this.repo = repo;
@@ -23,7 +26,7 @@ export class ExperimentController {
     this.output = path.join(this.recordsRoot, `desktop-${stamp}-${randomBytes(4).toString('hex')}`);
     this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', message: '正在准备实验', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
     this.stderr = ''; this.protocolError = null; this.notify();
-    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.experiments.x2_desktop', '--execute', '--sim-only', '--output', this.output], {
+    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.experiments.x2_behavior_desktop', '--execute', '--sim-only', '--qualification', '--output', this.output], {
       cwd: this.repo, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONPATH: path.join(this.repo, 'src'), PYTHONUNBUFFERED: '1' },
     });
@@ -59,6 +62,12 @@ export class ExperimentController {
       this.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);
       this.state = { ...this.state, state: 'stopping', message: '正在停车并关闭实验资源' }; this.notify();
     }
+    return this.state;
+  }
+  task(task) {
+    if (typeof task !== 'string' || !TASKS.has(task)) throw new Error('互动任务无效');
+    if (!this.child || this.state.state !== 'running' || this.state.phase === 'initializing') throw new Error('脑模型尚未准备完成');
+    this.child.stdin.write(`${JSON.stringify({ command: 'task', task })}\n`);
     return this.state;
   }
   get safeToClose() { return !this.child && this.state.resources_stopped === true; }
@@ -102,11 +111,27 @@ export class ExperimentController {
     const summary = await this.optionalJson(root, 'telemetry/summary.json');
     const names = await readdir(path.join(telemetry, 'batches'));
     const sequences = names.filter(name => /^\d{6}\.json$/.test(name)).map(name => Number(name.slice(0, 6))).sort((a, b) => a - b);
-    return { id, session, manifest, summary, sequences };
+    let capture;
+    try { capture = await readCaptureArchive(root, id, session, manifest); }
+    catch (error) { capture = { state: 'invalid', complete: false, reason: error.message, manifest: null, replay: null, summary: null }; }
+    let video;
+    try { video = await readVideoArchive(root, id, session, manifest); }
+    catch (error) { video = { state: 'invalid', complete: false, reason: error.message, manifest: null, media_url: null }; }
+    return { id, session, manifest, summary, sequences, capture, video };
   }
-  async readBatch(id, sequence) {
+  async readRecordedFrame(id, sequence) {
+    if (!Number.isInteger(sequence) || sequence < 1 || sequence > 480) throw new Error('画面帧序号无效');
+    const record = await this.openRecord(id);
+    return readCapturedFrame(await this.recordRoot(id), record.capture, sequence);
+  }
+  async readBatch(id, sequence, cursorIndex) {
     if (!Number.isInteger(sequence) || sequence < 1 || sequence > 999999) throw new Error('批次序号无效');
     const root = await this.recordRoot(id);
+    if (cursorIndex !== undefined) {
+      if (!Number.isInteger(cursorIndex) || cursorIndex < 0 || cursorIndex >= 10000) throw new Error('联合回放游标无效');
+      const record = await this.openRecord(id);
+      return readCapturedBatch(root, record.capture, sequence, cursorIndex);
+    }
     const session = await readBoundedJson(root, 'desktop_session.json');
     if (session.schema !== EVENT_SCHEMA || !TERMINAL_STATES.has(session.state) || !session.resources_stopped) throw new Error('记录尚未封存');
     return readBoundedJson(root, `telemetry/batches/${String(sequence).padStart(6, '0')}.json`);
