@@ -30,3 +30,7 @@ demo_log.csv
 # Local WebGL viewer dependencies and exported experiment data.
 apps/atlas/node_modules/
 apps/atlas/public/data/
+
+# Offline Electron prototype dependencies and copied research assets.
+apps/desktop/node_modules/
+apps/desktop/public/prototype/

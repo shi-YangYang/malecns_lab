@@ -16,11 +16,11 @@ from ..control.x2_protocol import (
 from . import x2_inference as base
 
 WRAPPERS = tuple(dict.fromkeys(base.WRAPPER_FILES + (
-    "learning/x2_frozen.py", "learning/x2_session.py", "experiments/x2_neural.py",
+    "learning/x2_frozen.py", "learning/x2_telemetry.py", "learning/x2_session.py", "experiments/x2_neural.py",
     "experiments/x2_bridge.py", "experiments/x2.py", "control/x2_protocol.py", "control/x2.py")))
 
 
-def execute(output, root=base.ROOT):
+def execute(output, root=base.ROOT, *, telemetry=False):
     from .resource_guard import resource_budget, supervise, write_json
     import psutil
     root, directory = Path(root).resolve(), Path(output).resolve()
@@ -53,7 +53,7 @@ def execute(output, root=base.ROOT):
                 "parent_pid": os.getpid(), "root": str(root), "output": str(directory),
                 "checkpoint_id": base.CHECKPOINT_ID, "source_manifest_sha256": base.sha256(directory / "sources.json"),
                 "wrapper_sha256": wrappers, "resources": budget, "wall_seconds": 240,
-                "runtime": base.runtime("optimized"), "rounds": MAX_ROUNDS,
+                "runtime": base.runtime("optimized"), "rounds": MAX_ROUNDS, "telemetry": telemetry,
                 "brain_timeout_seconds": BRAIN_TIMEOUT, "observation_timeout_seconds": OBSERVATION_TIMEOUT,
                 "pose_timeout_seconds": POSE_TIMEOUT,
                 "sensor": "live_odometry_virtual_marker", "forward_threshold": .03, "pulse_seconds": 1.}
@@ -129,7 +129,7 @@ def run_worker(directory):
     started = time.monotonic()
     result = {"status": "failed", "reason": None, "run_id": run_id, "completed_frames": 0,
               "registration_id": reg["registration_id"], "checkpoint_id": base.CHECKPOINT_ID}
-    sampler = None
+    sampler = telemetry = None
     timing, boundaries, frames = {}, [], []
     def phase(name, **fields):
         write_json(directory / "phase.json", {"phase": name, "worker_seconds": time.monotonic()-started, **fields})
@@ -187,6 +187,10 @@ def run_worker(directory):
                      and identity["checkpoint_id"] == base.CHECKPOINT_ID and identity["source_policy_id"] == policy.policy_id,
                      "Frozen backend identity differs")
         write_json(directory / "execution_identity.json", identity)
+        if reg.get("telemetry", False):
+            from .x2_telemetry import SpikeTelemetry
+            telemetry = SpikeTelemetry(directory, policy, identity, run_id)
+            executor.telemetry = telemetry
         write_json(directory / "actual_policy.json", policy.identity)
         initial_counts = raw_counts_digest(policy.brain.graph)
         base.require(initial_counts == policy.identity["model"]["graph"]["raw_ordered_counts_sha256"], "Full graph counts differ")
@@ -207,6 +211,8 @@ def run_worker(directory):
             return record
         with torch.no_grad():
             phase("new_scene_precondition", steps=600)
+            if telemetry is not None:
+                telemetry.begin("precondition")
             began = clock()
             state = executor.initial_state()
             timing["precondition_seconds"] = clock()-began
@@ -235,6 +241,8 @@ def run_worker(directory):
                 path = directory / "frames" / f"{sequence:03d}.npy"
                 np.save(path, frame, allow_pickle=False)
                 phase("forward", sequence=sequence)
+                if telemetry is not None:
+                    telemetry.begin("forward", sequence)
                 began = clock()
                 output = executor.forward_tensor(frame, state)
                 elapsed = clock()-began
@@ -280,6 +288,8 @@ def run_worker(directory):
         result["reason"] = f"{type(error).__name__}:{error}"
         traceback.print_exc()
     finally:
+        if telemetry is not None:
+            result["telemetry"] = telemetry.close(completed=result["status"] == "completed")
         if sampler is not None:
             try:
                 result["mps_memory"] = sampler.close()

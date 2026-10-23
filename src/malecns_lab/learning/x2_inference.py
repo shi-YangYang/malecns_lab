@@ -304,13 +304,14 @@ def numerical_lock(root=ROOT):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def execute(output, root=ROOT, *, backend="baseline", baseline=None):
+def execute(output, root=ROOT, *, backend="baseline", baseline=None, telemetry=False):
     """Prepare a new evidence directory and run exactly one supervised worker."""
     from .resource_guard import resource_budget, supervise, write_json
     import psutil
     root, output = Path(root).resolve(), Path(output).resolve()
     require(backend in ("baseline", "optimized") and (baseline is not None) == (backend == "optimized"),
             "Optimized execution requires a baseline; baseline execution cannot take one")
+    require(not telemetry or backend == "optimized", "Telemetry requires the optimized frozen backend")
     baseline_path = Path(baseline).resolve() if baseline is not None else None
     require(baseline_path is None or not output.is_relative_to(baseline_path), "Output must not modify the baseline directory")
     require(any(output.is_relative_to(root / name) and output != root / name for name in ("data", "logs")),
@@ -334,7 +335,7 @@ def execute(output, root=ROOT, *, backend="baseline", baseline=None):
             provenance.mkdir()
             for key, value in anchors.items():
                 write_json(provenance / f"{key}.json", value)
-            wrapper_files = WRAPPER_FILES + (("learning/x2_frozen.py",) if backend == "optimized" else ())
+            wrapper_files = WRAPPER_FILES + (("learning/x2_frozen.py", "learning/x2_telemetry.py") if backend == "optimized" else ())
             wrapper = {name: sha256(root / "src/malecns_lab" / name) for name in wrapper_files}
             for name in wrapper_files:
                 path = output / "wrapper_sources" / name
@@ -347,11 +348,11 @@ def execute(output, root=ROOT, *, backend="baseline", baseline=None):
             historical = anchors["run"]["runtime"]
             execution = {"schema": "malecns_lab.x2_inference_execution.v1", "backend": backend,
                          "source_policy_id": anchors["run"]["policy"]["policy_id"], "checkpoint_id": CHECKPOINT_ID,
-                         "wrapper_sha256": wrapper, "runtime": current,
+                         "wrapper_sha256": wrapper, "runtime": current, "telemetry": telemetry,
                          "baseline_registration_id": baseline_binding["registration_id"] if baseline_binding else None}
             execution["execution_id"] = canonical_hash(execution)
             registration = {"schema": result["schema"], "created_utc": datetime.now(timezone.utc).isoformat(),
-                            "backend": backend, "execution_identity": execution, "baseline_binding": baseline_binding,
+                            "backend": backend, "execution_identity": execution, "baseline_binding": baseline_binding, "telemetry": telemetry,
                             "parent_pid": os.getpid(), "root": str(root), "output": str(output), "resources": resources,
                             "wall_limit_seconds": WALL_SECONDS, "parent_started_monotonic": started,
                             "checkpoint_id": CHECKPOINT_ID, "checkpoint_path": str(root / CHECKPOINT),
@@ -445,7 +446,7 @@ def run_worker(directory):
     result = {"status": "failed", "reason": None, "completed_frames": 0, "saved_state_boundaries": 0,
               "registration_id": reg["registration_id"], "checkpoint_id": CHECKPOINT_ID}
     timing, frames, boundaries = {}, [], []
-    sampler = None
+    sampler = telemetry = None
     def phase(name, **details):
         write_json(directory / "phase.json", {"phase": name, "wall_seconds": time.monotonic()-started, **details})
         if sampler is not None:
@@ -531,6 +532,11 @@ def run_worker(directory):
                                 "source_policy_id": policy.policy_id, "checkpoint_id": CHECKPOINT_ID,
                                 "source_files_sha256": sources["registered_sha256"], "mode": "torch.no_grad"}
             backend_identity["execution_id"] = canonical_hash(backend_identity)
+        if reg.get("telemetry", False):
+            require(backend == "optimized", "Telemetry requires optimized frozen execution")
+            from .x2_telemetry import SpikeTelemetry
+            telemetry = SpikeTelemetry(directory, policy, backend_identity, reg["registration_id"])
+            executor.telemetry = telemetry
         write_json(directory / "execution_identity.json", {"registration_execution": execution, "backend_execution": backend_identity})
         result.update(execution_id=execution["execution_id"], backend_execution_id=backend_identity["execution_id"],
                       execution_identity_sha256=sha256(directory / "execution_identity.json"))
@@ -559,6 +565,8 @@ def run_worker(directory):
             timing.setdefault("state_save_seconds", []).append(clock()-began)
         with torch.no_grad():
             phase("new_scene_blank_precondition", neural_steps=600)
+            if telemetry is not None:
+                telemetry.begin("precondition")
             began = clock()
             state = executor.initial_state()
             timing["precondition_seconds"] = clock() - began
@@ -578,6 +586,8 @@ def run_worker(directory):
                 path = directory / "frames" / f"{index:03d}.npy"
                 np.save(path, frame, allow_pickle=False)
                 phase("forward", index=index, sample_id=sample["sample_id"], neural_steps=500)
+                if telemetry is not None:
+                    telemetry.begin("forward", index + 1)
                 began = clock()
                 output = executor.forward_tensor(frame, state)
                 elapsed = clock() - began
@@ -625,6 +635,8 @@ def run_worker(directory):
         result["reason"] = f"{type(error).__name__}:{error}"
         traceback.print_exc()
     finally:
+        if telemetry is not None:
+            result["telemetry"] = telemetry.close(completed=result["status"] == "completed")
         if sampler is not None:
             try:
                 result["mps_memory"] = sampler.close()

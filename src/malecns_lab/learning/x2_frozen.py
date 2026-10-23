@@ -57,7 +57,7 @@ class FrozenInference:
     """
 
     @torch.no_grad()
-    def __init__(self, policy, *, checkpoint_id=None):
+    def __init__(self, policy, *, checkpoint_id=None, telemetry=None):
         _require(type(policy).__module__ == "cnsbridge.learning.gpu_policy",
                  "A historical cnsbridge GPUPolicy is required")
         module = importlib.import_module(type(policy).__module__)
@@ -68,6 +68,7 @@ class FrozenInference:
         _require(checkpoint_id is None or (isinstance(checkpoint_id, str) and len(checkpoint_id) == 64
                  and all(c in "0123456789abcdef" for c in checkpoint_id)), "Invalid checkpoint_id reference")
         self.policy = policy
+        self.telemetry = telemetry
         self._policy_state, self._output = module.PolicyState, module.GPUOutput
         self._drive_state = module.GPUDriveState
         brain_module = importlib.import_module(type(policy.brain).__module__)
@@ -207,6 +208,9 @@ class FrozenInference:
         # Inspect pre-reset values too: a later finite reset cannot erase a fault.
         errors.finite(integrated_v, v, g, distance, spikes, transmitted)
         errors.add(refractory < 0, 8)
+        telemetry = getattr(self, "telemetry", None)
+        if telemetry is not None:
+            telemetry.capture(spikes, state.step)
         return (self._brain_state(next_v, next_g, refractory, state.pending[1:] + (transmitted,),
                                   state.step + 1, b.model_id), next_sensory)
 
@@ -226,6 +230,9 @@ class FrozenInference:
             completed = offset + 1
             if completed % BLOCK_STEPS == 0 or completed == count:
                 errors.check(brain.step)
+                telemetry = getattr(self, "telemetry", None)
+                if telemetry is not None:
+                    telemetry.flush(brain.step)
                 credit = frame_offset + completed
                 if sums is not None and credit % self.policy.credit_horizon == 0 and credit < 2 * self.policy.frame_steps:
                     brain = brain.detach()

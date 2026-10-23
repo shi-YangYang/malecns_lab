@@ -1,5 +1,7 @@
 # 设计与实测记录
 
+最新完成 [Spec022：Electron 仿真与脑活动工作台](spec-022-electron-workbench/spec.md)。同一冻结MPS控制脑的真实遥测、离线回放与官方GPU仿真生命周期已接入，原生桌面两轮实际前进0.381m/0.446m并逐轮停稳，32批遥测完整、资源自动关闭，[独立验收PASS](spec-022-electron-workbench/p1-p2-acceptance.md)。仅本机开发运行，安装包和仿真视频回放不在本阶段内。
+
 [完整脑到X2的纵向反馈MVP](spec-021-x2-neural-loop/implementation.md)已完成两轮实测并[独立PASS](spec-021-x2-neural-loop/acceptance.md)：实际前进0.419m和0.429m，逐轮水平停稳，模型参数未变，仿真已关闭。[冻结推理优化](spec-020-x2-frozen-optimization/acceptance.md)已独立PASS：完整状态与输出精确一致，计算耗时下降62.3%。MVP使用实际里程计驱动虚拟标记；尚未验证真实相机、学习目标跟随或真机。日常操作从[文档索引](../docs/README.md)进入。
 
 本目录保留阶段设计、独有数值协议和实际实验报告，删除重复实施、返工和验收流水。历史报告描述当时状态，不是当前待办清单；过程文件中已经提交的版本可从 Git 历史查看，未提交且被精简的过程说明不保证另有副本。原始数据、参数、源码快照和日志没有删除。
@@ -18,6 +20,8 @@
 | [013](spec-013-yaw-learning/spec.md) | 历史单轴学习：两分支各 80 窗完成、固定模型验证失败；后续支线已停止 |
 
 ## 关键实测
+
+- [Electron真实遥测配对、两轮闭环与回放](spec-022-electron-workbench/actual-integration.md)。
 
 - [完整脑到X2两轮纵向反馈](spec-021-x2-neural-loop/implementation.md)。
 

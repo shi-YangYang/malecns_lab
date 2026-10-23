@@ -1,32 +1,31 @@
-# 当前交接 — 完整MaleCNS到X2纵向MVP与冻结优化完成
+# 当前交接 — Electron 工作台正式接入已完成
 
 更新：2026-10-23。工作目录 `/Users/yang/project/malecns_lab`。
 
-## 当前结论
+## 当前状态
 
-用户授权的“跑完MVP并完成优化，每阶段可本地commit、自行决策”已达到约定的纵向工程范围；不push、不训练、不接真机。本轮[Spec021独立验收](../../specs/spec-021-x2-neural-loop/acceptance.md) PASS，必要检查与实际验证完成后停止追加运行。源代码和报告本地提交，data/logs/模型/来源快照不入Git。
+用户认可精简原型并要求开始实施。[Spec022](../../specs/spec-022-electron-workbench/spec.md) 的 P1/P2 已完成，[独立验收 AC1–AC6 PASS](../../specs/spec-022-electron-workbench/p1-p2-acceptance.md)。没有未处理返工或待运行验收；停止继续实验。用户随后授权本地 commit，当前提交封存本阶段源码与文档，不推送。
 
-完整166700节点、25582938非零边、124177617连接计数的冻结脑，通过实际里程计驱动的虚拟标记输入与官方Sim + MC + AimDK完成两轮反馈。原始vx按固定>0.03门限触发每轮1秒MC目标0.2，实际前进0.41884m和0.42901m，两轮均确认水平STOPPED。第二输入变化368像素；参数与图计数不变，完整状态600/1100/1600步封存，worker/监督/host_ack/桥清理关联齐全。
+桌面已从原型素材改为同一冻结 MPS 控制脑的真实活动与官方 GPU 仿真，保留用户认可的左右布局，不恢复已删除的大标题、底部播放条及历史小字。默认仅载入真实胞体坐标；点击准备才启动完整脑和自有仿真，官方界面 Reset/Run 后点击开始执行两轮纵向反馈。停止、退出、失败均走有界停车/清理路径。
 
-## 已完成阶段
+22个真实参考群组按实际 spike 统计；33个输出神经元中选32个记录真实逐步脉冲。颜色代表群组均值，栅格显示选样脉冲；没有全脑逐步归档、插值或另起CPU脑。每50步（5ms神经时间）采一批，显示跳批与归档丢批分开。
 
-- Spec016官方动作PASS，`2c14c31`；Spec017速度与停车契约PASS，`65aae55`；Spec018动作适配器PASS，`2865d5d`。固定意图动作只算这些阶段，不冒充脑控制。
-- [Spec019](../../specs/spec-019-x2-neural-inference/acceptance.md)完整脑冻结基线PASS，`5c8be07`；[Spec020](../../specs/spec-020-x2-frozen-optimization/acceptance.md)精确等价优化PASS，`a2108a4`。完整状态与输出精确一致，计算25.7747→9.7080秒，下降62.3351%；单独运行单帧约2.30秒。相关已通过检查不重复。
-- Spec021最终54项定向检查一次通过，新独立验收r4 PASS。联调与VM共驻留时单帧3.6775/3.6744秒；第二输入前另等27.5958秒姿态稳定，不能用其计算耗时或GUI60FPS冒充闭环频率。
-- 外围GPU兼容层 `5a26a7c`；官方SDK、MC、Sim及模型未修改。r1入口环境错误、r2姿态漂移拒绝、r3姿态等待超时均保留，详见本Spec实际报告与失败验收。
+## 已通过的证据
 
-## 最终协议与限制
+- [正式接入实测](../../specs/spec-022-electron-workbench/actual-integration.md)：完整图开关遥测分别对同一原baseline的4个递归边界和3个完整输出逐元素精确一致；耗时增加0.1666%，峰值RSS增加62.4375MiB，符合冻结15%/128MiB预算。配对仅一次，不作统计性能承诺。
+- 原生桌面成功运行 `data/x2_sim/agibot/data/var/desktop-20261023-034602-5d90cd78/`，run_id `e2e5ba357a674e8895c8279ce58264e9`。两轮FORWARD位移0.381064m/0.446197m，新观测来自上轮动作后，逐轮owned_core_STOPPED；最终停车、资源清理和parameters_unchanged均为true。
+- 32/32遥测批次完整、零丢批/错误，428612bytes；同一run各身份一致。实际回放第28批53.3Hz和5个spike与原始记录相符。截图 `logs/desktop_workbench/live-running.jpg` 和 `replay.jpg`，汇总 `desktop-integration.json`。回放无仿真视频，左侧明确缺少视频。
+- 宿主87.508s/VM80.332s，符合240s/120s预算。完成后只读检查私有Lighter未运行、旧CPU容器exited、默认context仍desktop-linux。完整脑已退出，未动Noria或重启Docker。Electron保留在离线回放，重资源关闭。
+- 已完成遥测、runtime、IPC/存档边界的定向检查和必要桌面构建，不再重复。实时summary完整性和SVG填充已修复并独立通过；官方SD仍要求明确成功响应，预算内重试且每次返回落盘，实际第二次成功。历史失败均保留，不冒称停车成功；详情见实测。
 
-最终执行两轮，初始和下一输入均要求既有站立/水平低速条件外，再有1秒角速度范数<=0.005rad/s、姿态变化<=0.005rad的新双流窗口。等待姿态最多40秒，下一观测45秒，脑计算30秒、停车12秒，宿主240秒、含准备的VM120秒。输出消费前仍检查更新反馈及0.02m/0.03rad漂移。全程等待/思考发零，失败不续走。vz/wz原样记录但未执行。
+## 入口与边界
 
-这是虚拟标记、纵向离散动作、单次有界工程闭环；两轮均FORWARD，未证明反馈改变决策、学会目标跟随、连续实时导航或真机能力。初始站姿仍需官方SD及GUI Pause→Reset→Run；最终STOPPED是水平停稳，并非角速度全零。HAL持续角漂移内部根因未定位，但输入前与响应接纳门槛均未放宽。
+- 已构建开发入口：`cd apps/desktop && npm start`。首次准备/修改构建按 `apps/desktop/README.md`。Electron 45.0.0官方本地依赖，尚无安装包/签名/跨平台交付。
+- 固定完整脑入口 `.venv-train/bin/python -m malecns_lab.experiments.x2_desktop --execute --sim-only --output <新desktop-run>` 由主进程封装；renderer无任意命令或路径权限。普通 `.venv` 不含Torch。
+- 私有runtime `data/x2_sim/gpu_probe/runtime-rebuild`，容器 `malecns-x2-gpu-trial`，noVNC 6081；不接管已运行资源，不启动旧CPU仿真，不切换Docker context。用户要求不用仿真时关闭以减少发热。
+- 范围仍是里程计虚拟标记、纵向离散动作、停稳后计算。没有训练、真实相机、连续控制、真机、SDK改造、全脑逐步脉冲或仿真视频归档；GUI帧率不是脑计算频率。本次共驻留每帧计算约3.64秒。
+- 本地提交仅包含源码、配置、锁文件与文档；模型、资产、依赖安装目录、日志及失败run保留在本地且不入库。下一阶段尚未授权实施；不要覆盖或清理科研资产，不重做已通过验证。
 
-## 环境与证据
+## 保留的工程基线
 
-- 当前GPU容器、私有VM、CPU仿真均已停止，完整脑进程已退出；默认Docker context仍desktop-linux，未重启Docker或操作Noria。不用仿真时继续保持关闭，避免发热。
-- 最终原始目录 `data/x2_sim/agibot/data/var/x2-neural-loop-20261023-r4/`；编排、生命周期、分析、独立验收关联和截图 `logs/x2_docker/20261023_neural_loop_r4/`。VM开启至关闭95.553秒，ROS桥51.303秒，宿主101.204秒。
-- RSS峰值1.53GiB、最低系统available1.99GiB，保留至少1GiB；MPS driver峰值不与统一内存RSS相加。共享锁、单完整脑、0.1秒监督继续适用。
-- GPU runtime `data/x2_sim/gpu_probe/runtime-rebuild/`，独立LIGHTER_HOME/docker.sock；容器 `malecns-x2-gpu-trial`，6081，VM8CPU/6GiB、容器4GiB。CPU容器 `malecns-x2-x2-1` 保持停止。
-- 宿主完整脑入口必须用 `PYTHONPATH="$PWD/src" .venv-train/bin/python -m malecns_lab.experiments.x2_neural`；普通 `.venv`用于轻量检查，缺少Torch。默认仅预览，执行需显式sim-only与全新data输出。容器ROS环境需source后prepend transport_src到PYTHONPATH，不能覆盖ROS路径。
-
-没有未处理的本阶段验收问题或活动运行。后续真实相机、连续控制、动作轴扩展、训练或真机工作需要另定范围与验收，当前不自动启动。
+Spec016–018 官方动作/停车契约与适配器、Spec019冻结推理、Spec020精确等价优化、Spec021两轮纵向反馈均已PASS。Spec021本地提交 `fbc5b2d`，原实测0.41884m/0.42901m后逐轮停稳；完整166700节点、25582938非零边、124177617原始连接计数。旧基线数值与失败记录见各Spec，不以桌面完成扩大科学或真机结论。

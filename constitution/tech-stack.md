@@ -10,6 +10,7 @@
 | 神经计算 | NumPy、SciPy；完整 MaleCNS 参考图、LIF 及输入编码 |
 | 学习 | .venv-train、PyTorch 2.14.1/MPS、psutil；CPU 与全 GPU 研究分支，不承诺实时性 |
 | 图谱 | apps/atlas，Vite + TypeScript + Three.js；npm/package-lock.json |
+| 桌面 | apps/desktop，Electron 45.0.0 + TypeScript + Three.js；Spec022 同一冻结MPS控制脑遥测、离线回放与GPU仿真生命周期已实现，两轮原生桌面联调及独立验收通过；本机开发运行，尚无安装包 |
 | 本地服务 | 网页 127.0.0.1:8765，Python 刺激任务服务 127.0.0.1:8766；单计算子进程 |
 | 设备 | 已有 Tello 工具；官方X2 Sim + MC + AimDK已完成两轮纵向神经反馈MVP实测，使用里程计驱动虚拟标记，真机待适配 |
 | 数据 | 本地 NPZ/JSON/CSV/视频，没有数据库；data/logs 不随源码分发 |
