@@ -9,11 +9,16 @@ import os
 from pathlib import Path
 import signal
 import time
+import uuid
 
-from ..learning.x2_behavior_session import (SCHEMA, TASKS, CAPABILITIES, DECISION_SECONDS,
+from ..learning.x2_behavior_session import (SCHEMA, TASKS, DECISION_SECONDS,
     SOURCE_AGE_SECONDS, HEADING_OFFSETS, HEADING_SOURCE, heading_goal, wrap_heading,
     validate_heading_target, atomic, read_json, require)
-from ..control.x2_skill_profile import candidate_skill_profile, validate_candidate_skill_profile
+from ..control.x2_skill_profile import (candidate_skill_profile, validate_candidate_skill_profile,
+    SIM_FIXED_ADVANCE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID)
+from ..control.x2_skills import SOURCE
+from ..control.x2_interaction import (interaction_profile, validate_interaction_profile,
+    relative_heading_goal, relative_heading_error, profile_capabilities)
 
 
 def registered_skill_profile(directory, reg):
@@ -21,25 +26,123 @@ def registered_skill_profile(directory, reg):
     host = read_json(Path(directory)/'behavior_registration.json')
     require(all(host.get(k) == reg.get(k) for k in ('run_id','session_id')), 'Skill profile session differs')
     require(host.get('qualification_only') is True and host.get('simulation_only') is True
-            and host.get('wave_enabled') is False, 'Host skill profile is not simulation qualification')
+            and host.get('wave_enabled') == reg.get('wave_enabled'), 'Host skill profile is not simulation qualification')
     profile = validate_candidate_skill_profile(reg.get('skill_profile'))
     require(validate_candidate_skill_profile(host.get('skill_profile')) == profile,
             'Host and bridge skill profiles differ')
+    require(validate_interaction_profile(host.get('interaction_profile'))
+            == validate_interaction_profile(reg.get('interaction_profile')),
+            'Host and bridge interaction profiles differ')
+    require(profile['wave_enabled'] == reg.get('wave_enabled')
+            and reg['interaction_profile']['skill_profile_id'] == profile['profile_id']
+            and reg['interaction_profile']['wave_enabled'] == profile['wave_enabled'], 'Registered capabilities differ')
+    if profile['wave_enabled']:
+        require(reg.get('simulation_only') is True, 'Wave is restricted to fixed simulation')
     return profile
 
 
-def candidate_executor(reg, publish, *, record=None, clock=time.monotonic):
+def candidate_executor(reg, publish, *, record=None, clock=time.monotonic, preset=None, wave_poses=None):
     from ..control.x2_skills import SkillExecutor
     profile = validate_candidate_skill_profile(reg.get('skill_profile'))
     def disabled_preset(_):
         raise RuntimeError('Wave cancellation unqualified; preset requests disabled')
-    return SkillExecutor(publish,disabled_preset,enabled=CAPABILITIES,wave_probe=False,record=record,clock=clock,
-        command_seconds_by_behavior=profile['command_seconds_by_behavior'],skill_profile_id=profile['profile_id'])
+    enabled = profile_capabilities(reg.get('interaction_profile', interaction_profile()))
+    require(('WAVE_RIGHT' in enabled) == profile['wave_enabled'], 'Executor capability profile differs')
+    wave = profile['wave_enabled']
+    fixed_advance = profile['profile_id'] in (SIM_FIXED_ADVANCE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID)
+    require(not fixed_advance or (reg.get('qualification_only') is True and reg.get('simulation_only') is True
+            and reg['interaction_profile']['skill_profile_id'] == profile['profile_id']),
+            'Fixed ADVANCE requires matching simulation qualification')
+    require(not wave or preset is not None and wave_poses is not None and reg.get('simulation_only') is True,
+            'Qualified simulation wave transport required')
+    return SkillExecutor(publish,preset if wave else disabled_preset,enabled=enabled,wave_probe=False,record=record,clock=clock,
+        command_seconds_by_behavior=profile['command_seconds_by_behavior'],skill_profile_id=profile['profile_id'],
+        wave_qualification=profile.get('wave_contract'),
+        execution_profile=profile if fixed_advance else None,
+        simulation_only=reg.get('simulation_only'), qualification_only=reg.get('qualification_only'),
+        wave_return_pose=wave_poses['terminal'] if wave else None,
+        wave_first_pose=wave_poses['first'] if wave else None,
+        wave_return_reference='official_animation_terminal_frame' if wave else None)
+
+
+def observed_base_stop_basis(core, *, allow_unsent_wave=False):
+    """Measured manual-SIM stop rule; never rewrite the owned-motion state."""
+    if core.motion.state == 'STOPPED':
+        return 'owned_executor_stop_window'
+    m, o, stopped_at = core.motion.mc, core.motion.odom, core.motion.stop_requested
+    idle = core.command is None and core.status == 'IDLE'
+    finished = (core.command is not None and core.terminal and core.status in ('COMPLETED', 'CANCELLED')
+        and (core.command.behavior == 'HOLD' or core.command.behavior == 'WAVE_RIGHT' and core.wave_return_confirmed))
+    withdrawn = (core.command is not None and core.command.behavior == 'WAVE_RIGHT'
+        and core.terminal and core.status == 'CANCELLED' and core.reason == 'wave_withdrawn_before_send'
+        and core.wave_dispatch_at is None and core.preset_sent_at is None)
+    unsent = (allow_unsent_wave and core.command is not None and core.command.behavior == 'WAVE_RIGHT'
+        and core.status == 'ACCEPTED' and core.wave_dispatch_at is None and core.preset_sent_at is None)
+    if (not core.motion.base_motion_requested and (idle or finished or withdrawn or unsent) and not core.motion.failures
+            and m is not None and o is not None and m.source == '' and stopped_at is not None
+            and min(m.received, o.received)-stopped_at >= 1. and core.standing_ready()):
+        return 'official_unclaimed_stationary_standing_after_stop'
+    return None
+
+
+class WaveStandPreparation:
+    """One actual SD for an already brain-selected WAVE; no task dispatcher."""
+    def __init__(self, client, request_factory, serialize, record, contract, *, clock=time.monotonic):
+        self.client, self.request_factory, self.serialize, self.record = client, request_factory, serialize, record
+        self.contract, self.clock = contract, clock
+        self.future = self.request = self.started = self.responded = None
+
+    def start(self, core):
+        require(core.command is not None and core.command.behavior == 'WAVE_RIGHT'
+                and core.status == 'ACCEPTED' and core.wave_dispatch_at is None
+                and observed_base_stop_basis(core, allow_unsent_wave=True) and core.standing_ready()
+                and core.player is not None and core.player[1] == 0
+                and core.query_state == 1 and self.clock()-core.query_at <= .5,
+                'Wave SD requires admitted WAVE, stopped body and idle preset player')
+        require(self.request is None, 'Wave SD already active')
+        self.request = dict(decision_seq=core.command.decision_seq, request_id=core.command.request_id,
+                            execution_id=core.execution_id, behavior='WAVE_RIGHT')
+        self.started, self.responded, self.future = self.clock(), None, None
+
+    def poll(self, core):
+        require(self.request is not None, 'No wave SD preparation')
+        require(self.clock()-self.started < self.contract['timeout_seconds'], 'Wave SD preparation timed out')
+        if self.future is None and self.responded is None:
+            if not self.client.service_is_ready():
+                return False
+            message = self.request_factory()
+            self.future = self.client.call_async(message)
+            self.record('wave_sd_request', request=self.request, message=self.serialize(message))
+        if self.future is not None and self.responded is None and self.future.done():
+            response = self.future.result()
+            self.record('wave_sd_response', request=self.request,
+                        response=self.serialize(response) if response is not None else None)
+            require(response is not None and response.response.header.code == 0
+                    and response.response.status.value == 1, 'Official wave SD rejected or unsuccessful')
+            self.responded = self.clock()
+        m, o = core.motion.mc, core.motion.odom
+        ready = (self.responded is not None and m is not None and o is not None
+                 and min(m.received, o.received) >= self.responded+self.contract['post_response_standing_seconds']
+                 and core.standing_ready())
+        if ready:
+            self.record('wave_sd_standing', request=self.request, responded_at=self.responded,
+                        mc_received=m.received, odom_received=o.received)
+            self.request = None
+        return ready
+
+    def cancel(self):
+        if self.request is not None:
+            if self.future is not None:
+                self.future.cancel()
+            self.record('wave_sd_wait_cancelled', request=self.request,
+                        note='local wait only; a sent SD cannot be recalled; no wave dispatched')
+        self.request = self.future = None
 
 
 class RemoteExchange:
     """Nonce time is signed by this process's own clock and never renewed."""
-    def __init__(self, run_id, session_id, clock=time.monotonic):
+    def __init__(self, run_id, session_id, clock=time.monotonic, *, profile=None):
+        self.capabilities = profile_capabilities(interaction_profile() if profile is None else profile)
         self.run_id, self.session_id, self.clock = run_id, session_id, clock
         self.issued = {}
         self.last_query = 0
@@ -49,7 +152,7 @@ class RemoteExchange:
         self.heading_targets = {}
 
     def observe(self, query, feedback, events, *, odom=None, sampled_remote_monotonic=None,
-                feedback_sources=None):
+                feedback_sources=None, runtime_context=None):
         require(query.get('schema') == SCHEMA and query.get('kind') == 'observe'
                 and (query.get('run_id'),query.get('session_id')) == (self.run_id,self.session_id),
                 'Foreign observation query')
@@ -72,14 +175,13 @@ class RemoteExchange:
             goal = self.heading_targets.get(query['request_id'])
             if goal is None:
                 goal = dict(source=HEADING_SOURCE,run_id=self.run_id,session_id=self.session_id,
-                    request_id=query['request_id'],task=query['task'],relative_offset_rad=HEADING_OFFSETS[query['task']],
-                    origin_yaw_rad=feedback.yaw_rad,target_yaw_rad=wrap_heading(feedback.yaw_rad+HEADING_OFFSETS[query['task']]),
+                    request_id=query['request_id'],task=query['task'],**relative_heading_goal(query['task'],feedback.yaw_rad),
                     established_remote_sequence=query['sequence'],established_remote_monotonic=now,origin_odom=odom)
-            error = wrap_heading(goal['target_yaw_rad']-feedback.yaw_rad)
+            error = relative_heading_error(query['task'],goal,feedback.yaw_rad)
             feedback = replace(feedback,heading_error_rad=error)
             target = dict(goal,current_odom=odom,current_yaw_rad=feedback.yaw_rad,heading_error_rad=error)
         else:
-            feedback = replace(feedback,heading_error_rad=0.)
+            feedback = replace(feedback,heading_error_rad=relative_heading_error(query['task'],None,feedback.yaw_rad))
         validate_heading_target(target,feedback,query,query['sequence'],now)
         goal = heading_goal(target) if target is not None else None
         require(query['request_id'] not in self.heading_targets or self.heading_targets[query['request_id']] == goal,
@@ -88,11 +190,13 @@ class RemoteExchange:
         packet = dict(schema=SCHEMA, kind='observation', run_id=self.run_id, session_id=self.session_id,
             nonce=query['nonce'], sequence=query['sequence'], remote_sequence=query['sequence'],
             request_id=query['request_id'], task=query['task'], remote_issued_monotonic=now,
-            source_age_s=feedback.age_s, feedback=asdict(feedback), capabilities=list(CAPABILITIES),
+            source_age_s=feedback.age_s, feedback=asdict(feedback), capabilities=list(self.capabilities),
             request_changed=changed, events=events,heading_target=target,
             feedback_sources=deepcopy(feedback_sources), sampled_remote_monotonic=sampled_remote_monotonic,
             host_sent_monotonic=query['host_sent_monotonic'],
             response_record=dict(file='bridge_events.jsonl',kind='observation_response',response_id=query['nonce']))
+        if runtime_context is not None:
+            packet['runtime_context'] = deepcopy(runtime_context)
         self.issued[query['nonce']] = deepcopy(packet)
         self.last_query, self.last_request = query['sequence'], query['request_id']
         # Bounded cache; an evicted nonce can never be resurrected from a file.
@@ -188,6 +292,29 @@ def feedback_snapshot(core, sensors, clock=time.monotonic):
     return body, originals, now
 
 
+def runtime_context_snapshot(core, body, event_sequence):
+    """Same factual readiness projection as the archived collection_guard.v1.
+
+    Called only after the bridge has confirmed stable preparation. Current
+    standing is a separate model input, never substituted for this guard.
+    """
+    m = core.motion.mc
+    facts = dict(source_registered=core.motion._source_registered, armed=core.motion.armed,
+        stable_preparation_completed=True, fresh_body=body.valid,
+        ownership_supported=bool(m and m.source in ('', SOURCE) and core.motion._source_registered),
+        actual_mc_source=None if m is None else m.source, motion_state=core.motion.state,
+        failures=list(core.motion.failures), core_status=core.status)
+    if facts['failures'] or facts['core_status'] in ('UNKNOWN', 'FAILED'):
+        state = 'LATCHED'
+    elif not all(facts[k] for k in ('source_registered','armed','stable_preparation_completed',
+                                    'fresh_body','ownership_supported')):
+        state = 'RECOVERING'
+    else:
+        state = 'READY'
+    return dict(protection_state=state, facts=facts, event_sequence=event_sequence,
+                source='collection_guard.v1 factual projection; not a model decision')
+
+
 def publish_observation(directory, packet, record):
     # Persist the exact response before exposing its overwritable mailbox.
     record('observation_response', response_id=packet['nonce'], response=deepcopy(packet))
@@ -197,14 +324,16 @@ def publish_observation(directory, packet, record):
         heading_target=packet['heading_target'], response_record=packet['response_record'])
 
 
-def wrap_execution(reg, raw, event_seq, recent_requests, sensors, trigger=None):
+def wrap_execution(reg, raw, event_seq, recent_requests, sensors, trigger=None, wave_owner=None):
     """Serialize original executor ownership and facts without renaming ACKs."""
     from ..control.x2_behavior import ExecutionEvent
     from ..control.x2_skills import SKILL_PACK_ID
     return ExecutionEvent(reg['run_id'],reg['session_id'],event_seq,raw['decision_seq'],raw['execution_id'],
         raw['request_id'],'sim',SKILL_PACK_ID,raw['status'],raw['behavior'],raw['received_monotonic'],
         mc_request=dict(recent_actual_requests=list(recent_requests),skill_profile_id=raw.get('skill_profile_id'),
-            command_seconds=raw.get('command_seconds'),intensity=raw.get('intensity')),
+            command_seconds=raw.get('command_seconds'),intensity=raw.get('intensity'),
+            **{key:raw[key] for key in ('model_intensity','resolved_velocity','velocity_resolution') if key in raw},
+            **({'wave_owner':deepcopy(wave_owner)} if raw['behavior'] == 'WAVE_RIGHT' and wave_owner else {})),
         raw_feedback=clean(deepcopy(dict(raw, sensors=sensors, triggering_snapshot=trigger))),
         stop_evidence=clean({k:v for k,v in raw.items() if k in ('stop_confirmed','base_stop_confirmed',
             'distance_m','forward_distance_m','lateral_distance_m','angle_rad','advance_direction_ok')}),
@@ -224,31 +353,188 @@ def rejected_execution(reg, decision, event_seq, core):
             summary_scope='executor_context_not_rejected_execution'))
 
 
+class WaveSession:
+    """One fresh old-SDK child per admitted wave; newer SDK only queries state.
+
+    Ownership is local/exclusive and temporal. Global MC state and task_id=0 do
+    not provide a strong task identifier. Closing a child is never cancellation.
+    """
+    def __init__(self, directory, reg, core, binding, record, query_client, request_factory,
+                 serialize, *, clock=time.monotonic, boundary_factory=None):
+        from .x2_preset_compat import PresetBoundary
+        self.directory, self.reg, self.core = Path(directory), reg, core
+        self.binding, self.record, self.clock = binding, record, clock
+        self.client, self.request_factory, self.serialize = query_client, request_factory, serialize
+        self.factory = boundary_factory or PresetBoundary
+        self.boundary = self.owner = self.future = None
+        self.query_sent = self.next_query = 0.
+        self.failed = False
+        self.actions = 0
+        self.stand_preparation = None
+
+    def _log(self, kind, **fields):
+        self.record(kind, wave_owner=deepcopy(self.owner), **fields)
+
+    def _drop_query(self):
+        if self.future is not None:
+            self.future.cancel()
+            self.future = None
+
+    def preset(self, command):
+        from .x2_preset_compat import FIXED, CANCEL
+        require(not self.failed, 'Wave transport is latched closed')
+        if command == FIXED:
+            require(self.boundary is None and self.actions < 50
+                    and (self.stand_preparation is None or self.stand_preparation.request is None),
+                    'Previous wave helper/preparation not reaped')
+            self.actions += 1
+            if self.stand_preparation is not None:
+                self.stand_preparation.start(self.core)
+            else:
+                self._start_helper()
+        else:
+            require(command == CANCEL and self.boundary is not None, 'No exclusive active wave to cancel')
+            self._drop_query()
+            self.boundary.request(command)
+
+    def _start_helper(self):
+        child_run = 'skills-'+time.strftime('%Y%m%d-%H%M%S', time.gmtime())+'-'+uuid.uuid4().hex
+        output = self.directory/'preset-actions'/child_run/'probe-00-wave_right'
+        output.mkdir(parents=True,exist_ok=False)
+        self.boundary = self.factory(output,self._log,binding=self.binding,clock=self.clock,allow_cancel=True)
+        self.owner = dict(run_id=self.reg['run_id'],session_id=self.reg['session_id'],
+            decision_seq=self.core.command.decision_seq,request_id=self.core.command.request_id,
+            execution_id=self.core.execution_id,helper_run_id=child_run,helper_probe_id=output.name,
+            helper_nonce=self.boundary.nonce,attribution=self.reg['skill_profile']['wave_contract']['attribution'])
+        atomic(output/'owner.json',self.owner)
+        self.boundary.start()
+
+    def fail(self, reason):
+        if not self.failed:
+            self.failed = True
+            self._log('wave_transport_failed',reason=reason)
+            self.core.cancel(reason)
+
+    def poll(self):
+        from .x2_preset_compat import FIXED
+        now = self.clock()
+        if self.stand_preparation is not None and self.stand_preparation.request is not None:
+            try:
+                if self.core.cancel_requested or self.core.status == 'UNKNOWN' or self.core.terminal:
+                    self.stand_preparation.cancel()
+                    self.core.withdraw_unsent_wave()
+                elif self.stand_preparation.poll(self.core):
+                    self._start_helper()
+            except Exception as error:
+                self.stand_preparation.cancel()
+                self.fail('wave_sd_preparation:'+type(error).__name__+':'+str(error))
+        if self.boundary is not None and not self.failed:
+            try:
+                for event in self.boundary.poll():
+                    kind = event['kind']
+                    if kind == 'error':
+                        self.fail(event['payload']['error'])
+                        break
+                    if kind in ('sent','cancel_sent'):
+                        self._log('actual_preset_request',kind_of_request=kind,**event['payload'],
+                                  helper_sent_at=event['monotonic'])
+                        (self.core.preset_sent if kind == 'sent' else self.core.preset_cancel_sent)(event['monotonic'])
+                    elif kind in ('response','cancel_response'):
+                        self._log('actual_preset_response',kind_of_response=kind,**event['payload'])
+                        r = event['payload']['message']['response']
+                        (self.core.preset_ack if kind == 'response' else self.core.preset_cancel_ack)(
+                            r['header']['code'],r['task_id'],r['state']['value'])
+                if not self.failed and not self.boundary.sent:
+                    if self.core.cancel_requested or self.core.status == 'UNKNOWN':
+                        self.close_action()
+                        self.core.withdraw_unsent_wave()
+                    elif self.boundary.ready and self.core.standing_ready() and self.core.query_state == 1 and now-self.core.query_at <= .5:
+                        self._drop_query()
+                        self.core.preset_dispatch()
+                        self.boundary.request(FIXED)
+            except Exception as error:
+                self.fail('wave_transport:'+type(error).__name__+':'+str(error))
+        if self.future is not None:
+            try:
+                if self.future.done():
+                    response = self.future.result()
+                    self.future = None
+                    self._log('preset_query',response=self.serialize(response) if response else None,
+                              scope='global_player_state_not_task_identity')
+                    if response is None:
+                        raise RuntimeError('empty preset query')
+                    r = response.response
+                    self.core.preset_query(r.header.code,r.task_id,r.state.value,received=now)
+                elif now-self.query_sent >= .5:
+                    self._drop_query()
+                    raise RuntimeError('preset query timeout')
+            except Exception as error:
+                self._drop_query()
+                self.core.query_state = None
+                if self.boundary is not None and self.boundary.sent:
+                    self.fail('wave_query:'+str(error))
+        active_wave = self.core.command is not None and self.core.command.behavior == 'WAVE_RIGHT' and not self.core.terminal
+        may_query = not active_wave or self.core.wave_dispatch_at is None or self.core.task_id is not None
+        if self.future is None and now >= self.next_query and may_query and self.client.service_is_ready():
+            request = self.request_factory(self.core.task_id or 0)
+            self.future = self.client.call_async(request)
+            self.query_sent, self.next_query = now, now+.1
+            self._log('preset_query_request',message=self.serialize(request))
+
+    def close_action(self):
+        if self.stand_preparation is not None:
+            self.stand_preparation.cancel()
+        if self.boundary is not None:
+            boundary = self.boundary
+            boundary.close()  # Reap before allowing another action; an exception keeps the slot closed.
+            self.boundary = None
+        self._drop_query()
+
+    def reap_terminal(self):
+        if self.boundary is not None and self.core.terminal:
+            self.close_action()
+
+
 def execute(directory):
     require(os.environ.get('ROS_DOMAIN_ID') == '47' and os.environ.get('ROS_LOCALHOST_ONLY') == '1',
             'Isolated simulation ROS environment required')
     directory = Path(directory)
     reg, ready = read_json(directory/'bridge_registration.json'), read_json(directory/'brain_ready.json')
-    require(reg['qualification_only'] is True and reg['wave_enabled'] is False, 'Only bounded candidate qualification supported')
+    require(reg['qualification_only'] is True, 'Only bounded candidate qualification supported')
     require(all(reg[k] == ready[k] for k in ('run_id','session_id')), 'Bridge session differs')
     skill_profile = registered_skill_profile(directory,reg)
+    require(ready.get('skill_profile_id') == skill_profile['profile_id'], 'Brain execution profile differs')
+    capabilities = profile_capabilities(reg['interaction_profile'])
+    wave_poses = binding = None
+    if skill_profile['wave_enabled']:
+        from . import x2_preset_identity as preset_identity
+        from .x2_skills import official_wave_poses
+        binding = preset_identity.verify_build(preset_identity.LINUX_ROOT)
+        require(binding == skill_profile['wave_contract']['helper_binding']
+                and binding == read_json(directory/'preset_compat/binding.json'), 'Installed wave contract differs')
+        prepared = preset_identity.read(preset_identity.LINUX_ROOT/'prepared.json')
+        for name in ('x2_preset_identity.py','x2_preset_compat.py','x2_preset_helper.py'):
+            require(preset_identity.sha(Path(__file__).with_name(name)) == prepared['tool_files']['malecns_lab/experiments/'+name],
+                    'Wave helper sources differ from inspected build')
+        wave_poses = official_wave_poses(preset_identity.LINUX_ROOT.parent)
     import rclpy
     from rclpy.node import Node
     from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
     from rclpy.signals import SignalHandlerOptions
     from rosidl_runtime_py.convert import message_to_ordereddict
     from aimdk_msgs.msg import McCommonState, McLocomotionVelocity, McInputAction, JointStateArray
-    from aimdk_msgs.srv import SetMcInputSource
+    from aimdk_msgs.srv import SetMcInputSource, GetMcPresetMotionState, SetMcAction
     from nav_msgs.msg import Odometry
-    from ..control.x2_skills import SOURCE, SKILL_PACK_ID
+    from ..control.x2_skills import SOURCE, SKILL_PACK_ID, RIGHT_ARM
     from ..control.x2_behavior import DecisionGate
     started = time.monotonic()
     deadline = started+reg['bridge_wall_seconds']
     interrupted, handlers = [], {}
-    gate = DecisionGate(reg['run_id'],reg['session_id'],ready['policy_id'],ready['checkpoint_id'],ready['input_map_id'])
-    exchange = RemoteExchange(reg['run_id'],reg['session_id'])
+    gate = DecisionGate(reg['run_id'],reg['session_id'],ready['policy_id'],ready['checkpoint_id'],ready['input_map_id'],
+        sim_wave_profile_id=skill_profile['profile_id'] if skill_profile['wave_enabled'] else None)
+    exchange = RemoteExchange(reg['run_id'],reg['session_id'],profile=reg['interaction_profile'])
     events, actual_requests = [], []
-    core = node = None
+    core = node = wave = None
     failure = None
     last_decision = -1
     last_query = 0
@@ -271,7 +557,8 @@ def execute(directory):
         log('actual_mc_request', **record)
     def execution(raw):
         require(len(events) < 512, 'Execution event budget exhausted')
-        event = wrap_execution(reg,raw,len(events),actual_requests,sensors.latest,sensors.trigger)
+        event = wrap_execution(reg,raw,len(events),actual_requests,sensors.latest,sensors.trigger,
+            wave_owner=wave.owner if wave is not None and wave.owner and wave.owner['execution_id'] == raw['execution_id'] else None)
         gate.execution_event(event)
         events.append(event.to_dict())
         log('execution', event=event.to_dict())
@@ -293,17 +580,27 @@ def execute(directory):
             lambda:core.motion.mc, received=received)
     def on_joints(msg):
         received = time.monotonic()
-        sensors.update('arm', message_to_ordereddict(msg),
-            lambda **stamp:core.update_joints({j.name:(j.position,j.velocity) for j in msg.joints},**stamp),
-            None, received=received, archive=False)
+        def update(**stamp):
+            ok = core.update_joints({j.name:(j.position,j.velocity) for j in msg.joints},**stamp)
+            if wave is not None and any(j.error_code for j in msg.joints if j.name in RIGHT_ARM):
+                core.joints = None
+                core.cancel('arm_joint_error')
+                return False
+            return ok
+        sensors.update('arm', message_to_ordereddict(msg),update,None,received=received,
+            archive=wave is not None and core.command is not None and core.command.behavior == 'WAVE_RIGHT')
     def spin():
         began = time.monotonic()
         for _ in range(64):
             if time.monotonic()-began >= .008:
                 break
             rclpy.spin_once(node,timeout_sec=.0001)
+        if wave is not None:
+            wave.poll()
         core.standing_ready()
         core.tick()
+        if wave is not None:
+            wave.reap_terminal()
     def register():
         client = node.create_client(SetMcInputSource,'/aimdk_5Fmsgs/srv/SetMcInputSource')
         end = min(deadline-15,started+12.)
@@ -334,7 +631,33 @@ def execute(directory):
             handlers[sig] = signal.signal(sig,lambda sig,frame:interrupted.append(sig))
         node = Node('malecns_x2_behavior_bridge')
         publisher = node.create_publisher(McLocomotionVelocity,'/aima/mc/locomotion/velocity',10)
-        core = candidate_executor(reg,publish,record=execution)
+        core = candidate_executor(reg,publish,record=execution,
+            preset=lambda command:wave.preset(command),wave_poses=wave_poses)
+        if binding is not None:
+            query_client = node.create_client(GetMcPresetMotionState,'/aimdk_5Fmsgs/srv/GetMcPresetMotionState')
+            def query_request(task_id):
+                request = GetMcPresetMotionState.Request()
+                request.request.header.stamp = node.get_clock().now().to_msg()
+                request.request.task_id = task_id
+                return request
+            def wave_record(kind, **fields):
+                if kind == 'actual_preset_request':
+                    actual_requests.append(dict(service='/aimdk_5Fmsgs/srv/SetMcPresetMotion',**fields))
+                    del actual_requests[:-4]
+                log(kind,**fields)
+            wave = WaveSession(directory,reg,core,binding,wave_record,query_client,query_request,message_to_ordereddict)
+            if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID:
+                stand_client = node.create_client(SetMcAction, '/aimdk_5Fmsgs/srv/SetMcAction')
+                def stand_request():
+                    require(wave.boundary is None, 'Active preset helper prevents SD preparation')
+                    request = SetMcAction.Request()
+                    request.header.stamp = node.get_clock().now().to_msg()
+                    request.source = SOURCE
+                    request.command.action_desc = 'STAND_DEFAULT'
+                    return request
+                wave.stand_preparation = WaveStandPreparation(stand_client,stand_request,
+                    message_to_ordereddict,log,skill_profile['wave_preparation'])
+            log('preset_parent_identity',binding=binding,identity=preset_identity.runtime_identity(preset_identity.LINUX_ROOT,'v1.1.0'))
         core.motion.arm()
         qos = QoSProfile(depth=1,reliability=ReliabilityPolicy.BEST_EFFORT,durability=DurabilityPolicy.VOLATILE)
         node.create_subscription(Odometry,'/aima/hal/odom/state',on_odom,qos)
@@ -346,7 +669,7 @@ def execute(directory):
             time.sleep(.02)
         require(core.standing_ready(),'Fresh stable standing not confirmed')
         atomic(directory/'bridge_ready.json',dict(run_id=reg['run_id'],session_id=reg['session_id'],
-            capabilities=CAPABILITIES, qualification_only=True,wave_enabled=False,skill_profile=skill_profile))
+            capabilities=capabilities, qualification_only=True,wave_enabled=skill_profile['wave_enabled'],skill_profile=skill_profile))
         while time.monotonic()<deadline-14. and not interrupted:
             began = time.monotonic()
             if (directory/'emergency.json').exists():
@@ -359,7 +682,8 @@ def execute(directory):
                     current,originals,sampled_at = feedback_snapshot(core,sensors)
                     if current.valid:
                         packet = exchange.observe(query,current,[e for e in events if e['event_seq']>query['after_event_seq']],
-                            odom=originals['odom'],sampled_remote_monotonic=sampled_at,feedback_sources=originals)
+                            odom=originals['odom'],sampled_remote_monotonic=sampled_at,feedback_sources=originals,
+                            runtime_context=runtime_context_snapshot(core,current,len(events)-1))
                         publish_observation(directory,packet,log)
                         last_query = query['sequence']
             if decision_path.exists():
@@ -376,7 +700,9 @@ def execute(directory):
                         reason=admission.reason,remote_nonce_age_s=remote_age,
                         host_inference_age_s=message['host_inference_age_s'])
                     require(admission.accepted,'Remote decision gate: '+admission.reason)
-                    accepted = core.submit_decision(decision,observation.received_monotonic)
+                    wave_seconds = 32. if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID else 26.
+                    enough_wave_budget = str(decision.behavior) != 'WAVE_RIGHT' or str(decision.phase) != 'START' or deadline-time.monotonic() >= wave_seconds
+                    accepted = enough_wave_budget and core.submit_decision(decision,observation.received_monotonic)
                     if not accepted:
                         # A locally admitted decision can still fail current MC preconditions.
                         # Preserve the actual rejection; never replace it with HOLD.
@@ -407,11 +733,15 @@ def execute(directory):
                 if core.command and not core.terminal:
                     core.cancel(failure or 'bridge_exit')
                 else:
-                    core.motion.request_stop(failure or 'bridge_exit',failure=True)
+                    core.motion.request_stop(failure or 'bridge_exit',failure=skill_profile['profile_id'] != SIM_FROZEN_FULL_PROFILE_ID)
             except BaseException:
                 pass
             end = min(deadline,time.monotonic()+12.)
-            while time.monotonic()<end and core.motion.state != 'STOPPED':
+            def stopped_basis():
+                return (observed_base_stop_basis(core) if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID
+                        else 'owned_executor_stop_window' if core.motion.state == 'STOPPED' else None)
+            while time.monotonic()<end and (stopped_basis() is None
+                    or wave is not None and core.command is not None and core.command.behavior == 'WAVE_RIGHT' and not core.terminal):
                 try:
                     spin()
                 except BaseException:
@@ -425,7 +755,16 @@ def execute(directory):
             except BaseException:
                 pass
             summary = clean(core.summary())
-            summary.update(base_stop_confirmed=core.motion.state=='STOPPED',wave_cancellation_verified=False)
+            wave_stopped = (wave is None or core.command is None or core.command.behavior != 'WAVE_RIGHT'
+                or core.wave_return_confirmed or core.terminal and core.wave_dispatch_at is None)
+            summary.update(base_stop_confirmed=stopped_basis() is not None,base_stop_basis=stopped_basis(),wave_stop_confirmed=wave_stopped,
+                           wave_cancellation_verified=False)
+        if wave is not None:
+            try:
+                wave.close_action()
+            except BaseException as error:
+                summary['wave_stop_confirmed'] = False
+                failure = (failure or '')+';helper_cleanup:'+str(error)
         summary.update(reason=failure,wall_seconds=time.monotonic()-started,qualification_only=True,
                        events=len(events),clock_domain='linux_bridge_monotonic',skill_profile=skill_profile)
         try:
@@ -440,7 +779,7 @@ def execute(directory):
                     rclpy.shutdown()
                 for sig,handler in handlers.items():
                     signal.signal(sig,handler)
-    return 0 if summary.get('base_stop_confirmed') else 1
+    return 0 if summary.get('base_stop_confirmed') and summary.get('wave_stop_confirmed',True) else 1
 
 
 def main(argv=None):

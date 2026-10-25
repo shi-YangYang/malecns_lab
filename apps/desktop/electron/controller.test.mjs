@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ExperimentController } from './controller.mjs';
+import { CLOCK_SCHEMA } from './recording.mjs';
 
 function fakeChild() { const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); return child; }
 function status(controller, state, extra = {}) { return { schema: 'malecns_lab.desktop_event.v1', type: 'status', state, message: state, output: controller.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false, ...extra }; }
@@ -16,6 +17,7 @@ test('launch uses only fixed executable and arguments; repeated prepare and star
   controller.prepare();
   assert.equal(calls[0][0], '/test/repo/.venv-train/bin/python');
   assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--output', controller.output]);
+  assert.equal(controller.state.mode, 'brain_control'); assert.equal(controller.state.brain_controlled, false);
   assert.equal(calls[0][2].shell, false); assert.throws(() => controller.prepare()); assert.throws(() => controller.continue());
   send(child, status(controller, 'awaiting_simulation', { simulator_ready: true }));
   controller.continue(); assert.throws(() => controller.continue());
@@ -58,7 +60,7 @@ test('task IPC admits only five enums during a ready running session; END remain
   assert.throws(() => controller.task('GREET'));
   controller.prepare();
   assert.throws(() => controller.task('GREET'));
-  send(child, status(controller, 'running', { phase: 'waiting_task', qualification_only: true }));
+  send(child, status(controller, 'running', { mode: 'brain_control', brain_controlled: true, phase: 'waiting_task', qualification_only: true }));
   for (const task of ['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']) {
     controller.task(task);
     assert.equal(child.stdin.read().toString(), JSON.stringify({ command: 'task', task }) + '\n');
@@ -67,4 +69,75 @@ test('task IPC admits only five enums during a ready running session; END remain
   controller.stop();
   assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
   assert.throws(() => controller.task('END_INTERACTION'));
+});
+
+test('brain input waits for backend readiness; END enters the model and emergency stop stays independent', () => {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  for (const extra of [
+    { mode: 'brain_control', phase: 'waiting_task' },
+    { mode: 'brain_control', brain_controlled: false, phase: 'waiting_task' },
+    { mode: 'manual_demo', brain_controlled: true, phase: 'waiting_task' },
+    { mode: 'brain_control', brain_controlled: true, phase: 'initializing' },
+  ]) {
+    send(child, status(controller, 'running', extra));
+    assert.throws(() => controller.task('SHOW_FORWARD'), /脑模型尚未准备完成/);
+    assert.equal(child.stdin.read(), null);
+  }
+  send(child, status(controller, 'running', { mode: 'brain_control', brain_controlled: true, phase: 'executing' }));
+  controller.task('END_INTERACTION');
+  assert.equal(child.stdin.read().toString(), '{"command":"task","task":"END_INTERACTION"}\n');
+  assert.equal(controller.state.phase, 'executing');
+  controller.stop();
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
+  child.emit('exit', 0, null);
+  assert.equal(controller.state.brain_controlled, false);
+});
+
+function clockReply(request, extra = {}) {
+  return { schema: CLOCK_SCHEMA, type: 'clock', run_id: request.run_id, nonce: request.nonce,
+    clock_id: 'c'.repeat(32), python_monotonic_ns: '9000000000',
+    clock_source: { api: 'time.monotonic_ns', implementation: 'fixture', monotonic: true, adjustable: false }, ...extra };
+}
+function clockFixture() {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child, () => 70010000000000n);
+  controller.prepare(); send(child, status(controller, 'running'));
+  return { child, controller, readRequest: () => JSON.parse(child.stdin.read().toString()) };
+}
+test('clock replies bind nonce/run and preserve distinct clocks without changing experiment state', async () => {
+  const { child, controller, readRequest } = clockFixture(), original = controller.state;
+  const pending = controller.sampleHostClock(), request = readRequest();
+  send(child, clockReply(request, { nonce: 'f'.repeat(32) }));
+  assert.equal(controller.hostClockId, null); assert.equal(controller.clockRequests.size, 1);
+  send(child, clockReply(request));
+  const sample = await pending;
+  assert.equal(sample.python_monotonic_ns, '9000000000'); assert.equal(sample.node_send_ns, '70010000000000');
+  assert.equal(controller.state, original); assert.equal(controller.clockRequests.size, 0);
+  for (const extra of [{ run_id: 'another-run' }, { nonce: undefined }, { clock_id: 'd'.repeat(32) }]) {
+    const result = controller.sampleHostClock(), rejected = assert.rejects(result, /时钟/), query = readRequest();
+    send(child, clockReply(query, extra)); await rejected;
+    assert.equal(controller.state, original);
+  }
+});
+test('clock timeout yields unknown age; exit and emergency stop cancel pending requests immediately', async () => {
+  const { child, controller, readRequest } = clockFixture();
+  controller.optionalJson = async (_root, name) => name.endsWith('latest.json') ? { host_monotonic_ns: 9000000000 } : null;
+  const snapshot = await controller.snapshot();
+  assert.equal(snapshot.transport_delay_ms, null); assert.equal(snapshot.transport_clock, null);
+  assert.equal(controller.state.state, 'running'); assert.equal(controller.clockRequests.size, 0); readRequest();
+  const pending = controller.sampleHostClock(), rejected = assert.rejects(pending, /停止/); readRequest();
+  controller.stop();
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n'); await rejected;
+  assert.equal(controller.clockRequests.size, 0);
+  const second = clockFixture(), onExit = second.controller.sampleHostClock(), exited = assert.rejects(onExit, /退出/);
+  second.readRequest(); second.child.emit('exit', 0, null); await exited;
+  assert.equal(second.controller.clockRequests.size, 0);
+});
+test('batch age uses only the Python sample and never subtracts the Node epoch', async () => {
+  const { child, controller, readRequest } = clockFixture();
+  controller.optionalJson = async (_root, name) => name.endsWith('latest.json') ? { host_monotonic_ns: 8000000000 } : null;
+  const pending = controller.snapshot();
+  while (!controller.clockRequests.size) await new Promise(resolve => setImmediate(resolve));
+  send(child, clockReply(readRequest()));
+  assert.equal((await pending).transport_delay_ms, 1000);
 });

@@ -29,7 +29,7 @@ def test_strict_protocol_and_clean_environment(monkeypatch):
         monkeypatch.setenv(key, '/new-sdk-or-hook')
     command, env = ipc.helper_command(NONCE, RUN, PROBE)
     assert command[:4] == ['/bin/bash', '--noprofile', '--norc', '-ec']
-    assert 'v1_0_0/install/local_setup.bash' in command[-1]
+    assert identity.DIRECTORY + '/install/local_setup.bash' in command[-1]
     assert not any('/new-sdk-or-hook' in v for v in env.values())
     assert not any(k in env for k in ('BASH_ENV', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'AMENT_PREFIX_PATH'))
     assert env['ROS_DOMAIN_ID'] == '47' and env['RMW_IMPLEMENTATION'] == 'rmw_fastrtps_cpp'
@@ -81,7 +81,7 @@ def boundary(tmp_path, monkeypatch):
     def send(kind, payload, seq):
         os.write(process.child_output, ipc.encode(kind, payload,
             nonce=b.nonce, run=RUN, probe=PROBE, seq=seq))
-    ready = {'binding': dict(schema='', zip_sha256='', mc_sha256='', prepared_sha256='', build_sha256='', inspection_sha256=''),
+    ready = {'binding': dict(schema='', zip_sha256='', mc_sha256='', mc_contract_sha256={}, prepared_sha256='', build_sha256='', inspection_sha256=''),
              'identity': dict(version='', prefix='', fields={}, modules={}, libraries={})}
     send('ready', ready, 0)
     assert b.poll()[0]['kind'] == 'ready'
@@ -163,6 +163,7 @@ def test_real_runner_callback_ack_unknown_and_nonwave_no_helper(tmp_path, monkey
     monkeypatch.setattr(runner.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + max(seconds, .02)))
     monkeypatch.setattr(identity, 'verify_build', lambda *a, **kw: {})
     monkeypatch.setattr(identity, 'runtime_identity', lambda *a, **kw: {'new': True})
+    monkeypatch.setattr(runner, 'official_wave_poses', lambda *a: dict(first={}, terminal={}))
 
     class Core:
         def __init__(self, publish, preset, **kwargs):
@@ -185,6 +186,7 @@ def test_real_runner_callback_ack_unknown_and_nonwave_no_helper(tmp_path, monkey
             if command.behavior == 'WAVE_RIGHT': self.preset(dict(ipc.FIXED))
             return True
         def cancel(self, reason): self.status = 'UNKNOWN'; self.reason = reason; self.terminal = True
+        def preset_sent(self, received): pass
         def preset_ack(self, code, task, state):
             self.acks.append((code, task, state)); self.task_id = task
             # Stop this fake core on ACK; real core completion is separately
@@ -201,7 +203,7 @@ def test_real_runner_callback_ack_unknown_and_nonwave_no_helper(tmp_path, monkey
         def poll(self):
             if not self.requests: return []
             if mode == 'wave_error': return [dict(kind='error', payload={'error': 'preset_ack_timeout'})]
-            return [dict(kind='sent', payload=dict(message=RAW_REQUEST, cdr_hex='0102')),
+            return [dict(kind='sent', monotonic=clock[0], payload=dict(message=RAW_REQUEST, cdr_hex='0102')),
                     dict(kind='response', payload=dict(message=RAW_RESPONSE, cdr_hex='0304'))]
         def close(self): self.closed = True
     monkeypatch.setattr(ipc, 'PresetBoundary', Boundary)
@@ -249,32 +251,35 @@ def test_real_runner_callback_ack_unknown_and_nonwave_no_helper(tmp_path, monkey
     assert next(e for e in config if e['kind']=='configuration')['wave_seconds'] == 12.
     assert not next(e for e in config if e['kind']=='configuration')['cancellation_verified']
 
-@pytest.mark.parametrize('duplicate', [False, True])
-def test_helper_actual_send_site_uses_old_six_fields_once(tmp_path, monkeypatch, duplicate):
+@pytest.mark.parametrize('mode', ['natural', 'duplicate', 'cancel'])
+def test_helper_actual_send_site_uses_old_six_fields_once(tmp_path, monkeypatch, mode):
     from malecns_lab.experiments import x2_preset_helper as helper
     prepared = dict(tool_files={'malecns_lab/experiments/'+name: 'hash' for name in
         ('x2_preset_identity.py', 'x2_preset_compat.py', 'x2_preset_helper.py')})
-    binding = dict(schema='', zip_sha256='', mc_sha256='', prepared_sha256='', build_sha256='', inspection_sha256='')
+    binding = dict(schema='', zip_sha256='', mc_sha256='', mc_contract_sha256={}, prepared_sha256='', build_sha256='', inspection_sha256='')
     monkeypatch.setattr(identity, 'verify_build', lambda *a, **kw: binding)
     monkeypatch.setattr(identity, 'read', lambda *a: prepared)
     monkeypatch.setattr(identity, 'sha', lambda *a: 'hash')
     monkeypatch.setattr(identity, 'runtime_identity', lambda *a: dict(version='', prefix='', fields={}, modules={}, libraries={}))
-    calls, read_calls = [], []
+    calls, read_calls, cancel_reads = [], [], []
     output = io.BytesIO()
     monkeypatch.setattr(helper.sys, 'stdin', NS(fileno=lambda: 90))
     monkeypatch.setattr(helper.sys, 'stdout', NS(buffer=output))
     monkeypatch.setattr(helper.os, 'set_blocking', lambda *a: None)
     def receive(*args):
         read_calls.append(True)
-        if len(read_calls) == 1 or duplicate:
+        if len(read_calls) == 1 or mode == 'duplicate':
             return ipc.encode('request', {}, **KEY, seq=0)
+        if mode == 'cancel' and len(output.getvalue().splitlines()) == 3 and not cancel_reads:
+            cancel_reads.append(True)
+            return ipc.encode('cancel', {}, **KEY, seq=1)
         raise BlockingIOError()
     monkeypatch.setattr(helper.os, 'read', receive)
     class Request:
         def __init__(self):
             self.header = NS(stamp=None); self.area = NS(value=0); self.motion = NS(value=0)
             self.interrupt = True; self.ani_path = 'unset'; self.play_timestamp = 1
-    response = object()
+    response = NS(response=NS(header=NS(code=0), state=NS(value=400)))
     def call(request):
         calls.append(request)
         return NS(done=lambda: True, result=lambda: response)
@@ -288,16 +293,96 @@ def test_helper_actual_send_site_uses_old_six_fields_once(tmp_path, monkeypatch,
     def raw(message):
         if message is response: return RAW_RESPONSE
         assert vars(message).keys() == RAW_REQUEST.keys()
-        assert (message.motion.value, message.area.value, message.interrupt, message.play_timestamp, message.ani_path) == (1002, 2, False, 0, '')
-        return RAW_REQUEST
+        cancel = len(calls) == 1 and mode == 'cancel'
+        assert (message.motion.value, message.area.value, message.interrupt, message.play_timestamp, message.ani_path) == (0 if cancel else 1002, 2, cancel, 0, '')
+        return {**RAW_REQUEST, 'motion': {'value': message.motion.value}, 'interrupt': message.interrupt}
     for name, module in {
         'rclpy': NS(init=lambda: None, shutdown=lambda: None, spin_once=lambda *a, **kw: None),
         'rclpy.node': NS(Node=Node), 'rclpy.serialization': NS(serialize_message=lambda value: b'\x01\x02'),
         'rosidl_runtime_py.convert': NS(message_to_ordereddict=raw),
         'aimdk_msgs.srv': NS(SetMcPresetMotion=NS(Request=Request)),
     }.items(): monkeypatch.setitem(sys.modules, name, module)
-    code = helper.run(NS(**KEY))
-    assert code == int(duplicate)
-    assert len(calls) == 1
+    code = helper.run(NS(**KEY, allow_cancel=mode == 'cancel'))
+    assert code == int(mode == 'duplicate')
+    assert len(calls) == (2 if mode == 'cancel' else 1)
     messages = [ipc.decode(line+b'\n', **KEY, seq=n) for n, line in enumerate(output.getvalue().splitlines())]
-    assert [m['kind'] for m in messages] == ['ready', 'sent', 'error' if duplicate else 'response']
+    assert [m['kind'] for m in messages] == (['ready', 'sent', 'error'] if mode == 'duplicate' else
+        ['ready', 'sent', 'response', 'cancel_sent', 'cancel_response'] if mode == 'cancel' else ['ready', 'sent', 'response'])
+
+
+def test_two_step_boundary_requires_wave_ack_and_never_retries_cancel(tmp_path, monkeypatch):
+    b, process, send, records, now = boundary(tmp_path, monkeypatch)
+    b.allow_cancel = True
+    zero = {**RAW_REQUEST, 'motion': {'value': 0}, 'interrupt': True}
+    try:
+        with pytest.raises(RuntimeError): b.request(ipc.CANCEL)
+        b.request(ipc.FIXED)
+        os.read(process.parent_input, ipc.MAX_LINE)
+        with pytest.raises(RuntimeError): b.request(ipc.CANCEL)
+        send('sent', {'message': RAW_REQUEST, 'cdr_hex': '0102'}, 1)
+        send('response', {'message': RAW_RESPONSE, 'cdr_hex': '0304'}, 2)
+        b.poll()
+        b.request(ipc.CANCEL)
+        message = os.read(process.parent_input, ipc.MAX_LINE)
+        assert ipc.decode(message, nonce=b.nonce, run=RUN, probe=PROBE, seq=1)['kind'] == 'cancel'
+        with pytest.raises(RuntimeError): b.request(ipc.CANCEL)
+        send('cancel_sent', {'message': zero, 'cdr_hex': '0506'}, 3)
+        send('cancel_response', {'message': RAW_RESPONSE, 'cdr_hex': '0708'}, 4)
+        assert [v['kind'] for v in b.poll()] == ['cancel_sent', 'cancel_response']
+        assert b.cancel_acknowledged
+        process.returncode = 0
+        assert b.poll() == []
+        with pytest.raises(ValueError):
+            ipc.encode('cancel_sent', {'message': RAW_REQUEST, 'cdr_hex': '0506'}, **KEY, seq=3)
+    finally:
+        b.close()
+        process.release()
+
+
+def test_cancel_ack_timeout_closes_boundary_without_resend(tmp_path, monkeypatch):
+    b, process, send, records, now = boundary(tmp_path, monkeypatch)
+    b.allow_cancel = True
+    try:
+        b.request(ipc.FIXED)
+        send('sent', {'message': RAW_REQUEST, 'cdr_hex': '0102'}, 1)
+        send('response', {'message': RAW_RESPONSE, 'cdr_hex': '0304'}, 2)
+        b.poll()
+        b.request(ipc.CANCEL)
+        now[0] += 2.
+        assert b.poll()[-1]['payload']['error'] == 'preset_cancel_ack_timeout'
+        with pytest.raises(RuntimeError): b.request(ipc.CANCEL)
+        assert b.failed
+    finally:
+        b.close()
+        process.release()
+
+
+def test_fixed_contract_requires_every_official_binary_and_config(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        identity.verify_mc_contract(tmp_path)
+    assert len(identity.MC_CONTRACT) == 6
+    assert identity.DIRECTORY != 'aimdk-preset-v1_0_0'  # Preserve previous evidence workspace.
+
+
+@pytest.mark.parametrize('entry', [runner.main, host.main])
+def test_cancel_probe_cannot_target_other_skills(entry):
+    with pytest.raises(SystemExit) as error:
+        entry(['--execute', '--sim-only', '--output', '/tmp/unused-probe', '--skill', 'HOLD', '--wave-cancel-probe'])
+    assert error.value.code == 2
+
+
+def test_wave_reference_reads_first_and_terminal_separately_and_checks_hash(tmp_path, monkeypatch):
+    from malecns_lab.control.x2_skills import RIGHT_ARM
+    relative = 'mc/bin/mc_param/src/robot/lx2501_3_t2d5/classic/animation/SM_wave_right_hand.csv'
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(','.join(['timeMS'] + ['command_pos::' + k for k in RIGHT_ARM]) + '\n'
+                    + '0,' + ','.join(['0.1'] * len(RIGHT_ARM)) + '\n'
+                    + '4280,' + ','.join(['0.4'] * len(RIGHT_ARM)) + '\n')
+    monkeypatch.setitem(identity.MC_CONTRACT, relative, identity.sha(path))
+    poses = runner.official_wave_poses(tmp_path)
+    assert poses['first'] == dict.fromkeys(RIGHT_ARM, .1)
+    assert poses['terminal'] == dict.fromkeys(RIGHT_ARM, .4)
+    path.write_text(path.read_text().replace('0.4', '0.5'))
+    with pytest.raises(ValueError, match='identity mismatch'):
+        runner.official_wave_poses(tmp_path)

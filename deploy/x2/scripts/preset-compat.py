@@ -3,8 +3,8 @@
 
 Host: PYTHONPATH=src python deploy/x2/scripts/preset-compat.py prepare
 Linux (owned, mounted /workspace; clean shell is launched here):
-  python3 /workspace/aimdk-preset-v1_0_0/preset-compat.py build
-  python3 /workspace/aimdk-preset-v1_0_0/preset-compat.py inspect
+  python3 /workspace/aimdk-preset-v1_0_0-cancel-v2/preset-compat.py build
+  python3 /workspace/aimdk-preset-v1_0_0-cancel-v2/preset-compat.py inspect
 Only the coordinator may run these after engineering acceptance.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import zipfile
 
 # Installed tool snapshot takes precedence only inside the fixed build directory.
 HERE = Path(__file__).resolve()
-if HERE.parent == Path('/workspace/aimdk-preset-v1_0_0'):
+if HERE.parent == Path('/workspace/aimdk-preset-v1_0_0-cancel-v2'):
     sys.path.insert(0, str(HERE.parent / 'tool_src'))
 from malecns_lab.experiments import x2_preset_identity as identity
 from malecns_lab.experiments.x2_preset_compat import isolated_environment
@@ -38,6 +38,7 @@ def prepare():
     for name, digest in identity.EVIDENCE.items():
         if identity.sha(source / name) != digest:
             raise ValueError('Official compatibility evidence mismatch')
+    contract = identity.verify_mc_contract(root.parent)
     root.mkdir(exist_ok=False)
     (root / 'evidence').mkdir()
     for name in (*identity.EVIDENCE, 'source.json'):
@@ -67,7 +68,7 @@ def prepare():
     for name in FILES:
         (tool_dir / name).write_bytes((repo / 'src/malecns_lab/experiments' / name).read_bytes())
     (root / 'preset-compat.py').write_bytes(HERE.read_bytes())
-    prepared = dict(schema=identity.SCHEMA, zip_sha256=identity.ZIP_SHA,
+    prepared = dict(schema=identity.SCHEMA, zip_sha256=identity.ZIP_SHA, mc_contract_sha256=contract,
                     source_files=identity.inventory(destination),
                     tool_files=identity.inventory(root / 'tool_src'),
                     build_script_sha256=identity.sha(root / 'preset-compat.py'),
@@ -120,6 +121,7 @@ def build():
     identity.selected_sources(root)
     if identity.sha(root.parent / identity.MC_LIBRARY) != identity.MC_SHA:
         raise ValueError('MC identity mismatch')
+    identity.verify_mc_contract(root.parent)
     tools = {name: subprocess.check_output([name, '--version'], text=True) for name in ('cmake', 'gcc', 'g++')}
     began = time.monotonic()
     result = subprocess.run(['colcon', '--log-base', str(root / 'log'), 'build',

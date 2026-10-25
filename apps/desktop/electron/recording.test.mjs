@@ -28,10 +28,13 @@ async function fixture(t, options = {}) {
   await writeFile(path.join(root, 'telemetry/batches/000001.json'), JSON.stringify(batch)); await writeFile(path.join(root, 'telemetry/latest.json'), JSON.stringify(batch));
   await writeFile(path.join(root, 'task_requests.jsonl'), JSON.stringify({ run_id: id, session_id: ready.session_id, request_id: 'r1', task: 'GREET', host_received_monotonic: 9.5 }) + '\n');
   await writeFile(path.join(root, 'behavior_events.jsonl'), JSON.stringify({ kind: 'execution', host_monotonic: 10.1, event: { run_id: id, session_id: ready.session_id, request_id: 'r1', execution_id: 'skill-not-neural', received_monotonic: 10.1, raw_feedback: { remote_received_monotonic: 1.2 }, behavior: 'HOLD', status: 'RUNNING' } }) + '\n');
-  let now = 10000000000n;
+  let now = 10000000000n, nonce = 0;
+  const nodeOffset = 70000000000000n;
+  const hostClock = async () => ({ schema: 'malecns_lab.desktop_clock.v1', type: 'clock', run_id: id, clock_id: 'c'.repeat(32), nonce: (++nonce).toString(16).padStart(32, '0'), python_monotonic_ns: now.toString(), node_send_ns: (now + nodeOffset).toString(), node_receive_ns: (now + nodeOffset).toString(), clock_source: { api: 'time.monotonic_ns', implementation: 'fixture_python_clock', monotonic: true, adjustable: false } });
   const context = { root, status: { state: 'running', run_id: id, resources_stopped: false, request_id: 'r1' }, visible: true, loaded: true, loading: false, error: null };
   const errors = [];
-  const capture = new SimulationCapture({ root, recordId: id, sourceRoot, capture: async () => fakeImage(1920, 1080), context: () => context, onFailure: message => errors.push(message), clock: () => now, platform: 'darwin', freeSpace: async () => ({ bavail: 1024 * 1024, bsize: 1024 }), ...options });
+  const capture = new SimulationCapture({ root, recordId: id, sourceRoot, capture: async () => fakeImage(1920, 1080), hostClock, context: () => context, onFailure: message => errors.push(message), clock: () => now + nodeOffset, platform: 'darwin', freeSpace: async () => ({ bavail: 1024 * 1024, bsize: 1024 }), ...options });
+  t.after(() => capture.freeze('test_end'));
   await capture.initialize();
   const session = { schema: 'malecns_lab.desktop_event.v1', run_id: id, resources_stopped: true, state: 'completed' };
   await writeFile(path.join(root, 'desktop_session.json'), JSON.stringify(session));
@@ -43,6 +46,7 @@ test('qualified own-run capture seals bounded real-format frames and host-only i
   assert.equal(f.capture.frames.length, 1); assert.equal(f.capture.frames[0].width, 1280); assert.equal(f.capture.frames[0].height, 720);
   assert.equal(f.capture.frames[0].context.skill_execution_id, 'actual-skill-before-capture');
   assert.equal(f.capture.frames[0].capture_start_host_monotonic_ns, '10000000000');
+  assert.equal(f.capture.frames[0].capture_start_node_ns, '70010000000000');
   await f.capture.seal();
   const archive = await readCaptureArchive(f.root, id, f.session, f.manifest);
   assert.equal(archive.state, 'sealed'); assert.equal(archive.replay.entries.find(e => e.kind === 'execution').skill_execution_id, 'skill-not-neural');
@@ -51,19 +55,49 @@ test('qualified own-run capture seals bounded real-format frames and host-only i
   await assert.rejects(f.capture.initialize(), /EEXIST/);
 });
 
-test('single in-flight capture, hide gap and no catch-up; recovered sampling preserves the gap', async t => {
+test('single in-flight capture records a transient compositor gap without catch-up or fabricated frames', async t => {
   const pending = deferred(); let calls = 0;
-  const f = await fixture(t, { capture: () => { calls++; return pending.promise; } });
+  const f = await fixture(t, { capture: () => { calls++; if (calls === 2) return Promise.reject(new Error('UnknownVizError')); return pending.promise; } });
   const first = f.capture.tick();
   // sample must finish its bounded identity reads before reaching injected capture.
   while (!calls) await new Promise(resolve => setImmediate(resolve));
   await f.capture.tick(); assert.equal(calls, 1);
   pending.resolve(fakeImage()); await first;
-  f.context.visible = false; f.setTime(11000000000n); await f.capture.tick();
-  assert.equal(f.capture.frames.length, 1); assert.equal(f.capture.gap.reason, 'view_hidden');
-  f.context.visible = true; f.setTime(12000000000n); await f.capture.tick();
-  assert.equal(f.capture.gaps.length, 1); assert.equal(f.capture.frames.length, 2); assert.equal(calls, 2);
+  f.setTime(11000000000n); await f.capture.tick();
+  assert.equal(f.capture.frames.length, 1); assert.equal(f.capture.gap.reason, 'snapshot_unavailable');
+  assert.deepEqual(f.errors, []); assert.equal(f.capture.accepting, true);
+  const failureFile = path.join(f.root, 'simulation_capture/sample_failures.jsonl');
+  const failure = JSON.parse(await readFile(failureFile, 'utf8'));
+  assert.equal(failure.reason, 'UnknownVizError'); assert.equal(failure.clock_before.python_monotonic_ns, '11000000000');
+  f.setTime(12000000000n); await f.capture.tick();
+  assert.equal(f.capture.gaps.length, 1); assert.equal(f.capture.frames.length, 2); assert.equal(calls, 3);
+  assert.equal(f.capture.consecutiveFailures, 0); assert.equal(f.capture.gaps[0].end_host_monotonic_ns, '12000000000');
   await f.capture.seal();
+  const archive = await readCaptureArchive(f.root, id, f.session, f.manifest);
+  assert.equal(archive.replay.gaps.length, 1); assert.equal(archive.replay.sample_failures[0].reason, 'UnknownVizError');
+  await writeFile(failureFile, '');
+  await assert.rejects(readCaptureArchive(f.root, id, f.session, f.manifest), /错误记录完整性/);
+});
+
+test('snapshot retries stop at three failures or two seconds; unknown errors and display disconnects never retry', async t => {
+  let calls = 0;
+  const f = await fixture(t, { capture: async () => { calls++; throw new Error('UnknownVizError'); } });
+  for (const time of [10000000000n, 10500000000n, 11000000000n]) { f.setTime(time); await f.capture.tick(); }
+  assert.equal(calls, 3); assert.equal(f.capture.sampleFailures.length, 3); assert.equal(f.errors.length, 1);
+  assert.match(f.errors[0], /恢复达到上限/); await f.capture.tick(); assert.equal(calls, 3);
+  await f.capture.seal(); assert.equal((await readCaptureArchive(f.root, id, f.session, f.manifest)).complete, false);
+  const timed = await fixture(t, { capture: async () => { throw new Error('UnknownVizError'); } });
+  await timed.capture.tick(); timed.setTime(12000000000n); await timed.capture.tick();
+  assert.equal(timed.capture.sampleFailures.length, 1); assert.match(timed.errors[0], /2 秒/);
+  const unknown = await fixture(t, { capture: async () => { throw new Error('new-unclassified-error'); } });
+  await unknown.capture.tick(); assert.equal(unknown.errors[0], 'new-unclassified-error'); assert.equal(unknown.capture.sampleFailures.length, 0);
+  for (const changed of [{ visible: false }, { loaded: false }, { loading: true }, { error: 'VNC disconnected' }]) {
+    const disconnected = await fixture(t); Object.assign(disconnected.context, changed);
+    disconnected.capture.viewChanged(disconnected.context);
+    assert.equal(disconnected.capture.accepting, false); assert.equal(disconnected.errors.length, 1);
+    disconnected.context.visible = true; disconnected.context.loaded = true; disconnected.context.loading = false; disconnected.context.error = null;
+    await disconnected.capture.tick(); assert.equal(disconnected.capture.frames.length, 0);
+  }
 });
 
 test('capture errors send independent stop before freezing; time/frame boundaries never expand', async t => {
@@ -75,9 +109,11 @@ test('capture errors send independent stop before freezing; time/frame boundarie
   const archive = await readCaptureArchive(f.root, id, f.session, f.manifest); assert.equal(archive.state, 'failed'); assert.equal(archive.complete, false);
 });
 
-test('identity changes, empty images, oversized image and disk reserve fail without fabricated frames', async t => {
+test('identity, oversized image and disk reserve fail; repeated empty images reach the bounded failure limit', async t => {
   const changed = await fixture(t); await writeFile(path.join(changed.root, 'brain_ready.json'), JSON.stringify({ ...changed.ready, checkpoint_id: 'other' })); await changed.capture.tick(); assert.equal(changed.capture.frames.length, 0); assert.match(changed.errors[0], /身份/);
-  const empty = await fixture(t, { capture: async () => ({ isEmpty: () => true }) }); await empty.capture.tick(); assert.match(empty.errors[0], /空图/);
+  const empty = await fixture(t, { capture: async () => ({ isEmpty: () => true }) });
+  await empty.capture.tick(); assert.deepEqual(empty.errors, []); assert.equal(empty.capture.frames.length, 0);
+  await empty.capture.tick(); await empty.capture.tick(); assert.match(empty.errors[0], /空图/);
   const large = await fixture(t, { capture: async () => fakeImage(640, 400, Buffer.alloc(CAPTURE_LIMITS.frame_bytes + 1)) }); await large.capture.tick(); assert.match(large.errors[0], /单帧/);
   const low = await fixture(t); low.capture.freeSpace = async () => ({ bavail: 0, bsize: 4096 }); await assert.rejects(low.capture.initialize(), /512 MiB/);
 });
@@ -93,10 +129,10 @@ test('late capture after bounded seal cannot publish a frame or flow into anothe
   const pending = deferred(); let entered = false;
   const f = await fixture(t, { capture: () => { entered = true; return pending.promise; } });
   const work = f.capture.tick(); while (!entered) await new Promise(resolve => setImmediate(resolve));
-  await f.capture.seal('window_close'); assert.equal(f.capture.state, 'incomplete');
+  await f.capture.seal('window_close'); assert.equal(f.capture.state, 'failed'); assert.match(f.capture.error, /1 秒/);
   pending.resolve(fakeImage()); await work;
   assert.equal(f.capture.frames.length, 0); assert.deepEqual(await readdir(path.join(f.root, 'simulation_capture/frames')), []);
-  assert.equal((await readCaptureArchive(f.root, id, f.session, f.manifest)).state, 'incomplete');
+  assert.equal((await readCaptureArchive(f.root, id, f.session, f.manifest)).state, 'failed');
 });
 
 test('summary publication already in IO at seal timeout cannot become a completed archive later', async t => {
@@ -166,7 +202,46 @@ test('renderer cursor selects only previous data, keeps motion-only frames and e
   const source = await readFile(new URL('../src/data.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   const { replayAt } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
-  const replay = { max_frame_age_ns: '1000000000', frames: [{ sequence: 1, capture_end_host_monotonic_ns: '2000000000' }, { sequence: 2, capture_end_host_monotonic_ns: '4500000000' }], gaps: [{ start_host_monotonic_ns: '3000000000', end_host_monotonic_ns: '4000000000' }], entries: [{ kind: 'batch', host_monotonic_ns: '1000000000', sequence: 1 }, { kind: 'frame', host_monotonic_ns: '2000000000', sequence: 1 }, { kind: 'gap_start', host_monotonic_ns: '3000000000' }, { kind: 'frame', host_monotonic_ns: '4500000000', sequence: 2 }, { kind: 'status', host_monotonic_ns: '6000000000' }, { kind: 'batch', host_monotonic_ns: '7000000000', sequence: 2 }] };
+  const replay = { max_frame_age_ns: '1000000000', frames: [{ sequence: 1, capture_start_host_monotonic_ns: '1900000000', capture_end_host_monotonic_ns: '2000000000' }, { sequence: 2, capture_start_host_monotonic_ns: '4400000000', capture_end_host_monotonic_ns: '4500000000' }], gaps: [{ start_host_monotonic_ns: '3000000000', end_host_monotonic_ns: '4000000000' }], entries: [{ kind: 'batch', host_monotonic_ns: '1000000000', sequence: 1 }, { kind: 'frame', host_monotonic_ns: '2000000000', sequence: 1 }, { kind: 'gap_start', host_monotonic_ns: '3000000000' }, { kind: 'frame', host_monotonic_ns: '4500000000', sequence: 2 }, { kind: 'status', host_monotonic_ns: '6000000000' }, { kind: 'batch', host_monotonic_ns: '7000000000', sequence: 2 }] };
   assert.equal(replayAt(replay, 0).frame, null); assert.equal(replayAt(replay, 1).batch, 1);
   assert.equal(replayAt(replay, 2).frame, null); assert.equal(replayAt(replay, 3).frame.sequence, 2); assert.equal(replayAt(replay, 3).batch, 1); assert.equal(replayAt(replay, 3).previousBatch, true); assert.equal(replayAt(replay, 4).frame, null); assert.equal(replayAt(replay, 5).batch, 2);
+});
+
+test('legacy capture remains untouched and degrades to brain-only replay without an offset guess', async t => {
+  const f = await fixture(t); await f.capture.tick(); await f.capture.seal();
+  const manifestPath = path.join(f.root, 'simulation_capture/manifest.json');
+  const old = JSON.parse(await readFile(manifestPath));
+  old.schema = 'malecns_lab.x2_simulation_capture.manifest.v1';
+  old.clock = { domain: 'macos_same_host_monotonic', comparability: 'actual_run_comparison_pending' };
+  await writeFile(manifestPath, JSON.stringify(old));
+  const original = await readFile(path.join(f.root, 'simulation_capture/replay_index.json'));
+  const controller = new ExperimentController(path.dirname(f.root)); controller.recordsRoot = path.dirname(f.root);
+  const record = await controller.openRecord(id);
+  assert.equal(record.capture.state, 'incomplete'); assert.equal(record.capture.replay, null);
+  assert.match(record.capture.reason, /时钟证据/);
+  assert.deepEqual(await controller.readBatch(id, 1), f.batch);
+  assert.deepEqual(await readFile(path.join(f.root, 'simulation_capture/replay_index.json')), original);
+  assert.deepEqual(await readFile(path.join(f.root, 'simulation_capture/frames/000001.jpg')), jpeg);
+});
+
+test('missing or foreign clock evidence never publishes a screenshot; local status stays off the joint axis', async t => {
+  for (const extra of [{ nonce: undefined }, { run_id: 'other-run' }, { clock_id: 'd'.repeat(32) }]) {
+    const f = await fixture(t), clock = f.capture.hostClock;
+    f.capture.hostClock = async () => ({ ...await clock(), ...extra });
+    await f.capture.tick();
+    assert.equal(f.capture.frames.length, 0); assert.match(f.errors[0], /时钟/);
+  }
+  const f = await fixture(t);
+  f.capture.noteStatus({ ...f.context.status, clock_source: 'desktop_local', host_monotonic_ns: 123 });
+  f.capture.noteStatus({ ...f.context.status, clock_source: 'python_runtime', host_clock_id: 'c'.repeat(32), host_monotonic_ns: 9500000000 });
+  await f.capture.tick(); await f.capture.seal();
+  const record = await readCaptureArchive(f.root, id, f.session, f.manifest);
+  assert.equal(record.replay.node_local_events.length, 1);
+  assert.equal(record.replay.node_local_events[0].host_monotonic_ns, undefined);
+  assert.equal(record.replay.entries.filter(e => e.kind === 'desktop_status').length, 1);
+  assert.equal(record.replay.entries.find(e => e.kind === 'desktop_status').host_monotonic_ns, '9500000000');
+  const manifest = JSON.parse(await readFile(path.join(f.root, 'simulation_capture/manifest.json')));
+  delete manifest.clock.initial_sample.nonce;
+  await writeFile(path.join(f.root, 'simulation_capture/manifest.json'), JSON.stringify(manifest));
+  await assert.rejects(readCaptureArchive(f.root, id, f.session, f.manifest), /时钟/);
 });

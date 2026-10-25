@@ -10,7 +10,7 @@ export async function loadAtlas(): Promise<Atlas> {
 }
 export function validManifest(value: TelemetryManifest): boolean {
   const behavior = value.schema === 'malecns_lab.x2_behavior_telemetry_manifest.v1';
-  return (value.schema === 'malecns_lab.x2_telemetry_manifest.v1' || behavior) && (!behavior || (typeof value.session_id === 'string' && typeof value.input_map_id === 'string' && value.spike_source?.includes('X2BehaviorPolicy._step') === true)) && typeof value.run_id === 'string' && typeof value.execution_id === 'string' && Array.isArray(value.groups) && value.groups.length <= 64 && value.groups.every(group => typeof group.id === 'string' && typeof group.name === 'string' && Array.isArray(group.body_ids) && group.body_ids.every(id => typeof id === 'string') && Number.isInteger(group.neuron_count) && group.neuron_count === group.body_ids.length) && Array.isArray(value.selected_neurons) && value.selected_neurons.length <= 32 && value.selected_neurons.every(neuron => typeof neuron.body_id === 'string');
+  return (value.schema === 'malecns_lab.x2_telemetry_manifest.v1' || behavior) && (!behavior || (typeof value.session_id === 'string' && typeof value.input_map_id === 'string' && (value.spike_source?.includes('X2BehaviorPolicy._step') === true || value.spike_source === 'actual same-instance PrefixEngine kernel._advance spikes; precondition from the same base._step; no cache/reconstructed spike stream'))) && typeof value.run_id === 'string' && typeof value.execution_id === 'string' && Array.isArray(value.groups) && value.groups.length <= 64 && value.groups.every(group => typeof group.id === 'string' && typeof group.name === 'string' && Array.isArray(group.body_ids) && group.body_ids.every(id => typeof id === 'string') && Number.isInteger(group.neuron_count) && group.neuron_count === group.body_ids.length) && Array.isArray(value.selected_neurons) && value.selected_neurons.length <= 32 && value.selected_neurons.every(neuron => typeof neuron.body_id === 'string');
 }
 export function validBatch(value: TelemetryBatch, manifest: TelemetryManifest): boolean {
   const ids = new Set(manifest.selected_neurons.map(neuron => neuron.body_id));
@@ -21,7 +21,7 @@ export function validBatch(value: TelemetryBatch, manifest: TelemetryManifest): 
 export function validCapture(capture: CaptureArchive, record: OpenRecord): boolean {
   if (!capture.replay) return ['absent', 'incomplete', 'invalid'].includes(capture.state);
   const replay = capture.replay, identity = replay.identity;
-  return ['sealed', 'failed'].includes(capture.state) && replay.schema === 'malecns_lab.x2_simulation_capture.replay.v1' && replay.clock_domain === 'macos_same_host_monotonic' && identity.record_id === record.id && identity.run_id === record.manifest.run_id && identity.execution_id === record.manifest.execution_id && identity.session_id === record.manifest.session_id && identity.checkpoint_id === record.manifest.checkpoint_id && identity.policy_id === record.manifest.policy_id && identity.input_map_id === record.manifest.input_map_id && Array.isArray(replay.entries) && replay.entries.length <= 10000 && replay.entries.every(entry => typeof entry.host_monotonic_ns === 'string' && /^\d{1,24}$/.test(entry.host_monotonic_ns));
+  return ['sealed', 'failed'].includes(capture.state) && replay.schema === 'malecns_lab.x2_simulation_capture.replay.v2' && replay.clock_domain === 'python_host_monotonic' && replay.clock_protocol === 'python_capture_outer_bounds_v1' && /^[a-f0-9]{32}$/.test(replay.clock_id) && identity.record_id === record.id && identity.run_id === record.manifest.run_id && identity.execution_id === record.manifest.execution_id && identity.session_id === record.manifest.session_id && identity.checkpoint_id === record.manifest.checkpoint_id && identity.policy_id === record.manifest.policy_id && identity.input_map_id === record.manifest.input_map_id && Array.isArray(replay.entries) && replay.entries.length <= 10000 && replay.entries.every(entry => typeof entry.host_monotonic_ns === 'string' && /^\d{1,24}$/.test(entry.host_monotonic_ns));
 }
 export function replayAt(replay: CaptureReplay, index: number): { frame: CaptureFrame | null; batch: number | null; batchEntry: ReplayEntry | null; previousBatch: boolean; cursor: string } {
   const entry = replay.entries[index];
@@ -35,7 +35,9 @@ export function replayAt(replay: CaptureReplay, index: number): { frame: Capture
   let frame: CaptureFrame | null = null;
   for (const item of replay.frames) if (BigInt(item.capture_end_host_monotonic_ns) <= cursor) frame = item;
   const inGap = replay.gaps.some(gap => BigInt(gap.start_host_monotonic_ns) <= cursor && (gap.end_host_monotonic_ns === null || cursor < BigInt(gap.end_host_monotonic_ns)));
-  if (inGap || (frame && cursor - BigInt(frame.capture_end_host_monotonic_ns) > BigInt(replay.max_frame_age_ns))) frame = null;
+  // Age is conservative from the outer interval's earliest bound; completion
+  // remains the latest bound, so an uncertain/future frame is never selected.
+  if (inGap || (frame && cursor - BigInt(frame.capture_start_host_monotonic_ns) > BigInt(replay.max_frame_age_ns))) frame = null;
   return { frame, batch, batchEntry, previousBatch: batch !== null && cursor - batchTime > 2000000000n, cursor: cursor.toString() };
 }
 export function validReplayBatch(value: TelemetryBatch, manifest: TelemetryManifest, selected: ReturnType<typeof replayAt>): boolean {

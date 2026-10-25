@@ -3,20 +3,21 @@ import { randomBytes } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { readVideoArchive } from './video.mjs';
-import { readCaptureArchive, readCapturedFrame, readCapturedBatch } from './recording.mjs';
+import { readCaptureArchive, readCapturedFrame, readCapturedBatch, validateClockSample, CLOCK_SCHEMA, CLOCK_TIMEOUT_MS } from './recording.mjs';
 import { JsonLineReader, MAX_ARCHIVE_BYTES, MAX_MANIFEST_BYTES, STATES, TERMINAL_STATES, readBoundedJson, recordIdAllowed } from './boundaries.mjs';
 
 const EVENT_SCHEMA = 'malecns_lab.desktop_event.v1';
 const TASKS = new Set(['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']);
 export class ExperimentController {
-  constructor(repo, onChange = () => {}, launch = spawn) {
+  constructor(repo, onChange = () => {}, launch = spawn, clock = () => process.hrtime.bigint()) {
     this.repo = repo;
     this.recordsRoot = path.join(repo, 'data/x2_sim/agibot/data/var');
     this.onChange = onChange;
     this.launch = launch;
+    this.clock = clock; this.clockRequests = new Map(); this.hostClockId = null;
     this.child = null;
     this.output = null;
-    this.state = { state: 'idle', message: '未运行', simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: true };
+    this.state = { state: 'idle', mode: 'brain_control', brain_controlled: false, message: '未运行', simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: true };
     this.cached = null; this.lastRead = 0; this.reading = null; this.stderr = '';
   }
   notify() { this.cached = null; this.onChange(this.state); }
@@ -24,7 +25,8 @@ export class ExperimentController {
     if (this.child || !this.state.resources_stopped) throw new Error('上一实验尚未完成资源清理');
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
     this.output = path.join(this.recordsRoot, `desktop-${stamp}-${randomBytes(4).toString('hex')}`);
-    this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', message: '正在准备实验', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
+    this.cancelClockRequests('实验会话已改变'); this.hostClockId = null;
+    this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', mode: 'brain_control', brain_controlled: false, message: '正在准备脑控验证', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
     this.stderr = ''; this.protocolError = null; this.notify();
     const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--output', this.output], {
       cwd: this.repo, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
@@ -32,20 +34,24 @@ export class ExperimentController {
     });
     this.child = child;
     const lines = new JsonLineReader(event => {
+      if (event.type === 'clock' || event.schema === CLOCK_SCHEMA) { this.receiveClock(event); return; }
       if (event.schema !== EVENT_SCHEMA || event.type !== 'status' || !STATES.has(event.state) || event.output !== this.output || typeof event.message !== 'string') throw new Error('实验状态协议无效');
       if (typeof event.simulator_ready !== 'boolean' || typeof event.motion_started !== 'boolean' || typeof event.resources_stopped !== 'boolean' || ![true, false, null].includes(event.stop_confirmed)) throw new Error('实验安全状态无效');
-      this.state = { ...event, message: event.message.slice(0, 2000) }; this.notify();
+      this.state = { ...event, brain_controlled: event.brain_controlled === true, clock_source: /^[a-f0-9]{32}$/.test(event.host_clock_id) && Number.isFinite(event.host_monotonic_ns) && event.host_monotonic_ns >= 0 ? 'python_runtime' : 'desktop_local', message: event.message.slice(0, 2000) }; this.notify();
     }, error => { this.protocolError = error.message; this.stop(); });
     child.stdout.setEncoding('utf8'); child.stdout.on('data', chunk => lines.push(chunk));
     child.stderr.setEncoding('utf8'); child.stderr.on('data', chunk => { this.stderr = `${this.stderr}${chunk}`.slice(-4096); });
     child.stdin.on('error', () => { /* Exit handler records an unexpected broken control pipe. */ });
     child.once('error', error => {
-      this.state = { ...this.state, state: 'failed', message: `无法启动实验：${error.message}`, resources_stopped: true, simulator_ready: false };
+      this.cancelClockRequests('实验进程无法启动');
+      this.state = { ...this.state, brain_controlled: false, state: 'failed', message: `无法启动实验：${error.message}`, resources_stopped: true, simulator_ready: false };
       this.child = null; this.notify();
     });
     child.once('exit', (code, signal) => {
+      this.cancelClockRequests('实验进程已退出');
       this.child = null;
-      if (!TERMINAL_STATES.has(this.state.state)) this.state = { ...this.state, state: 'failed', message: `实验进程意外退出（${signal ?? code}），未收到停车与资源清理确认`, simulator_ready: false, resources_stopped: false, stop_confirmed: this.state.motion_started ? false : null };
+      this.state = { ...this.state, brain_controlled: false };
+      if (!TERMINAL_STATES.has(this.state.state)) this.state = { ...this.state, clock_source: 'desktop_local', state: 'failed', message: `实验进程意外退出（${signal ?? code}），未收到停车与资源清理确认`, simulator_ready: false, resources_stopped: false, stop_confirmed: this.state.motion_started ? false : null };
       this.notify();
     });
     return this.state;
@@ -54,19 +60,45 @@ export class ExperimentController {
     if (!this.child || this.state.state !== 'awaiting_simulation' || this.state.request_pending) throw new Error('实验尚未准备完成');
     this.child.stdin.write(`${JSON.stringify({ command: 'continue' })}\n`);
     // Runtime owns the authoritative transition; reject repeated clicks meanwhile.
-    this.state = { ...this.state, request_pending: true, message: '等待实验启动确认' }; this.notify();
+    this.state = { ...this.state, clock_source: 'desktop_local', request_pending: true, message: '等待实验启动确认' }; this.notify();
     return this.state;
   }
   stop() {
     if (this.child && !TERMINAL_STATES.has(this.state.state) && this.state.state !== 'stopping') {
       this.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);
-      this.state = { ...this.state, state: 'stopping', message: '正在停车并关闭实验资源' }; this.notify();
+      this.cancelClockRequests('实验正在停止');
+      this.state = { ...this.state, clock_source: 'desktop_local', state: 'stopping', message: '正在停车并关闭实验资源' }; this.notify();
     }
     return this.state;
   }
+  sampleHostClock() {
+    if (!this.child || this.state.state !== 'running' || this.clockRequests.size >= 4) return Promise.reject(new Error('主机时钟暂不可用'));
+    const nonce = randomBytes(16).toString('hex'), runId = path.basename(this.output), sent = this.clock().toString();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.clockRequests.delete(nonce); reject(new Error('主机时钟应答超时')); }, CLOCK_TIMEOUT_MS);
+      this.clockRequests.set(nonce, { runId, sent, resolve, reject, timer });
+      try { this.child.stdin.write(`${JSON.stringify({ command: 'clock', run_id: runId, nonce })}\n`); }
+      catch (error) { clearTimeout(timer); this.clockRequests.delete(nonce); reject(error); }
+    });
+  }
+  cancelClockRequests(reason) {
+    for (const request of this.clockRequests.values()) { clearTimeout(request.timer); request.reject(new Error(reason)); }
+    this.clockRequests.clear();
+  }
+  receiveClock(event) {
+    if (!/^[a-f0-9]{32}$/.test(event.nonce)) { this.cancelClockRequests('主机时钟应答缺少 nonce'); return; }
+    const request = this.clockRequests.get(event.nonce);
+    if (!request) return; // Expired/unsolicited replies never establish a clock.
+    clearTimeout(request.timer); this.clockRequests.delete(event.nonce);
+    try {
+      const value = validateClockSample({ ...event, node_send_ns: request.sent, node_receive_ns: this.clock().toString() }, request.runId, this.hostClockId);
+      this.hostClockId = value.clock_id; request.resolve(value);
+    } catch (error) { request.reject(error); }
+  }
   task(task) {
     if (typeof task !== 'string' || !TASKS.has(task)) throw new Error('互动任务无效');
-    if (!this.child || this.state.state !== 'running' || this.state.phase === 'initializing') throw new Error('脑模型尚未准备完成');
+    if (!this.child || this.state.state !== 'running' || this.state.mode !== 'brain_control' || this.state.brain_controlled !== true || this.state.phase === 'initializing') throw new Error('脑模型尚未准备完成');
+    // Every ordinary task, including END, enters the model. Emergency stop is separate.
     this.child.stdin.write(`${JSON.stringify({ command: 'task', task })}\n`);
     return this.state;
   }
@@ -86,7 +118,7 @@ export class ExperimentController {
       try {
         const root = await this.recordRoot(entry.name);
         const session = await readBoundedJson(root, 'desktop_session.json');
-        if (session.schema !== EVENT_SCHEMA || !TERMINAL_STATES.has(session.state) || session.resources_stopped !== true) continue;
+        if (session.schema !== EVENT_SCHEMA || !TERMINAL_STATES.has(session.state) || session.resources_stopped !== true || session.mode === 'manual_demo') continue;
         results.push({ id: entry.name, state: session.state, run_id: session.run_id, message: session.message });
       } catch { /* Incomplete, oversized, or unsafe archives are not offered for replay. */ }
     }
@@ -151,10 +183,15 @@ export class ExperimentController {
           summary = await this.optionalJson(this.output, 'telemetry/summary.json');
         } catch (error) { readError = error.message; }
       }
-      // process.hrtime and Python monotonic both use the host monotonic clock on macOS.
-      const hostNow = Number(process.hrtime.bigint());
-      const delayMs = batch && typeof batch.host_monotonic_ns === 'number' ? Math.max(0, (hostNow - batch.host_monotonic_ns) / 1e6) : null;
-      this.cached = { status: this.state, manifest, batch, summary, read_error: readError ?? this.protocolError ?? null, transport_delay_ms: delayMs, received_at_ms: Date.now() };
+      let delayMs = null, clockSample = null;
+      if (batch && Number.isSafeInteger(batch.host_monotonic_ns) && batch.host_monotonic_ns >= 0) {
+        try {
+          clockSample = await this.sampleHostClock();
+          const age = BigInt(clockSample.python_monotonic_ns) - BigInt(batch.host_monotonic_ns);
+          if (age >= 0n) delayMs = Number(age) / 1e6;
+        } catch { /* Unknown clock means unknown age, never zero or a guessed offset. */ }
+      }
+      this.cached = { status: this.state, manifest, batch, summary, read_error: readError ?? this.protocolError ?? null, transport_delay_ms: delayMs, transport_clock: clockSample, received_at_ms: Date.now() };
       this.lastRead = Date.now();
       return this.cached;
     })();

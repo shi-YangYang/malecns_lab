@@ -6,7 +6,14 @@ import { MAX_MANIFEST_BYTES, recordIdAllowed } from './boundaries.mjs';
 
 const PREFIX = 'malecns_lab.x2_simulation_capture.';
 const SEAL_PROTOCOL = 'pending_marker_v1';
+export const CLOCK_DOMAIN = 'python_host_monotonic';
+export const CLOCK_SCHEMA = 'malecns_lab.desktop_clock.v1';
+export const CLOCK_TIMEOUT_MS = 250;
+const CLOCK_PROTOCOL = 'python_capture_outer_bounds_v1';
+const MAX_CAPTURE_INTERVAL_NS = 1000000000n;
 export const CAPTURE_LIMITS = Object.freeze({ interval_ms: 500, duration_ms: 240000, frames: 480, frame_bytes: 512 * 1024, image_bytes: 256 * 1024 * 1024, index_bytes: 4 * 1024 * 1024, free_bytes: 512 * 1024 * 1024, width: 1280, height: 800, jpeg_quality: 70, seal_ms: 2000, max_frame_age_ns: '1000000000' });
+// Separate from the immutable historical limits so old archives remain readable.
+export const CAPTURE_RECOVERY = Object.freeze({ policy: 'bounded_snapshot_gap_v1', capture_timeout_ms: 1000, max_consecutive_failures: 3, max_gap_ms: 2000 });
 const ID_KEYS = ['record_id', 'run_id', 'session_id', 'execution_id', 'checkpoint_id', 'policy_id', 'input_map_id'];
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const encoded = value => Buffer.from(JSON.stringify(value));
@@ -15,6 +22,23 @@ const nonempty = value => typeof value === 'string' && value.length > 0 && value
 const requireValue = (test, message) => { if (!test) throw new Error(message); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sourceNames = ['recording.mjs', 'main.mjs', 'controller.mjs', 'boundaries.mjs', 'preload.cjs'];
+
+export function validateClockSample(value, runId, clockId = null) {
+  requireValue(value?.schema === CLOCK_SCHEMA && value.type === 'clock' && value.run_id === runId && /^[a-f0-9]{32}$/.test(value.nonce) && /^[a-f0-9]{32}$/.test(value.clock_id) && (!clockId || value.clock_id === clockId), '主机时钟应答身份无效');
+  requireValue(value.clock_source?.api === 'time.monotonic_ns' && value.clock_source.monotonic === true && value.clock_source.adjustable === false && nonempty(value.clock_source.implementation), '主机时钟来源无效');
+  requireValue(ns(value.python_monotonic_ns) && ns(value.node_send_ns) && ns(value.node_receive_ns) && BigInt(value.node_receive_ns) >= BigInt(value.node_send_ns) && BigInt(value.node_receive_ns) - BigInt(value.node_send_ns) <= BigInt(CLOCK_TIMEOUT_MS) * 1000000n, '主机时钟往返超时或时间无效');
+  return value;
+}
+
+function validateFrameClock(frame, identity, clockId) {
+  const before = validateClockSample(frame.clock_before, identity.run_id, clockId);
+  const after = validateClockSample(frame.clock_after, identity.run_id, clockId);
+  requireValue(before.nonce !== after.nonce && same(before.clock_source, after.clock_source) && ns(frame.capture_start_node_ns) && ns(frame.capture_end_node_ns)
+    && BigInt(before.node_receive_ns) <= BigInt(frame.capture_start_node_ns) && BigInt(frame.capture_start_node_ns) <= BigInt(frame.capture_end_node_ns)
+    && BigInt(frame.capture_end_node_ns) <= BigInt(after.node_send_ns) && BigInt(after.node_receive_ns) - BigInt(before.node_send_ns) <= MAX_CAPTURE_INTERVAL_NS
+    && frame.capture_start_host_monotonic_ns === before.python_monotonic_ns && frame.capture_end_host_monotonic_ns === after.python_monotonic_ns
+    && BigInt(after.python_monotonic_ns) >= BigInt(before.python_monotonic_ns) && BigInt(after.python_monotonic_ns) - BigInt(before.python_monotonic_ns) <= MAX_CAPTURE_INTERVAL_NS, '截图缺少有效的 Python 外包时间区间');
+}
 
 // Resolve every component, including directories. Unlike realpath containment alone,
 // this also refuses an in-root symlink. O_NOFOLLOW covers a last-component swap.
@@ -83,29 +107,33 @@ function validateBatch(value, identity) {
 }
 
 export class SimulationCapture {
-  constructor({ root, recordId, sourceRoot, capture, context, onFailure, clock = () => process.hrtime.bigint(), platform = process.platform, freeSpace = statfs }) {
-    Object.assign(this, { root, recordId, sourceRoot, capture, context, onFailure, clock, platform, freeSpace });
-    this.folder = path.join(root, 'simulation_capture'); this.generation = 1; this.accepting = false; this.inFlight = null; this.timer = null; this.frames = []; this.gaps = []; this.events = []; this.bytes = 0; this.indexBytes = 0; this.error = null; this.reason = null; this.gap = null; this.skipped = 0; this.state = 'initializing'; this.sealing = null; this.finalized = false;
+  constructor({ root, recordId, sourceRoot, capture, context, onFailure, hostClock, clock = () => process.hrtime.bigint(), platform = process.platform, freeSpace = statfs }) {
+    Object.assign(this, { root, recordId, sourceRoot, capture, context, onFailure, hostClock, clock, platform, freeSpace });
+    this.folder = path.join(root, 'simulation_capture'); this.generation = 1; this.accepting = false; this.inFlight = null; this.timer = null; this.frames = []; this.gaps = []; this.events = []; this.localEvents = []; this.bytes = 0; this.indexBytes = 0; this.error = null; this.reason = null; this.gap = null; this.skipped = 0; this.state = 'initializing'; this.sealing = null; this.finalized = false;
+    this.sampleFailures = []; this.consecutiveFailures = 0; this.recoveryStarted = null; this.recoveryTimer = null;
   }
   async initialize() {
-    requireValue(this.platform === 'darwin', '联合采样当前仅支持同机 macOS 单调时钟');
+    requireValue(this.platform === 'darwin' && typeof this.hostClock === 'function', '联合采样需要同机 Python 主机时钟');
     const verified = await captureIdentity(this.root, this.recordId);
     const available = await this.freeSpace(this.root);
     requireValue(Number(available.bavail) * Number(available.bsize) >= CAPTURE_LIMITS.free_bytes, '采样磁盘预留不足 512 MiB');
     const sources = Object.fromEntries(await Promise.all(sourceNames.map(async name => [name, sha(await safeFile(this.sourceRoot, name, MAX_MANIFEST_BYTES))])));
+    const initial = validateClockSample(await this.hostClock(), this.recordId);
     this.started = this.clock(); this.binding = verified;
-    this.manifest = { schema: PREFIX + 'manifest.v1', ...verified, seal_protocol: SEAL_PROTOCOL, seal_generation: this.generation, media_kind: 'sampled_frames', source: 'novnc_webcontents_snapshot', limits: CAPTURE_LIMITS, source_sha256: sources, started_host_monotonic_ns: this.started.toString(), clock: { domain: 'macos_same_host_monotonic', node_source: 'process.hrtime.bigint', python_source: 'time.monotonic/time.monotonic_ns', comparability: 'same_host_macos_route; actual_run_comparison_pending', existing_number_precision: 'original JSON Number retained; cursor conversion approximate beyond safe integer', pixel_source_timestamp: null, claim: 'host_time_association_only' } };
+    this.manifest = { schema: PREFIX + 'manifest.v2', ...verified, seal_protocol: SEAL_PROTOCOL, seal_generation: this.generation, media_kind: 'sampled_frames', source: 'novnc_webcontents_snapshot', limits: CAPTURE_LIMITS, source_sha256: sources, started_node_ns: this.started.toString(), clock: { domain: CLOCK_DOMAIN, protocol: CLOCK_PROTOCOL, clock_id: initial.clock_id, initial_sample: initial, node_source: 'process.hrtime.bigint', python_source: initial.clock_source, interval: 'Python samples before and after capture; outer bounds, not pixel source time', existing_number_precision: 'original Python JSON Number retained', pixel_source_timestamp: null, claim: 'bounded_host_capture_association_only' } };
+    this.manifest.snapshot_recovery = CAPTURE_RECOVERY;
     await mkdir(this.folder); await mkdir(path.join(this.folder, 'frames'));
     // Durable before any publishable manifest: a late summary alone is never a
     // completed seal. Timeout/crash leaves this marker for every future reader.
     await exclusiveFile(this.folder, 'seal_pending.json', encoded({ schema: PREFIX + 'pending.v1', identity: verified.identity, generation: this.generation }));
     await exclusiveFile(this.folder, 'manifest.json', encoded(this.manifest));
     await exclusiveFile(this.folder, 'frame_index.jsonl', Buffer.alloc(0));
+    await exclusiveFile(this.folder, 'sample_failures.jsonl', Buffer.alloc(0));
     this.accepting = true; this.state = 'recording';
   }
   start() { this.deadlineTimer = setTimeout(() => this.fail('画面采样达到时长上限'), CAPTURE_LIMITS.duration_ms); const loop = async () => { await this.tick(); if (this.accepting) this.timer = setTimeout(loop, CAPTURE_LIMITS.interval_ms); }; void loop(); }
-  status() { return { state: this.state, frames: this.frames.length, reason: this.error ?? this.reason, complete: this.state === 'sealed' && !this.error }; }
-  freeze(reason) { this.accepting = false; this.reason ??= reason; clearTimeout(this.timer); clearTimeout(this.deadlineTimer); }
+  status() { return { state: this.state, frames: this.frames.length, reason: this.error ?? this.gap?.reason ?? this.reason, complete: this.state === 'sealed' && !this.error, sample_failures: this.sampleFailures.length, sampling_gap: this.gap !== null }; }
+  freeze(reason) { this.accepting = false; this.reason ??= reason; clearTimeout(this.timer); clearTimeout(this.deadlineTimer); clearTimeout(this.recoveryTimer); }
   fail(error) {
     if (this.error) return;
     this.error = error instanceof Error ? error.message : String(error); this.state = 'failed';
@@ -114,15 +142,47 @@ export class SimulationCapture {
   }
   viewChanged(state) {
     if (!this.accepting) return;
+    if (state.status.state !== 'running' || state.status.resources_stopped) { this.freeze('control_ended'); return; }
     if (!state.visible || !state.loaded || state.loading || state.error) {
-      this.gap ??= { start_host_monotonic_ns: this.clock().toString(), end_host_monotonic_ns: null, reason: state.error ? 'load_error' : !state.visible ? 'view_hidden' : 'page_loading' };
+      this.openGap(state.error ? 'load_error' : !state.visible ? 'view_hidden' : 'page_loading');
+      this.fail(state.error ?? '仿真视图已隐藏、断开或重载');
     }
+  }
+  async snapshotFailure(error, before, token) {
+    if (!this.accepting || token !== this.generation) return;
+    const state = this.context();
+    requireValue(state.root === this.root && state.status.run_id === this.recordId, '采样运行身份改变');
+    this.viewChanged(state);
+    if (!this.accepting) return;
+    const now = this.clock();
+    if (this.recoveryStarted === null) {
+      this.recoveryStarted = now;
+      this.recoveryTimer = setTimeout(() => this.fail('画面采样缺口超过 2 秒恢复上限'), CAPTURE_RECOVERY.max_gap_ms);
+    }
+    this.consecutiveFailures++; this.skipped++; this.openGap('snapshot_unavailable');
+    const failure = { sequence: this.sampleFailures.length + 1, reason: String(error?.message ?? error).slice(0, 1000),
+      noticed_node_ns: now.toString(), clock_before: before, consecutive: this.consecutiveFailures };
+    this.sampleFailures.push(failure);
+    requireValue(encoded(this.sampleFailures).length <= CAPTURE_LIMITS.index_bytes / 4, '采样错误索引达到上限');
+    const handle = await open(path.join(this.folder, 'sample_failures.jsonl'), constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+    try { await handle.writeFile(JSON.stringify(failure) + '\n'); await handle.sync(); } finally { await handle.close(); }
+    if (!this.accepting || token !== this.generation) return;
+    if (this.consecutiveFailures >= CAPTURE_RECOVERY.max_consecutive_failures || now - this.recoveryStarted >= BigInt(CAPTURE_RECOVERY.max_gap_ms) * 1000000n) this.fail(`画面采样恢复达到上限：${failure.reason}`);
+    // The ordinary 500 ms loop may take the next sample. Never retry in-place,
+    // copy an old image, or claim that a failed snapshot was a disconnection.
+  }
+  openGap(reason) {
+    // Without a fresh Python sample, invalidate conservatively from the last
+    // verified frame; never rename or subtract a Node clock value.
+    this.gap ??= { start_host_monotonic_ns: this.frames.at(-1)?.capture_end_host_monotonic_ns ?? this.manifest.clock.initial_sample.python_monotonic_ns, end_host_monotonic_ns: null, noticed_node_ns: this.clock().toString(), boundary: 'last_verified_python_sample_conservative', reason };
   }
   noteStatus(status) {
     if (!this.accepting) return;
-    const event = { kind: 'desktop_status', host_monotonic_ns: this.clock().toString(), state: status.state, phase: status.phase ?? null, request_id: status.request_id ?? null, behavior: status.behavior ?? null, message: String(status.message ?? '').slice(0, 2000) };
-    this.events.push(event);
-    if (encoded(this.events).length > CAPTURE_LIMITS.index_bytes / 4) this.fail('采样状态索引达到上限');
+    const event = { kind: 'desktop_status', received_node_ns: this.clock().toString(), state: status.state, phase: status.phase ?? null, request_id: status.request_id ?? null, behavior: status.behavior ?? null, message: String(status.message ?? '').slice(0, 2000) };
+    if (status.clock_source === 'python_runtime' && status.host_clock_id === this.manifest.clock.clock_id) {
+      this.events.push({ ...event, host_monotonic_ns: hostTime(status.host_monotonic_ns, 'ns'), original_host_monotonic_ns: status.host_monotonic_ns, host_clock_id: status.host_clock_id });
+    } else this.localEvents.push(event);
+    if (encoded([this.events, this.localEvents]).length > CAPTURE_LIMITS.index_bytes / 4) this.fail('采样状态索引达到上限');
   }
   async tick() {
     if (!this.accepting || this.inFlight) { if (this.inFlight) this.skipped++; return; }
@@ -133,6 +193,7 @@ export class SimulationCapture {
   async sample(token) {
     const now = this.clock();
     if (now - this.started >= BigInt(CAPTURE_LIMITS.duration_ms) * 1000000n || this.frames.length >= CAPTURE_LIMITS.frames) { this.fail('画面采样达到时长或帧数上限'); return; }
+    if (this.recoveryStarted !== null && now - this.recoveryStarted >= BigInt(CAPTURE_RECOVERY.max_gap_ms) * 1000000n) { this.fail('画面采样缺口超过 2 秒恢复上限'); return; }
     const state = this.context();
     requireValue(state.root === this.root && state.status.run_id === this.binding.identity.run_id, '采样运行身份改变');
     if (state.status.state !== 'running' || state.status.resources_stopped) { this.freeze('control_ended'); return; }
@@ -140,18 +201,31 @@ export class SimulationCapture {
     requireValue(same(verified, this.binding), '采样来源身份改变');
     if (!this.accepting || token !== this.generation) return;
     if (!state.visible || !state.loaded || state.loading || state.error) {
-      const reason = state.error ? 'load_error' : !state.visible ? 'view_hidden' : 'page_loading';
-      if (!this.gap) this.gap = { start_host_monotonic_ns: now.toString(), end_host_monotonic_ns: null, reason };
-      this.skipped++; return;
+      this.viewChanged(state); return;
     }
     const latest = await optionalJson(this.root, 'telemetry/latest.json');
     if (latest) validateBatch(latest, this.binding.identity);
-    const start = this.clock();
-    const image = await this.capture();
+    const before = validateClockSample(await this.hostClock(), this.recordId, this.manifest.clock.clock_id);
     if (!this.accepting || token !== this.generation) return;
-    const finish = this.clock(), after = this.context();
+    const start = this.clock();
+    let image, captureTimer;
+    try {
+      image = await Promise.race([this.capture(), new Promise((_, reject) => {
+        captureTimer = setTimeout(() => reject(new Error('画面捕获超过 1 秒上限')), CAPTURE_RECOVERY.capture_timeout_ms);
+      })]);
+    } catch (error) {
+      if (error?.message === 'UnknownVizError') { await this.snapshotFailure(error, before, token); return; }
+      throw error; // Unknown errors and a hung capturer are not retryable.
+    } finally { clearTimeout(captureTimer); }
+    if (!this.accepting || token !== this.generation) return;
+    if (image && image.isEmpty()) { await this.snapshotFailure(new Error('仿真采样得到空图'), before, token); return; }
+    const finish = this.clock();
+    if (this.recoveryStarted !== null && finish - this.recoveryStarted >= BigInt(CAPTURE_RECOVERY.max_gap_ms) * 1000000n) { this.fail('画面采样缺口超过 2 秒恢复上限'); return; }
+    const afterClock = validateClockSample(await this.hostClock(), this.recordId, this.manifest.clock.clock_id);
+    if (!this.accepting || token !== this.generation) return;
+    const after = this.context();
     requireValue(after.root === this.root && after.status.run_id === this.binding.identity.run_id, '采样期间运行身份改变');
-    if (!after.visible || !after.loaded || after.loading || after.error || after.status.state !== 'running') { this.gap ??= { start_host_monotonic_ns: start.toString(), end_host_monotonic_ns: null, reason: 'view_changed_during_capture' }; this.skipped++; return; }
+    if (!after.visible || !after.loaded || after.loading || after.error || after.status.state !== 'running' || after.status.resources_stopped) { this.viewChanged(after); return; }
     requireValue(image && !image.isEmpty(), '仿真采样得到空图');
     const size = image.getSize();
     requireValue(size.width > 0 && size.height > 0, '仿真采样尺寸无效');
@@ -161,7 +235,8 @@ export class SimulationCapture {
     requireValue(Buffer.isBuffer(jpeg) && jpeg.length > 0 && jpeg.length <= CAPTURE_LIMITS.frame_bytes && dimensions.width <= CAPTURE_LIMITS.width && dimensions.height <= CAPTURE_LIMITS.height, '画面采样超过单帧上限');
     requireValue(this.bytes + jpeg.length <= CAPTURE_LIMITS.image_bytes, '画面采样达到图片总上限');
     const sequence = this.frames.length + 1;
-    const frame = { sequence, capture_start_host_monotonic_ns: start.toString(), capture_end_host_monotonic_ns: finish.toString(), width: dimensions.width, height: dimensions.height, bytes: jpeg.length, sha256: sha(jpeg), context: contextOf(state.status, latest), page: { visible: state.visible, loaded: state.loaded, source_freshness: 'unknown_no_pixel_source_timestamp' } };
+    const frame = { sequence, capture_start_host_monotonic_ns: before.python_monotonic_ns, capture_end_host_monotonic_ns: afterClock.python_monotonic_ns, capture_start_node_ns: start.toString(), capture_end_node_ns: finish.toString(), clock_before: before, clock_after: afterClock, width: dimensions.width, height: dimensions.height, bytes: jpeg.length, sha256: sha(jpeg), context: contextOf(state.status, latest), page: { visible: state.visible, loaded: state.loaded, source_freshness: 'unknown_no_pixel_source_timestamp' } };
+    validateFrameClock(frame, this.binding.identity, this.manifest.clock.clock_id);
     const line = Buffer.from(JSON.stringify(frame) + '\n');
     requireValue(this.indexBytes + line.length <= CAPTURE_LIMITS.index_bytes / 2, '画面帧索引达到上限');
     if (!this.accepting || token !== this.generation) return;
@@ -171,7 +246,8 @@ export class SimulationCapture {
     try { await handle.writeFile(line); } finally { await handle.close(); }
     if (token !== this.generation) return;
     this.frames.push(frame); this.bytes += jpeg.length; this.indexBytes += line.length;
-    if (this.gap) { this.gap.end_host_monotonic_ns = finish.toString(); this.gaps.push(this.gap); this.gap = null; }
+    if (this.gap) { this.gap.end_host_monotonic_ns = afterClock.python_monotonic_ns; this.gaps.push(this.gap); this.gap = null; }
+    clearTimeout(this.recoveryTimer); this.recoveryTimer = null; this.recoveryStarted = null; this.consecutiveFailures = 0;
   }
   seal(reason = 'control_ended', deadline = Date.now() + CAPTURE_LIMITS.seal_ms) {
     if (this.sealing) return this.sealing;
@@ -184,15 +260,18 @@ export class SimulationCapture {
     const expire = () => { if (!timedOut) { timedOut = true; this.generation++; this.state = 'incomplete'; this.error ??= '画面封存超过 2 秒，保留未完成档案'; } };
     const work = (async () => {
       if (this.inFlight) await this.inFlight;
-      if (this.gap) { this.gap.end_host_monotonic_ns = this.clock().toString(); this.gaps.push(this.gap); this.gap = null; }
+      if (this.gap) { this.gaps.push(this.gap); this.gap = null; }
       if (!this.manifest || timedOut) return;
-      const replay = await buildReplay(this.root, this.binding.identity, this.frames, this.gaps, this.events);
+      const replay = await buildReplay(this.root, this.binding.identity, this.frames, this.gaps, this.events, this.localEvents, this.manifest.clock);
+      replay.sample_failures = this.sampleFailures;
       if (timedOut) return;
       requireValue(this.indexBytes + encoded(replay).length <= CAPTURE_LIMITS.index_bytes, '画面回放索引超过 4 MiB');
       await exclusiveFile(this.folder, 'replay_index.json', encoded(replay), () => !timedOut);
       if (timedOut) return;
       const complete = !this.error;
-      const result = { schema: PREFIX + 'summary.v1', identity: this.binding.identity, seal_generation: token, state: complete ? 'sealed' : 'failed', complete, reason: this.error ?? this.reason, frame_count: this.frames.length, image_bytes: this.bytes, skipped: this.skipped, ended_host_monotonic_ns: this.clock().toString(), replay_sha256: sha(encoded(replay)), index_sha256: sha(await safeFile(this.folder, 'frame_index.jsonl', CAPTURE_LIMITS.index_bytes)) };
+      const result = { schema: PREFIX + 'summary.v2', identity: this.binding.identity, seal_generation: token, state: complete ? 'sealed' : 'failed', complete, reason: this.error ?? this.reason, frame_count: this.frames.length, image_bytes: this.bytes, skipped: this.skipped, ended_node_ns: this.clock().toString(), replay_sha256: sha(encoded(replay)), index_sha256: sha(await safeFile(this.folder, 'frame_index.jsonl', CAPTURE_LIMITS.index_bytes)) };
+      result.sample_failures_sha256 = sha(await safeFile(this.folder, 'sample_failures.jsonl', CAPTURE_LIMITS.index_bytes / 4));
+      result.sample_failures = this.sampleFailures.length;
       if (timedOut) return;
       await exclusiveFile(this.folder, 'summary.json', encoded(result), () => !timedOut);
       if (timedOut || token !== this.generation) return;
@@ -209,7 +288,7 @@ export class SimulationCapture {
   }
 }
 
-async function buildReplay(root, identity, frames, gaps, desktopEvents) {
+async function buildReplay(root, identity, frames, gaps, desktopEvents, localEvents, clock) {
   const entries = [...desktopEvents];
   for (const frame of frames) entries.push({ kind: 'frame', host_monotonic_ns: frame.capture_end_host_monotonic_ns, sequence: frame.sequence });
   for (const gap of gaps) {
@@ -242,7 +321,7 @@ async function buildReplay(root, identity, frames, gaps, desktopEvents) {
     }
   }
   entries.sort((a, b) => BigInt(a.host_monotonic_ns) < BigInt(b.host_monotonic_ns) ? -1 : BigInt(a.host_monotonic_ns) > BigInt(b.host_monotonic_ns) ? 1 : 0);
-  return { schema: PREFIX + 'replay.v1', identity, clock_domain: 'macos_same_host_monotonic', max_frame_age_ns: CAPTURE_LIMITS.max_frame_age_ns, entries, frames, gaps };
+  return { schema: PREFIX + 'replay.v2', identity, clock_domain: CLOCK_DOMAIN, clock_id: clock.clock_id, clock_protocol: CLOCK_PROTOCOL, max_frame_age_ns: CAPTURE_LIMITS.max_frame_age_ns, entries, frames, gaps, node_local_events: localEvents };
 }
 
 export async function readCaptureArchive(root, id, session, telemetry) {
@@ -251,12 +330,17 @@ export async function readCaptureArchive(root, id, session, telemetry) {
   requireValue(directory.isDirectory() && !directory.isSymbolicLink(), '采样目录不能使用符号链接');
   const folder = path.join(root, 'simulation_capture');
   const manifest = await json(folder, 'manifest.json');
-  requireValue(manifest.schema === PREFIX + 'manifest.v1' && manifest.media_kind === 'sampled_frames' && manifest.source === 'novnc_webcontents_snapshot' && same(manifest.limits, CAPTURE_LIMITS) && manifest.clock?.domain === 'macos_same_host_monotonic', '采样清单或时间域无效');
+  requireValue([PREFIX + 'manifest.v1', PREFIX + 'manifest.v2'].includes(manifest.schema) && manifest.media_kind === 'sampled_frames' && manifest.source === 'novnc_webcontents_snapshot' && same(manifest.limits, CAPTURE_LIMITS), '采样清单无效');
   requireValue(manifest.source_sha256 && sourceNames.every(name => /^[a-f0-9]{64}$/.test(manifest.source_sha256[name])), '采样源码身份缺失');
+  if (manifest.snapshot_recovery !== undefined) requireValue(same(manifest.snapshot_recovery, CAPTURE_RECOVERY), '采样恢复规则不匹配');
   checkIdentity(manifest.identity);
   requireValue(manifest.identity.record_id === id && session.run_id === id && ['run_id','session_id','execution_id','checkpoint_id','policy_id','input_map_id'].every(key => telemetry[key] === manifest.identity[key]), '采样与脑回放身份不匹配');
   const verified = await captureIdentity(root, id);
   requireValue(same(verified.identity, manifest.identity) && same(verified.inputs_sha256, manifest.inputs_sha256) && same(verified.official_assets_sha256, manifest.official_assets_sha256), '采样来源已改变');
+  if (manifest.schema === PREFIX + 'manifest.v1') return { state: 'incomplete', complete: false, reason: '旧画面记录缺少跨进程时钟证据，仅回放脑记录', manifest, replay: null, summary: null };
+  requireValue(manifest.clock?.domain === CLOCK_DOMAIN && manifest.clock.protocol === CLOCK_PROTOCOL, '采样时间域或协议无效');
+  validateClockSample(manifest.clock.initial_sample, id, manifest.clock.clock_id);
+  requireValue(same(manifest.clock.python_source, manifest.clock.initial_sample.clock_source), '采样主机时钟来源不匹配');
   if (manifest.seal_protocol === undefined) return { state: 'incomplete', complete: false, reason: '旧画面档案缺少封存及批次校验信息，仅可回放脑记录', manifest, replay: null, summary: null };
   requireValue(manifest.seal_protocol === SEAL_PROTOCOL && Number.isInteger(manifest.seal_generation) && manifest.seal_generation > 0, '采样封存协议无效');
   const pending = await optionalJson(folder, 'seal_pending.json');
@@ -266,16 +350,33 @@ export async function readCaptureArchive(root, id, session, telemetry) {
   }
   const summary = await optionalJson(folder, 'summary.json');
   if (!summary) return { state: 'incomplete', complete: false, manifest, replay: null, summary: null };
-  requireValue(summary.schema === PREFIX + 'summary.v1' && same(summary.identity, manifest.identity) && summary.seal_generation === manifest.seal_generation && ['sealed','failed'].includes(summary.state) && typeof summary.complete === 'boolean' && summary.complete === (summary.state === 'sealed'), '采样封存状态无效');
+  requireValue(summary.schema === PREFIX + 'summary.v2' && same(summary.identity, manifest.identity) && summary.seal_generation === manifest.seal_generation && ['sealed','failed'].includes(summary.state) && typeof summary.complete === 'boolean' && summary.complete === (summary.state === 'sealed'), '采样封存状态无效');
   const index = await safeFile(folder, 'frame_index.jsonl', CAPTURE_LIMITS.index_bytes);
   const bytes = await safeFile(folder, 'replay_index.json', CAPTURE_LIMITS.index_bytes - index.length);
   requireValue(sha(index) === summary.index_sha256 && sha(bytes) === summary.replay_sha256, '采样索引完整性校验失败');
   const replay = JSON.parse(bytes.toString('utf8'));
-  requireValue(replay.schema === PREFIX + 'replay.v1' && same(replay.identity, manifest.identity) && replay.clock_domain === manifest.clock.domain && replay.max_frame_age_ns === CAPTURE_LIMITS.max_frame_age_ns && Array.isArray(replay.frames) && Array.isArray(replay.entries) && Array.isArray(replay.gaps) && replay.frames.length <= CAPTURE_LIMITS.frames && replay.entries.length <= 10000, '回放索引无效');
+  if (manifest.snapshot_recovery !== undefined) {
+    const failures = await safeFile(folder, 'sample_failures.jsonl', CAPTURE_LIMITS.index_bytes / 4);
+    const rows = failures.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+    requireValue(sha(failures) === summary.sample_failures_sha256 && same(rows, replay.sample_failures) && rows.length === summary.sample_failures, '采样错误记录完整性校验失败');
+    for (const [index, row] of rows.entries()) {
+      requireValue(row.sequence === index + 1 && ns(row.noticed_node_ns) && typeof row.reason === 'string' && row.reason.length <= 1000 && Number.isInteger(row.consecutive) && row.consecutive >= 1 && row.consecutive <= CAPTURE_RECOVERY.max_consecutive_failures, '采样错误记录无效');
+      validateClockSample(row.clock_before, id, manifest.clock.clock_id);
+    }
+  }
+  requireValue(replay.schema === PREFIX + 'replay.v2' && same(replay.identity, manifest.identity) && replay.clock_domain === manifest.clock.domain && replay.clock_id === manifest.clock.clock_id && replay.clock_protocol === CLOCK_PROTOCOL && replay.max_frame_age_ns === CAPTURE_LIMITS.max_frame_age_ns && Array.isArray(replay.frames) && Array.isArray(replay.entries) && Array.isArray(replay.gaps) && Array.isArray(replay.node_local_events) && replay.frames.length <= CAPTURE_LIMITS.frames && replay.entries.length <= 10000, '回放索引无效');
   const indexed = index.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
   requireValue(same(indexed, replay.frames) && indexed.length === summary.frame_count, '帧索引不匹配');
   let total = 0;
+  const nonces = new Set([manifest.clock.initial_sample.nonce]);
+  let lastClock = manifest.clock.initial_sample;
   replay.frames.forEach((frame, i) => {
+    validateFrameClock(frame, manifest.identity, manifest.clock.clock_id);
+    requireValue(!nonces.has(frame.clock_before.nonce) && !nonces.has(frame.clock_after.nonce)
+      && BigInt(frame.clock_before.node_send_ns) >= BigInt(lastClock.node_receive_ns)
+      && BigInt(frame.clock_before.python_monotonic_ns) >= BigInt(lastClock.python_monotonic_ns)
+      && same(frame.clock_before.clock_source, manifest.clock.python_source), '采样时钟重复、倒退或来源改变');
+    nonces.add(frame.clock_before.nonce); nonces.add(frame.clock_after.nonce); lastClock = frame.clock_after;
     requireValue(frame.sequence === i + 1 && ns(frame.capture_start_host_monotonic_ns) && ns(frame.capture_end_host_monotonic_ns) && BigInt(frame.capture_end_host_monotonic_ns) >= BigInt(frame.capture_start_host_monotonic_ns) && Number.isInteger(frame.width) && frame.width > 0 && frame.width <= 1280 && Number.isInteger(frame.height) && frame.height > 0 && frame.height <= 800 && Number.isInteger(frame.bytes) && frame.bytes > 0 && frame.bytes <= CAPTURE_LIMITS.frame_bytes && /^[a-f0-9]{64}$/.test(frame.sha256), '采样帧元数据超界'); total += frame.bytes;
   });
   requireValue(total === summary.image_bytes && total <= CAPTURE_LIMITS.image_bytes, '采样图片总量不匹配');
@@ -288,7 +389,10 @@ export async function readCaptureArchive(root, id, session, telemetry) {
       requireValue(!batchSequences.has(entry.sequence), '回放批次序号重复'); batchSequences.add(entry.sequence);
       await readBoundBatch(root, manifest.identity, entry);
     }
+    if (entry.kind === 'frame') requireValue(replay.frames[entry.sequence - 1]?.capture_end_host_monotonic_ns === entry.host_monotonic_ns, '回放帧游标缺少同域时间绑定');
+    if (entry.kind === 'desktop_status') requireValue(entry.host_clock_id === manifest.clock.clock_id && hostTime(entry.original_host_monotonic_ns, 'ns') === entry.host_monotonic_ns && ns(entry.received_node_ns), '桌面状态时间来源无效');
   }
+  for (const event of replay.node_local_events) requireValue(ns(event.received_node_ns) && event.host_monotonic_ns === undefined, '本地状态不能进入 Python 回放时间轴');
   for (const gap of replay.gaps) requireValue(ns(gap.start_host_monotonic_ns) && (gap.end_host_monotonic_ns === null || (ns(gap.end_host_monotonic_ns) && BigInt(gap.end_host_monotonic_ns) >= BigInt(gap.start_host_monotonic_ns))), '采样空档无效');
   return { state: summary.state, complete: summary.complete, manifest, replay, summary };
 }

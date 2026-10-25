@@ -1,4 +1,4 @@
-"""Old official messages only: one fixed preset request, bounded stdin/stdout IPC."""
+"""Old official messages: fixed wave and optional motion=0 simulation probe."""
 from __future__ import annotations
 import argparse
 import os
@@ -25,7 +25,7 @@ def run(args):
         sys.stdout.buffer.flush()
         seq += 1
 
-    def incoming():
+    def incoming(expected_seq=0):
         try:
             chunk = os.read(sys.stdin.fileno(), MAX_LINE + 1)
         except BlockingIOError:
@@ -41,7 +41,7 @@ def run(args):
         if rest:
             raise ValueError('Duplicate/trailing IPC input')
         buffer.clear()
-        return decode(bytes(line)+b'\n', nonce=args.nonce, run=args.run, probe=args.probe, seq=0)
+        return decode(bytes(line)+b'\n', nonce=args.nonce, run=args.run, probe=args.probe, seq=expected_seq)
 
     try:
         root = identity.LINUX_ROOT
@@ -79,29 +79,48 @@ def run(args):
             rclpy.spin_once(node, timeout_sec=.01)
         if request_message is None or request_message['kind'] != 'request':
             raise ValueError('Missing single request')
-        request = SetMcPresetMotion.Request()
-        request.header.stamp = node.get_clock().now().to_msg()
-        request.area.value, request.motion.value = 2, 1002
-        request.interrupt, request.ani_path, request.play_timestamp = False, '', 0
-        raw = message_to_ordereddict(request)
-        raw_request(raw)
-        cdr_hex = serialize_message(request).hex()
-        future = client.call_async(request)  # The only action send in this process.
-        sent = time.monotonic()
-        emit('sent', dict(message=raw, cdr_hex=cdr_hex))
-        while not future.done() and time.monotonic() - sent < 2.:
-            if incoming() is not None:
-                raise ValueError('Duplicate request')
-            rclpy.spin_once(node, timeout_sec=.005)
-        if not future.done() or time.monotonic() - sent >= 2.:
-            raise TimeoutError('preset_ack_timeout')
-        # Drain once even for an immediately completed fake/real response.
-        if incoming() is not None:
-            raise ValueError('Duplicate request')
-        response = future.result()
-        if response is None:
-            raise ValueError('Empty preset response')
-        emit('response', dict(message=message_to_ordereddict(response), cdr_hex=serialize_message(response).hex()))
+        def send_once(*, cancel=False):
+            request = SetMcPresetMotion.Request()
+            request.header.stamp = node.get_clock().now().to_msg()
+            request.area.value, request.motion.value = 2, 0 if cancel else 1002
+            request.interrupt, request.ani_path, request.play_timestamp = cancel, '', 0
+            raw = message_to_ordereddict(request)
+            raw_request(raw, cancel=cancel)
+            cdr_hex = serialize_message(request).hex()
+            future = client.call_async(request)  # One wave; optionally one zero. No retries.
+            sent = time.monotonic()
+            emit('cancel_sent' if cancel else 'sent', dict(message=raw, cdr_hex=cdr_hex))
+            while not future.done() and time.monotonic() - sent < 2.:
+                if incoming(2 if cancel else 1) is not None:
+                    raise ValueError('Request before previous ACK')
+                rclpy.spin_once(node, timeout_sec=.005)
+            if not future.done() or time.monotonic() - sent >= 2.:
+                raise TimeoutError('preset_cancel_ack_timeout' if cancel else 'preset_ack_timeout')
+            if incoming(2 if cancel else 1) is not None:
+                raise ValueError('Request before previous ACK')
+            response = future.result()
+            if response is None:
+                raise ValueError('Empty preset response')
+            emit('cancel_response' if cancel else 'response',
+                 dict(message=message_to_ordereddict(response), cdr_hex=serialize_message(response).hex()))
+            return response
+
+        response = send_once()
+        if args.allow_cancel:
+            if response.response.header.code != 0 or response.response.state.value != 400:
+                raise ValueError('Wave not accepted; cancellation send disabled')
+            # Keep the same ROS node alive during motion; only the parent that
+            # observed real PLAYING/joint motion may request the second step.
+            while time.monotonic() < started + 35.:
+                message = incoming(1)
+                if message is not None:
+                    if message['kind'] != 'cancel':
+                        raise ValueError('Only one fixed cancellation is allowed')
+                    send_once(cancel=True)
+                    break
+                rclpy.spin_once(node, timeout_sec=.005)
+            else:
+                raise TimeoutError('bounded_cancel_probe_expired')
         return 0
     except BaseException as error:
         try:
@@ -120,6 +139,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('nonce', 'run', 'probe'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--allow-cancel', action='store_true')
     args = parser.parse_args(argv)
     if (not re.fullmatch('[a-f0-9]{32}', args.nonce)
             or not re.fullmatch(r'skills-\d{8}-\d{6}-[a-f0-9]{8,32}', args.run)

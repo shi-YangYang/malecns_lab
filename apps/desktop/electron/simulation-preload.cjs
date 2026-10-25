@@ -25,7 +25,11 @@ function canvas() {
   const nodes = document.querySelectorAll('#noVNC_container canvas');
   if (nodes.length !== 1) throw new Error('视频画布缺失或不唯一');
   const node = nodes[0], rect = node.getBoundingClientRect(), style = getComputedStyle(node);
-  if (!(node instanceof HTMLCanvasElement) || !node.isConnected || node.width < 1 || node.height < 1 || node.width > 1280 || node.height > 800 || rect.width <= 0 || rect.height <= 0 || style.visibility !== 'visible' || style.display === 'none' || document.hidden || !document.documentElement.classList.contains('noVNC_connected')) throw new Error('视频来源未连接或不可见');
+  const facts = { canvas: node instanceof HTMLCanvasElement, attached: node.isConnected,
+    width: node.width, height: node.height, display_width: rect.width, display_height: rect.height,
+    visibility: style.visibility, display: style.display, hidden: document.hidden,
+    connected: document.documentElement.classList.contains('noVNC_connected') };
+  if (!facts.canvas || !facts.attached || facts.width < 1 || facts.height < 1 || facts.width > 1280 || facts.height > 800 || facts.display_width <= 0 || facts.display_height <= 0 || facts.visibility !== 'visible' || facts.display === 'none' || facts.hidden || !facts.connected) throw new Error(`视频来源未连接或不可见：${JSON.stringify(facts)}`);
   return node;
 }
 async function pump(a) {
@@ -94,6 +98,15 @@ function start(message) {
     a.duration = setTimeout(() => fault(a, '视频达到 240 秒上限'), 240000);
   } catch (error) { fault(a, error); }
 }
+ipcRenderer.on('simulation:source-check', (_event, message) => {
+  if (!message || !Number.isInteger(message.generation) || !/^[a-f0-9]{32}$/.test(message.nonce)) return;
+  try {
+    const source = canvas();
+    ipcRenderer.send('simulation:source-status', { ...message, ready: true, width: source.width, height: source.height });
+  } catch (error) {
+    ipcRenderer.send('simulation:source-status', { ...message, ready: false, reason: String(error.message).slice(0, 1000) });
+  }
+});
 ipcRenderer.on('video:command', (_event, message) => {
   if (!message || typeof message !== 'object') return;
   if (message.kind === 'start') { start(message); return; }

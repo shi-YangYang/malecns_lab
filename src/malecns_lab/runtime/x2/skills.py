@@ -19,7 +19,7 @@ import sys
 import time
 
 from . import desktop
-from ...experiments.x2_skills import validate_command_seconds
+from ...experiments.x2_skills import validate_command_seconds, validate_intensity
 
 ROOT = desktop.ROOT
 SKILLS = ("HOLD", "ADVANCE", "TURN_LEFT", "TURN_RIGHT", "WAVE_RIGHT")
@@ -35,14 +35,20 @@ ASSETS = (
 )
 TRANSPORT = desktop.TRANSPORT + ("control/x2_skills.py", "experiments/x2_skills.py",
     "experiments/x2_preset_identity.py", "experiments/x2_preset_compat.py", "experiments/x2_preset_helper.py")
-TIMEOUT_PRESETS = ((80., 240.), (180., 360.))
+TIMEOUT_PRESETS = ((80., 240.), (180., 360.), (300., 480.))
 CLEANUP_RESERVE = 30.
 AFTER_UI_RESERVE = 60.
 
 
 def validate_timeouts(ui_timeout, wall_timeout):
     if (ui_timeout, wall_timeout) not in TIMEOUT_PRESETS:
-        raise ValueError("Use --ui-timeout 80 --wall-timeout 240 or --ui-timeout 180 --wall-timeout 360")
+        raise ValueError("Use ui/wall timeouts 80/240, 180/360, or 300/480 seconds")
+
+
+def validate_skills(skills):
+    if (not skills or len(skills) > 5 or any(skill not in SKILLS for skill in skills)
+            or any(skills.count(skill) > (2 if skill == "ADVANCE" else 1) for skill in skills)):
+        raise ValueError("Request at most five probes; only ADVANCE may repeat, at most twice")
 
 
 @contextmanager
@@ -65,11 +71,13 @@ def output_directory(value):
 
 
 class SkillRuntime(desktop.Runtime):
-    def __init__(self, output, root, commands, emit, *, ui_timeout=80., wall_timeout=240., command_seconds=1.):
+    def __init__(self, output, root, commands, emit, *, ui_timeout=80., wall_timeout=240., command_seconds=1., intensity=1.):
         validate_timeouts(ui_timeout, wall_timeout)
         validate_command_seconds(command_seconds)
+        validate_intensity(intensity)
         self.ui_timeout, self.wall_timeout = float(ui_timeout), float(wall_timeout)
         self.command_seconds = float(command_seconds)
+        self.intensity = float(intensity)
         super().__init__(output, root, commands, emit)
 
     def budget_record(self):
@@ -239,10 +247,11 @@ class SkillRuntime(desktop.Runtime):
             time.sleep(.1)
         raise TimeoutError("Official UI preparation timed out")
 
-    def execute_skills(self, skills, wave_probe, cancel_after):
+    def execute_skills(self, skills, wave_probe, cancel_after, wave_cancel_probe=False):
+        validate_skills(skills)
         self.log_directory=self.output
         outcome={"state":"failed","reason":"startup_incomplete","probes":[],
-                 "command_seconds":self.command_seconds}
+                 "command_seconds":self.command_seconds,"intensity":self.intensity}
         try:
             self.preflight()
             self.prepare_transport()
@@ -258,12 +267,14 @@ class SkillRuntime(desktop.Runtime):
                     "PYTHONPATH="+shlex.quote(self.remote+"/transport_src")+":$PYTHONPATH "
                     "ROS_DOMAIN_ID=47 ROS_LOCALHOST_ONLY=1 python3 -m malecns_lab.experiments.x2_skills "
                     "--execute --sim-only --skill "+skill+" --output "+shlex.quote(remote)+
-                    " --command-seconds "+str(self.command_seconds))
+                    " --command-seconds "+str(self.command_seconds)+" --intensity "+str(self.intensity))
                 if wave_probe:
                     command += " --wave-probe"
+                if wave_cancel_probe:
+                    command += " --wave-cancel-probe"
                 if cancel_after is not None:
                     command += " --cancel-after "+str(cancel_after)
-                self.status("running","正在核验官方技能",skill=skill,command_seconds=self.command_seconds)
+                self.status("running","正在核验官方技能",skill=skill,command_seconds=self.command_seconds,intensity=self.intensity)
                 self.bridge=self.spawn(self.docker+["exec",desktop.CONTAINER,"bash","-lc",command],f"probe-{number:02d}-cli.log")
                 while self.bridge.poll() is None:
                     self.guard()
@@ -327,31 +338,35 @@ def main(argv=None):
     p.add_argument("--output",type=Path)
     p.add_argument("--skill",choices=SKILLS,nargs="+",default=["HOLD"])
     p.add_argument("--wave-probe",action="store_true")
+    p.add_argument("--wave-cancel-probe",action="store_true")
     p.add_argument("--cancel-after",type=float)
     p.add_argument("--command-seconds",type=float,default=1.,help="continuous motion pulse: 1 or 2 seconds; does not alter preset wave playback")
+    p.add_argument("--intensity",type=float,default=1.,help="skill intensity in (0, 1]; continuous velocity uses the existing 0.2 scaling")
     p.add_argument("--ui-timeout",type=float,default=80.)
     p.add_argument("--wall-timeout",type=float,default=240.)
     args=p.parse_args(argv)
     try:
         validate_timeouts(args.ui_timeout, args.wall_timeout)
         validate_command_seconds(args.command_seconds)
+        validate_intensity(args.intensity)
+        validate_skills(args.skill)
     except ValueError as error:
         p.error(str(error))
     if not args.execute:
         print(json.dumps(dict(mode="preview",brain_loaded=False,simulator_started=False,skills=args.skill,
-            command_seconds=args.command_seconds,
+            command_seconds=args.command_seconds,intensity=args.intensity,
             wall_seconds=args.wall_timeout,ui_timeout_seconds=args.ui_timeout,cleanup_reserve_seconds=CLEANUP_RESERVE,
             system_reserve_bytes=desktop.GIB)))
         return 0
     if not args.sim_only or args.output is None or ("WAVE_RIGHT" in args.skill and not args.wave_probe):
         p.error("execute requires --sim-only and a new --output; wave also requires --wave-probe")
-    if len(args.skill)!=len(set(args.skill)) or len(args.skill)>5:
-        p.error("Request each skill at most once per owned simulation")
     if args.cancel_after is not None and not .1 <= args.cancel_after <= 4.:
         p.error("cancel-after must be within .1..4 seconds")
     if "WAVE_RIGHT" in args.skill and (args.skill != ["WAVE_RIGHT"] or args.cancel_after is not None
-            or (args.ui_timeout, args.wall_timeout) != (180., 360.)):
-        p.error("Compatibility trial requires only WAVE_RIGHT, no cancel-after, and budgets 180/360")
+            or (args.ui_timeout, args.wall_timeout) not in ((180., 360.), (300., 480.))):
+        p.error("Compatibility trial requires only WAVE_RIGHT, no cancel-after, and budgets 180/360 or 300/480")
+    if args.wave_cancel_probe and (args.skill != ["WAVE_RIGHT"] or not args.wave_probe):
+        p.error("wave-cancel-probe requires only WAVE_RIGHT and wave-probe")
     directory=output_directory(args.output)
     commands=desktop.Commands(sys.stdin)  # No stdin reader; only signals stop this CLI.
     handlers={sig:signal.signal(sig,lambda sig,frame:commands.request_stop("signal:"+str(sig))) for sig in (signal.SIGINT,signal.SIGTERM)}
@@ -365,7 +380,8 @@ def main(argv=None):
                     stream.flush()
                     print(line,end="",flush=True)
                 result=SkillRuntime(directory,ROOT,commands,emit,ui_timeout=args.ui_timeout,
-                    wall_timeout=args.wall_timeout,command_seconds=args.command_seconds).execute_skills(args.skill,args.wave_probe,args.cancel_after)
+                    wall_timeout=args.wall_timeout,command_seconds=args.command_seconds,intensity=args.intensity).execute_skills(
+                        args.skill,args.wave_probe,args.cancel_after,args.wave_cancel_probe)
         return 0 if result["state"]=="completed" else 1
     finally:
         for sig,handler in handlers.items():

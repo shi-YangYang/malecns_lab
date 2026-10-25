@@ -1,4 +1,4 @@
-"""Nonblocking, single-request boundary to the official old-message process."""
+"""Bounded old-message IPC: one wave, optionally one fixed simulation cancel."""
 from __future__ import annotations
 import json
 import math
@@ -15,6 +15,7 @@ from . import x2_preset_identity as identity
 MAX_LINE = 32768
 MAX_STDERR = 65536
 FIXED = {'motion': 1002, 'area': 2, 'interrupt': False}
+CANCEL = {'motion': 0, 'area': 2, 'interrupt': True}
 SERVICE = '/aimdk_5Fmsgs/srv/SetMcPresetMotion'
 
 
@@ -43,15 +44,15 @@ def stamp(value):
         raise ValueError('Invalid timestamp')
 
 
-def raw_request(value):
+def raw_request(value, *, cancel=False):
     exact(value, ('header', 'area', 'motion', 'interrupt', 'ani_path', 'play_timestamp'))
     exact(value['header'], ('stamp',)); stamp(value['header']['stamp'])
-    for key, number in (('area', 2), ('motion', 1002)):
+    for key, number in (('area', 2), ('motion', 0 if cancel else 1002)):
         exact(value[key], ('value',))
         integer(value[key]['value'])
         if value[key]['value'] != number:
             raise ValueError('Unexpected preset')
-    if value['interrupt'] is not False or value['ani_path'] != '' or type(value['play_timestamp']) is not int or value['play_timestamp'] != 0:
+    if value['interrupt'] is not cancel or value['ani_path'] != '' or type(value['play_timestamp']) is not int or value['play_timestamp'] != 0:
         raise ValueError('Unexpected preset parameters')
 
 
@@ -88,15 +89,18 @@ def decode(line, *, nonce, run, probe, seq):
         if type(value[key]) not in (int, float) or not math.isfinite(value[key]) or value[key] < 0:
             raise ValueError('Invalid local IPC clock')
     payload, kind = value['payload'], value['kind']
-    if kind == 'request':
+    if kind in ('request', 'cancel'):
         exact(payload, ())
     elif kind == 'ready':
         exact(payload, ('binding', 'identity'))
-        exact(payload['binding'], ('schema', 'zip_sha256', 'mc_sha256', 'prepared_sha256', 'build_sha256', 'inspection_sha256'))
+        exact(payload['binding'], ('schema', 'zip_sha256', 'mc_sha256', 'mc_contract_sha256', 'prepared_sha256', 'build_sha256', 'inspection_sha256'))
         exact(payload['identity'], ('version', 'prefix', 'fields', 'modules', 'libraries'))
-    elif kind in ('sent', 'response'):
+    elif kind in ('sent', 'response', 'cancel_sent', 'cancel_response'):
         exact(payload, ('message', 'cdr_hex'))
-        (raw_request if kind == 'sent' else raw_response)(payload['message'])
+        if kind.endswith('sent'):
+            raw_request(payload['message'], cancel=kind == 'cancel_sent')
+        else:
+            raw_response(payload['message'])
         if not isinstance(payload['cdr_hex'], str) or not re.fullmatch(r'(?:[0-9a-f]{2}){1,4096}', payload['cdr_hex']):
             raise ValueError('Invalid serialized message')
     elif kind == 'error':
@@ -116,7 +120,7 @@ def encode(kind, payload, *, nonce, run, probe, seq):
     return line
 
 
-def helper_command(nonce, run, probe):
+def helper_command(nonce, run, probe, *, allow_cancel=False):
     if not re.fullmatch('[a-f0-9]{32}', nonce) or not re.fullmatch(r'skills-\d{8}-\d{6}-[a-f0-9]{8,32}', run) or not re.fullmatch(r'probe-\d{2}-wave_right', probe):
         raise ValueError('Invalid probe identity')
     # Only the already-archived transport source directory is passed as Python
@@ -125,14 +129,14 @@ def helper_command(nonce, run, probe):
     env = isolated_environment()
     env['PYTHONPATH'] = str(transport)
     command = ['/bin/bash', '--noprofile', '--norc', '-ec',
-        'source /opt/ros/humble/setup.bash; source /workspace/aimdk-preset-v1_0_0/install/local_setup.bash; '
+        'source /opt/ros/humble/setup.bash; source ' + str(identity.LINUX_ROOT / 'install/local_setup.bash') + '; '
         'exec /usr/bin/python3 -m malecns_lab.experiments.x2_preset_helper '
-        '--nonce ' + nonce + ' --run ' + run + ' --probe ' + probe]
+        '--nonce ' + nonce + ' --run ' + run + ' --probe ' + probe + (' --allow-cancel' if allow_cancel else '')]
     return command, env
 
 
 class PresetBoundary:
-    def __init__(self, output, record, *, binding, root=identity.LINUX_ROOT, clock=time.monotonic):
+    def __init__(self, output, record, *, binding, root=identity.LINUX_ROOT, clock=time.monotonic, allow_cancel=False):
         self.output, self.record, self.binding, self.root, self.clock = Path(output), record, binding, root, clock
         self.run, self.probe = self.output.parent.name, self.output.name
         self.nonce = secrets.token_hex(16)
@@ -141,6 +145,9 @@ class PresetBoundary:
         self.stderr_size = 0
         self.seq = 0
         self.ready = self.sent = self.acknowledged = self.failed = False
+        self.allow_cancel = bool(allow_cancel)
+        self.cancel_sent = self.cancel_acknowledged = False
+        self.cancel_requested_at = None
         self.requested_at = None
         self.started = clock()
         self.stderr = (self.output / 'preset-helper.stderr').open('xb')
@@ -148,7 +155,7 @@ class PresetBoundary:
     def start(self):
         if self.process is not None:
             raise ValueError('Helper already started')
-        command, env = helper_command(self.nonce, self.run, self.probe)
+        command, env = helper_command(self.nonce, self.run, self.probe, allow_cancel=self.allow_cancel)
         self.process = subprocess.Popen(command, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
         for stream in (self.process.stdout, self.process.stderr, self.process.stdin):
@@ -157,13 +164,24 @@ class PresetBoundary:
                     helper_sha256=identity.sha(Path(__file__).with_name('x2_preset_helper.py')))
 
     def request(self, command):
-        if command != FIXED or not self.ready or self.sent or self.failed:
+        cancel = command == CANCEL
+        if (not self.ready or self.failed or
+                (cancel and (not self.allow_cancel or not self.acknowledged or self.cancel_sent)) or
+                (not cancel and (command != FIXED or self.sent))):
             raise RuntimeError('Preset helper not ready or duplicate/invalid request')
-        line = encode('request', {}, nonce=self.nonce, run=self.run, probe=self.probe, seq=0)
-        self.sent = True  # A partial write is unknown and must never retry.
-        self.requested_at = self.clock()
-        if os.write(self.process.stdin.fileno(), line) != len(line):
-            raise RuntimeError('Partial preset IPC write')
+        line = encode('cancel' if cancel else 'request', {}, nonce=self.nonce,
+                      run=self.run, probe=self.probe, seq=1 if cancel else 0)
+        # A partial write is unknown and must never retry either operation.
+        if cancel:
+            self.cancel_sent, self.cancel_requested_at = True, self.clock()
+        else:
+            self.sent, self.requested_at = True, self.clock()
+        try:
+            if os.write(self.process.stdin.fileno(), line) != len(line):
+                raise RuntimeError('Partial preset IPC write')
+        except (OSError, RuntimeError):
+            self.fail('preset_ipc_write_unknown')
+            raise
         self.record('preset_ipc_tx', message=json.loads(line))
 
     def _ready(self, payload):
@@ -188,6 +206,8 @@ class PresetBoundary:
         now = self.clock()
         if self.sent and not self.acknowledged and now - self.requested_at >= 2.:
             return self.fail('preset_ack_timeout')
+        if self.cancel_sent and not self.cancel_acknowledged and now - self.cancel_requested_at >= 2.:
+            return self.fail('preset_cancel_ack_timeout')
         if not self.ready and now - self.started >= 12.:
             return self.fail('preset_helper_ready_timeout')
         events = []
@@ -214,18 +234,23 @@ class PresetBoundary:
                 self.record('preset_ipc_rx', message=value)
                 if kind == 'error':
                     raise ValueError('Child error: ' + value['payload']['error'])
-                expected = ('ready', 'sent', 'response')[self.seq] if self.seq < 3 else None
-                if kind != expected or (self.seq > 0 and not self.sent):
+                sequence = ('ready', 'sent', 'response', 'cancel_sent', 'cancel_response')
+                expected = sequence[self.seq] if self.seq < len(sequence) else None
+                if (kind != expected or (self.seq > 0 and not self.sent)
+                        or (self.seq > 2 and not self.cancel_sent)):
                     raise ValueError('Unexpected IPC state')
                 if kind == 'ready':
                     self._ready(value['payload'])
                     self.ready = True
                 elif kind == 'response':
                     self.acknowledged = True
+                elif kind == 'cancel_response':
+                    self.cancel_acknowledged = True
                 self.seq += 1
                 events.append(value)
             code = self.process.poll()
-            if code is not None and (code != 0 or not self.acknowledged or self.buffer):
+            complete = self.cancel_acknowledged if self.allow_cancel else self.acknowledged
+            if code is not None and (code != 0 or not complete or self.buffer):
                 raise ValueError('Helper exited without a complete successful exchange: ' + str(code))
             return events
         except (ValueError, OSError, IndexError, TypeError, KeyError) as error:

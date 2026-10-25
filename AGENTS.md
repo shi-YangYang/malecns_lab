@@ -12,7 +12,7 @@ multi_agent: AUTO
 
 ## 当前方向与边界
 
-- 基于完整 MaleCNS 神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。旧 CPU 仿真部署已删除，只保留 GPU 部署。多行为按钮、挥手和现场版本匹配尚未验收；训练与实测按用户要求暂停，不把红目标前进/停止诊断当作主线。
+- 基于完整 MaleCNS 神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。旧 CPU 仿真部署已删除，只保留 GPU 部署。用户已重新授权多行为按钮排障、完整脑短训练及仿真点击验收，范围见当前交接；不把红目标前进/停止诊断当作主线。
 - 脑活动图谱与刺激响应保留；单轴稳向和目标跟随为历史研究，不作为接入 X2 的前置门槛。
 - 保留 Python src layout，以及 apps、deploy、tests、docs、configs、examples 的职责；constitution 存使命，.ai/prompts 存精简交接。旧 specs 已汇总至 history.md，不恢复多文档任务目录。
 - data/、logs/、模型、录像、运行环境和旧 run 的 sources 快照是科研资产；清理文档不授权删除这些资产。

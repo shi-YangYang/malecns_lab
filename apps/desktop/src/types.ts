@@ -20,13 +20,15 @@ export interface TelemetrySummary {
   written_batches: number; dropped_batches: number; errors: string[]; error: string | null;
 }
 export interface ExperimentStatus {
+  mode?: 'manual_demo' | 'brain_control'; brain_controlled?: boolean;
   state: 'idle' | 'preparing' | 'awaiting_simulation' | 'running' | 'stopping' | 'completed' | 'cancelled' | 'failed';
   message: string; run_id?: string | null; simulator_ready: boolean; motion_started: boolean;
   stop_confirmed: boolean | null; resources_stopped: boolean; request_pending?: boolean;
   task?: Task; phase?: string; behavior?: string; reason?: string; qualification_only?: boolean;
+  clock_source?: 'python_runtime' | 'desktop_local'; host_clock_id?: string; host_monotonic_ns?: number;
 }
 export type Task = 'GREET' | 'FACE_LEFT' | 'FACE_RIGHT' | 'SHOW_FORWARD' | 'END_INTERACTION';
-export interface Snapshot { status: ExperimentStatus; manifest: TelemetryManifest | null; batch: TelemetryBatch | null; summary: TelemetrySummary | null; read_error: string | null; simulation_error: string | null; transport_delay_ms: number | null; received_at_ms: number; video?: { state: string; reason: string | null; bytes: number; complete: boolean } | null; capture?: { state: string; reason: string | null; frames: number; complete: boolean } | null }
+export interface Snapshot { status: ExperimentStatus; manifest: TelemetryManifest | null; batch: TelemetryBatch | null; summary: TelemetrySummary | null; read_error: string | null; simulation_error: string | null; transport_delay_ms: number | null; transport_clock?: HostClockSample | null; received_at_ms: number; video?: { state: string; reason: string | null; bytes: number; complete: boolean } | null; capture?: { state: string; reason: string | null; frames: number; complete: boolean } | null }
 export interface RecordEntry { id: string; state: string; run_id: string | null; message: string }
 export interface OpenRecord { id: string; session: ExperimentStatus; manifest: TelemetryManifest; summary: TelemetrySummary | null; sequences: number[]; capture: CaptureArchive; video: VideoArchive }
 export interface WorkbenchAPI {
@@ -41,9 +43,10 @@ export interface WorkbenchAPI {
 declare global { interface Window { workbench?: WorkbenchAPI } }
 
 export interface CaptureIdentity { record_id: string; run_id: string; session_id: string; execution_id: string; checkpoint_id: string; policy_id: string; input_map_id: string; backend: 'sim' }
-export interface CaptureFrame { sequence: number; capture_start_host_monotonic_ns: string; capture_end_host_monotonic_ns: string; width: number; height: number; bytes: number; sha256: string }
+export interface HostClockSample { schema: 'malecns_lab.desktop_clock.v1'; type: 'clock'; run_id: string; clock_id: string; nonce: string; python_monotonic_ns: string; node_send_ns: string; node_receive_ns: string; clock_source: { api: 'time.monotonic_ns'; implementation: string; monotonic: true; adjustable: false } }
+export interface CaptureFrame { sequence: number; capture_start_host_monotonic_ns: string; capture_end_host_monotonic_ns: string; capture_start_node_ns: string; capture_end_node_ns: string; clock_before: HostClockSample; clock_after: HostClockSample; width: number; height: number; bytes: number; sha256: string }
 export interface ReplayEntry { kind: string; host_monotonic_ns: string; sequence?: number; original_host_monotonic_ns?: number; bytes?: number; sha256?: string; task?: string | null; state?: string | null; behavior?: string | null; request_id?: string | null; skill_execution_id?: string | null }
-export interface CaptureReplay { schema: 'malecns_lab.x2_simulation_capture.replay.v1'; identity: CaptureIdentity; clock_domain: 'macos_same_host_monotonic'; max_frame_age_ns: string; entries: ReplayEntry[]; frames: CaptureFrame[]; gaps: { start_host_monotonic_ns: string; end_host_monotonic_ns: string | null; reason: string }[] }
+export interface CaptureReplay { schema: 'malecns_lab.x2_simulation_capture.replay.v2'; identity: CaptureIdentity; clock_domain: 'python_host_monotonic'; clock_id: string; clock_protocol: 'python_capture_outer_bounds_v1'; max_frame_age_ns: string; entries: ReplayEntry[]; frames: CaptureFrame[]; gaps: { start_host_monotonic_ns: string; end_host_monotonic_ns: string | null; reason: string }[]; node_local_events: { received_node_ns: string; state: string }[] }
 export interface CaptureArchive { state: 'absent' | 'sealed' | 'failed' | 'incomplete' | 'invalid'; complete: boolean; reason?: string; manifest: { identity: CaptureIdentity } | null; replay: CaptureReplay | null; summary: { reason: string | null } | null }
 export interface RecordedFrame { sequence: number; identity: CaptureIdentity; frame: CaptureFrame; jpeg_base64: string }
 

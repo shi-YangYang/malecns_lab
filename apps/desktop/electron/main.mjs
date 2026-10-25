@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, session, WebContentsView
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { SimulationVideo, trustedVideo, videoResponse } from './video.mjs';
 import { SimulationCapture } from './recording.mjs';
 import { ExperimentController } from './controller.mjs';
@@ -15,6 +16,7 @@ let documentGeneration = 0, videoInitializing = null, archiveDeadline = null;
 let closePromise = null;
 let captureRoot = null, captureInitializing = null, captureClosing = null, simulationVisible = false, simulationLoading = false;
 let requestedVisible = true;
+let sourceCheck = null;
 let rectangle = { x: 0, y: 62, width: 0, height: 0 };
 let closing = false, quitApproved = false, simulationLoaded = false, simulationError = null;
 protocol.registerSchemesAsPrivileged([{ scheme: 'workbench', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
@@ -64,18 +66,38 @@ function bind(name, fn) { ipcMain.handle(name, (event, ...args) => { trusted(eve
 function captureContext() {
   return { root: controller.output, status: controller.state, visible: simulationVisible, loaded: simulationLoaded, loading: simulationLoading, error: simulationError };
 }
+async function confirmCaptureSource() {
+  updateSimulation();
+  const context = captureContext();
+  if (!context.visible || !context.loaded || context.loading || context.error) throw new Error(context.error ?? '请等待仿真画面可见并连接后再开始');
+  if (sourceCheck) throw new Error('正在检查仿真画面');
+  // Page load is not an RFB/canvas readiness signal. Ask the isolated preload
+  // before starting control; real recording faults still stop an active run.
+  const nonce = randomBytes(16).toString('hex'), generation = documentGeneration;
+  const result = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { sourceCheck = null; reject(new Error('仿真画面检查超时，请确认连接后再开始')); }, 2000);
+    sourceCheck = { nonce, generation, resolve: value => { clearTimeout(timer); sourceCheck = null; resolve(value); } };
+    simulation.webContents.send('simulation:source-check', { nonce, generation });
+  });
+  if (result.ready !== true) throw new Error(`仿真画面尚未就绪：${result.reason}`);
+  updateSimulation();
+  const current = captureContext();
+  if (documentGeneration !== generation || !current.visible || !current.loaded || current.loading || current.error) throw new Error(current.error ?? '仿真画面在检查期间改变，请确认可见并连接后再开始');
+}
 function stopExperiment() {
   const state = controller.stop(); // writes the independent stop request first
   capture?.freeze('independent_stop'); video?.requestStop('independent_stop');
   return state;
 }
 function maintainCapture() {
+  // Action demos have no neural telemetry identity; do not fabricate a paired archive.
+  if (controller.state.mode === 'manual_demo') return;
   if (controller.state.state !== 'running') { capture?.freeze('control_ended'); video?.requestStop('control_ended'); }
   if ((capture || video) && controller.safeToClose && !captureClosing) captureClosing = sealArchives().finally(() => { if (closing) closeWhenSafe(); });
   if (!simulation || captureInitializing || controller.state.state !== 'running' || controller.state.resources_stopped || !simulationVisible || !simulationLoaded || simulationLoading || simulationError || captureRoot === controller.output) return;
   captureRoot = controller.output;
   capture = new SimulationCapture({ root: captureRoot, recordId: path.basename(captureRoot), sourceRoot: fileURLToPath(new URL('./', import.meta.url)).replace(/\/$/, ''),
-    capture: () => simulation.webContents.capturePage(undefined, { stayHidden: true, stayAwake: false }), context: captureContext, onFailure: () => stopExperiment() });
+    capture: () => simulation.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true }), hostClock: () => controller.sampleHostClock(), context: captureContext, onFailure: () => stopExperiment() });
   const active = capture;
   captureClosing = null; archiveDeadline = null;
   video = new SimulationVideo({ root: captureRoot, recordId: path.basename(captureRoot), sourceRoot: fileURLToPath(new URL('./', import.meta.url)).replace(/\/$/, ''), generation: documentGeneration, context: captureContext, send: message => { if (!simulation.webContents.isDestroyed()) simulation.webContents.send('video:command', message); }, onFailure: () => stopExperiment() });
@@ -116,15 +138,17 @@ function createWindow() {
   window = new BrowserWindow({
     width: 1400, height: 880, minWidth: 1100, minHeight: 720,
     backgroundColor: '#0c1119', title: 'MaleCNS Lab', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 20 },
-    webPreferences: { preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: true },
+    webPreferences: { preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false },
   });
+  // Control state must keep updating while the operator uses another window.
+  // Expensive brain rendering still pauses through its visibility handler.
   lockContents(window.webContents);
   window.webContents.on('render-process-gone', () => stopExperiment());
   window.removeMenu();
   const isolated = session.fromPartition('malecns-simulation');
   lockSession(isolated);
   isolated.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !simulationRequestAllowed(details.url) }));
-  simulation = new WebContentsView({ webPreferences: { preload: fileURLToPath(new URL('./simulation-preload.cjs', import.meta.url)), session: isolated, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: true } });
+  simulation = new WebContentsView({ webPreferences: { preload: fileURLToPath(new URL('./simulation-preload.cjs', import.meta.url)), session: isolated, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } });
   lockContents(simulation.webContents);
   simulation.webContents.on('render-process-gone', () => { simulationLoaded = false; simulationError = '仿真画面进程已退出'; simulationLoading = false; stopExperiment(); });
   simulation.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => { if (isMainFrame && code !== -3) { simulationError = `仿真画面无法读取：${description}`; simulationLoading = false; simulationVisible = false; simulation.setVisible(false); capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); } });
@@ -160,7 +184,7 @@ app.whenReady().then(async () => {
   });
   controller = new ExperimentController(repo, closeWhenSafe);
   bind('experiment:prepare', () => { if (closing || captureInitializing || videoInitializing || !controller.safeToClose || (capture && !capture.finalized) || (video && !video.finalized)) throw new Error('正在关闭或封存实验'); capture = null; video = null; captureRoot = null; captureClosing = null; archiveDeadline = null; simulationLoaded = false; simulationLoading = false; return controller.prepare(); });
-  bind('experiment:start', () => controller.continue());
+  bind('experiment:start', async () => { if (controller.state.mode !== 'manual_demo') await confirmCaptureSource(); return controller.continue(); });
   bind('experiment:stop', () => stopExperiment());
   bind('experiment:task', task => controller.task(task));
   bind('experiment:snapshot', async () => { maintainCapture(); return { ...await controller.snapshot(), simulation_error: simulationError, capture: capture?.status() ?? null, video: video?.status() ?? null }; });
@@ -170,6 +194,12 @@ app.whenReady().then(async () => {
   bind('records:batch', (id, sequence, cursorIndex) => controller.readBatch(id, sequence, cursorIndex));
   bind('simulation:bounds', value => { const [width, height] = window.getContentSize(); rectangle = boundedRectangle(value, width, height); simulation.setBounds(rectangle); updateSimulation(); });
   bind('simulation:visible', value => { if (typeof value !== 'boolean') throw new Error('显示状态无效'); requestedVisible = value; updateSimulation(); });
+  ipcMain.on('simulation:source-status', (event, message) => {
+    const pending = sourceCheck;
+    if (!pending || event.sender !== simulation?.webContents || event.senderFrame !== simulation.webContents.mainFrame || event.senderFrame?.url !== SIMULATION_URL || message?.generation !== documentGeneration || message.generation !== pending.generation || message.nonce !== pending.nonce) return;
+    if (typeof message.ready !== 'boolean' || (message.ready === false && (typeof message.reason !== 'string' || message.reason.length > 1000))) return;
+    pending.resolve(message);
+  });
   for (const channel of ['video:event', 'video:clock', 'video:fault']) ipcMain.handle(channel, async (event, message) => {
     if (!trustedVideo(event, simulation?.webContents, message, video?.authorization) || message.generation !== documentGeneration) throw new Error('不允许的视频请求来源');
     const active = video;

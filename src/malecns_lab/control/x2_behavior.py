@@ -56,6 +56,12 @@ class ExecutionStatus(StrEnum):
 
 BEHAVIORS = tuple(Behavior)
 PHASES = tuple(Phase)
+JOINT_READOUT_SCHEMA = "malecns_lab.x2_joint_readout.v1"
+JOINT_READOUT_CLASSES = (
+    "HOLD/FINISH", "ADVANCE/START", "ADVANCE/CONTINUE",
+    "TURN_LEFT/START", "TURN_LEFT/CONTINUE", "TURN_RIGHT/START",
+    "TURN_RIGHT/CONTINUE", "WAVE_RIGHT/START", "WAVE_RIGHT/CONTINUE",
+)
 ACTIVE = frozenset((ExecutionStatus.ACCEPTED, ExecutionStatus.STARTED, ExecutionStatus.RUNNING))
 TERMINAL = frozenset((ExecutionStatus.COMPLETED, ExecutionStatus.CANCELLED, ExecutionStatus.REJECTED,
                       ExecutionStatus.FAILED, ExecutionStatus.UNKNOWN))
@@ -180,6 +186,13 @@ class Decision(Message):
     input_map_id: str
     neural_start_step: int
     neural_end_step: int
+    joint_readout: dict | None = None
+
+    def to_dict(self):
+        value = super().to_dict()
+        if self.joint_readout is None:
+            value.pop("joint_readout")  # Preserve the legacy serialized contract exactly.
+        return value
 
     def __post_init__(self):
         object.__setattr__(self, "behavior", Behavior(self.behavior))
@@ -190,14 +203,60 @@ class Decision(Message):
                 self.state_after_id, self.policy_id, self.checkpoint_id, self.input_map_id)), "Invalid decision identity")
         require(all(type(x) is int and x >= 0 for x in (self.decision_seq, self.observation_seq, self.neural_start_step))
                 and type(self.neural_end_step) is int and self.neural_end_step > self.neural_start_step, "Invalid decision clock")
-        require(len(self.behavior_logits) == 5 and len(self.phase_logits) == 3 and len(self.parameter_raw) == 1
+        require(len(self.parameter_raw) == 1
                 and all(finite(x) for x in self.behavior_logits + self.phase_logits + self.parameter_raw), "Invalid raw heads")
-        require(self.behavior == BEHAVIORS[max(range(5), key=self.behavior_logits.__getitem__)]
-                and self.phase == PHASES[max(range(3), key=self.phase_logits.__getitem__)], "Decoded class differs from raw logits")
+        if self.joint_readout is None:
+            require(len(self.behavior_logits) == 5 and len(self.phase_logits) == 3, "Invalid raw heads")
+            require(self.behavior == BEHAVIORS[max(range(5), key=self.behavior_logits.__getitem__)]
+                    and self.phase == PHASES[max(range(3), key=self.phase_logits.__getitem__)], "Decoded class differs from raw logits")
+        else:
+            self._validate_joint_readout()
         # Stable sigmoid; same contract used by a device readout.
         x = self.parameter_raw[0]
         expected = 1 / (1 + math.exp(-x)) if x >= 0 else math.exp(x) / (1 + math.exp(x))
         require(finite(self.intensity) and 0 <= self.intensity <= 1 and abs(self.intensity-expected) <= 1e-6, "Decoded intensity differs from raw parameter")
+
+    def _validate_joint_readout(self):
+        evidence = self.joint_readout
+        keys = {"schema", "classes", "member_logits", "probabilities", "selected_index",
+                "model_advanced_this_frame", "source_observation_seq", "source_request_id",
+                "source_neural_start", "source_neural_end"}
+        require(isinstance(evidence, dict) and set(evidence) == keys
+                and evidence["schema"] == JOINT_READOUT_SCHEMA, "Invalid joint readout schema")
+        require(not self.behavior_logits and not self.phase_logits and self.parameter_raw == (0.,)
+                and self.intensity == .5, "Joint readout must not fabricate independent heads or learned intensity")
+        require(isinstance(evidence["classes"], (list, tuple))
+                and tuple(evidence["classes"]) == JOINT_READOUT_CLASSES, "Joint classes differ")
+        members, probabilities = evidence["member_logits"], evidence["probabilities"]
+        require(isinstance(members, (list, tuple)) and len(members) == 3
+                and all(isinstance(row, (list, tuple)) and len(row) == 9
+                        and all(finite(x) for x in row) for row in members), "Invalid joint member logits")
+        require(isinstance(probabilities, (list, tuple)) and len(probabilities) == 9
+                and all(finite(x) and 0 <= x <= 1 for x in probabilities), "Invalid joint probabilities")
+        member_probabilities = []
+        for row in members:
+            shifted = [math.exp(x - max(row)) for x in row]
+            total = math.fsum(shifted)
+            member_probabilities.append([x / total for x in shifted])
+        expected = [math.fsum(row[index] for row in member_probabilities) / 3 for index in range(9)]
+        require(all(abs(actual - wanted) <= 1e-6 for actual, wanted in zip(probabilities, expected)),
+                "Joint probabilities differ from equal T1 member softmax")
+        selected = evidence["selected_index"]
+        require(type(selected) is int and 0 <= selected < 9
+                and selected == max(range(9), key=expected.__getitem__)
+                and selected == max(range(9), key=probabilities.__getitem__), "Joint selected index differs")
+        require(f"{self.behavior}/{self.phase}" == JOINT_READOUT_CLASSES[selected], "Decoded joint class differs")
+        advanced, source_seq = evidence["model_advanced_this_frame"], evidence["source_observation_seq"]
+        require(type(advanced) is bool and type(source_seq) is int and source_seq >= 0
+                and ((advanced and source_seq == self.observation_seq)
+                     or (not advanced and source_seq < self.observation_seq)), "Invalid joint consumption clock")
+        require(evidence["source_request_id"] == self.request_id, "Joint source crosses request")
+        require(type(evidence["source_neural_start"]) is int and type(evidence["source_neural_end"]) is int
+                and evidence["source_neural_start"] == self.neural_start_step
+                and evidence["source_neural_end"] == self.neural_end_step, "Joint source neural interval differs")
+        # Normalize JSON/list and in-process/tuple callers without editing their evidence.
+        object.__setattr__(self, "joint_readout", {**evidence, "classes": list(JOINT_READOUT_CLASSES),
+            "member_logits": [list(row) for row in members], "probabilities": list(probabilities)})
 
 
 @dataclass(frozen=True)
@@ -252,11 +311,15 @@ class DecisionGate:
     An admitted START reserves the slot until its attributed execution event.
     No method emits an MC command. Safety protection belongs to the executor.
     """
-    def __init__(self, run_id, session_id, policy_id, checkpoint_id, input_map_id, *, max_age_s=30.):
+    def __init__(self, run_id, session_id, policy_id, checkpoint_id, input_map_id, *, max_age_s=30., sim_wave_profile_id=None):
         require(all(identifier(x) for x in (run_id, session_id, policy_id, checkpoint_id, input_map_id)), "Invalid gate identity")
         require(finite(max_age_s) and max_age_s > 0, "Invalid decision age budget")
         self.run_id, self.session_id = run_id, session_id
         self.identities = (policy_id, checkpoint_id, input_map_id)
+        if sim_wave_profile_id is not None:
+            from .x2_skill_profile import SIM_WAVE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID
+            require(sim_wave_profile_id in (SIM_WAVE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID), "Unknown simulation wave contract")
+        self.sim_wave_profile_id = sim_wave_profile_id
         self.max_age_s = max_age_s
         self.observation = None
         self.last_decision_seq = -1
@@ -336,8 +399,19 @@ class DecisionGate:
             if event.fact == "preset_ack":
                 require(d.behavior == Behavior.WAVE_RIGHT and old == event.status == ExecutionStatus.ACCEPTED
                         and not self.active["preset_ack"], "Duplicate or invalid official preset ACK")
-                require(type(event.raw_feedback.get("task_id")) is int and event.raw_feedback["task_id"] > 0,
-                        "Official preset ACK needs task attribution")
+                task_id = event.raw_feedback.get("task_id")
+                if self.sim_wave_profile_id is not None:
+                    owner = event.mc_request.get("wave_owner", {})
+                    require(event.backend == "sim" and event.mc_request.get("skill_profile_id") == self.sim_wave_profile_id
+                            and owner.get("run_id") == self.run_id and owner.get("session_id") == self.session_id
+                            and owner.get("decision_seq") == origin and owner.get("request_id") == d.request_id
+                            and owner.get("execution_id") == event.execution_id and identifier(owner.get("helper_nonce"))
+                            and event.raw_feedback.get("preset_send_confirmed") is True
+                            and event.raw_feedback.get("query_state") == 400
+                            and type(task_id) is int and 0 <= task_id < 2**64,
+                            "Fixed simulation preset ACK lacks exclusive request evidence")
+                else:
+                    require(type(task_id) is int and task_id > 0, "Official preset ACK needs task attribution")
             elif event.fact == "finish_requested":
                 require(event.finish_decision_seq is not None and old == event.status
                         and event.finish_decision_seq not in self.active["finish_requests"], "Duplicate or invalid finish fact")

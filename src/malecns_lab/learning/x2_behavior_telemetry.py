@@ -19,7 +19,8 @@ def selection_manifest(policy, identity, run_id, session_id):
         input_map_id=policy.encoder.input_map_id,
         observer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         sampler_sha256=hashlib.sha256(Path(base.__file__).read_bytes()).hexdigest(),
-        spike_source='actual X2BehaviorPolicy._step MPSLIF spikes from the unique decision policy instance',
+        spike_source=getattr(policy, 'telemetry_spike_source',
+            'actual X2BehaviorPolicy._step MPSLIF spikes from the unique decision policy instance'),
         execution_id_meaning='neural session execution; individual MC skills are linked by skill_execution_id',
         phase_source='engineering sensory stimulation; no biological task-region attribution')
     return manifest, lookup

@@ -13,11 +13,20 @@ from malecns_lab.control.x2_skills import SkillExecutor, SkillCommand, RIGHT_ARM
 
 
 class Rig:
-    def __init__(self, wave=False, source=SOURCE, initial_yaw=0.):
+    def __init__(self, wave=False, source=SOURCE, initial_yaw=0., contract=False, cancel=False, return_pose=None, qualified=False):
         self.t = 1.
         self.commands, self.presets = [], []
+        from malecns_lab.control.x2_skill_profile import SIM_WAVE_PROFILE_ID, sim_wave_contract
+        if qualified:
+            return_pose = dict.fromkeys(RIGHT_ARM, 0.)
         self.core = SkillExecutor(self.commands.append, self.presets.append, clock=lambda:self.t,
-                                  enabled=("HOLD","ADVANCE","TURN_LEFT","TURN_RIGHT","WAVE_RIGHT"), wave_probe=wave)
+                                  enabled=("HOLD","ADVANCE","TURN_LEFT","TURN_RIGHT","WAVE_RIGHT"), wave_probe=wave,
+                                  wave_contract_probe=contract, wave_cancel_probe=cancel,
+                                  wave_return_pose=return_pose,
+                                  wave_return_reference='official_animation_terminal_frame' if return_pose is not None else None,
+                                  wave_qualification=sim_wave_contract() if qualified else None,
+                                  wave_first_pose=return_pose if qualified else None,
+                                  skill_profile_id=SIM_WAVE_PROFILE_ID if qualified else None)
         self.core.motion.arm()
         self.core.motion.confirm_source_registration()
         self.x = self.y = 0.
@@ -440,3 +449,170 @@ def test_host_cleanup_does_not_stop_unowned_resources(tmp_path):
     r.command = lambda *args, **kwargs: pytest.fail("must not stop or inspect unowned resources")
     r.cleanup()
     assert not r.resources_stopped
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_fixed_version_probe_global_query_and_observed_cancel(cancel):
+    r = Rig(wave=True, contract=True, cancel=cancel)
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit("WAVE_RIGHT")
+    assert not r.core.request_probe_cancel()
+    assert r.core.preset_sent(r.t)
+    assert r.core.preset_ack(0, 0, 400)  # This MC does not assign a normal-wave task ID.
+    r.player, r.joint = 2, .3
+    r.feed()
+    r.core.preset_query(0, 0, 400, received=r.t)
+    r.core.tick()
+    assert r.core.status == "STARTED"
+    assert not r.core.request_probe_cancel()  # Must wait after measured start.
+    if cancel:
+        for _ in range(26):
+            r.feed()
+            r.core.preset_query(0, 0, 400, received=r.t)
+            r.core.tick()
+        assert r.core.request_probe_cancel()
+        assert not r.core.request_probe_cancel()
+        assert r.presets == [dict(motion=1002, area=2, interrupt=False), dict(motion=0, area=2, interrupt=True)]
+        r.player = 3
+        r.feed()  # DDS may arrive before the helper's IPC send-time receipt.
+        r.core.tick()
+        assert r.core.status == 'STARTED' and not r.core.saw_cancel_interrupting
+        assert r.core.preset_cancel_sent(r.t)
+        assert r.core.preset_cancel_ack(0, 72, 400)
+        r.player = 3
+        r.feed()
+        r.core.preset_query(0, 0, 400, received=r.t)  # Global query does not echo cancel task 72.
+        r.core.tick()
+        assert r.core.status == "STARTED"
+    r.player, r.joint = 0, 0.
+    for _ in range(125):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    assert r.core.status == ("CANCELLED" if cancel else "COMPLETED")
+    summary = r.core.summary()
+    assert summary['cancellation_trial_pass'] is cancel
+    assert not summary['wave_cancellation_verified']
+    assert 'global_query_not_task_identity' in summary['attribution']
+
+
+@pytest.mark.parametrize("fault", ["missing_interrupting", "cancel_ack", "tilt", "foreign_motion"])
+def test_cancel_probe_cannot_pass_missing_evidence_or_protection(fault):
+    r = Rig(wave=True, contract=True, cancel=True)
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit("WAVE_RIGHT") and r.core.preset_sent(r.t)
+    assert r.core.preset_ack(0, 0, 400)
+    r.player, r.joint = 2, .3
+    for _ in range(28):
+        r.feed()
+        r.core.preset_query(0, 0, 400, received=r.t)
+        r.core.tick()
+    assert r.core.request_probe_cancel()
+    assert r.core.preset_cancel_sent(r.t)
+    if fault == 'cancel_ack':
+        assert not r.core.preset_cancel_ack(1, 0, 400)
+    else:
+        assert r.core.preset_cancel_ack(0, 0, 400)
+    if fault != 'missing_interrupting':
+        r.player = 3
+        r.feed()
+        r.core.tick()
+    if fault == 'tilt':
+        r.t += .001
+        r.core.update_odom((0.,0.,.65), (math.sin(.3),0.,0.,math.cos(.3)), (0.,0.,0.), (0.,0.,0.), received=r.t)
+        r.core.tick()
+    if fault == 'foreign_motion':
+        r.t += .001
+        r.core.update_mc(SOURCE, "STAND_DEFAULT", 1, 100, player_state=2,
+                        motion="other_animation", area=2, motion_type=1, received=r.t)
+    r.player, r.joint = 0, 0.
+    for _ in range(650):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    assert r.core.status == 'UNKNOWN'
+    assert not r.core.summary()['cancellation_trial_pass']
+    assert not r.core.request_probe_cancel()
+    assert len(r.presets) == 2
+
+
+def test_production_wave_never_accepts_zero_task_or_probe_cancel():
+    r = Rig(wave=True)
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit('WAVE_RIGHT')
+    assert not r.core.preset_ack(0, 0, 400)
+    assert not r.core.request_probe_cancel()
+    assert r.core.status == 'UNKNOWN'
+
+
+def test_failed_global_query_cannot_admit_wave():
+    r = Rig(wave=True, contract=True)
+    assert not r.core.preset_query(7, 0, 1, received=r.t)
+    assert not r.submit('WAVE_RIGHT')
+    assert r.presets == []
+
+
+def test_wave_balance_sway_does_not_satisfy_final_stop():
+    r = Rig(wave=True, contract=True)
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit('WAVE_RIGHT') and r.core.preset_sent(r.t)
+    assert r.core.preset_ack(0, 0, 400)
+    r.player, r.joint, r.x = 2, .3, .029
+    r.feed(speed=.043, wz=.037)
+    r.core.preset_query(0, 0, 400, received=r.t)
+    r.core.tick()
+    assert r.core.status == 'STARTED' and not r.core.motion.failures
+    r.player, r.joint = 0, 0.
+    for _ in range(125):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    assert not r.core.terminal  # 2.9 cm residual translation is not accepted as returned.
+    r.x = .001
+    for _ in range(125):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    assert r.core.status == 'COMPLETED'
+
+
+@pytest.mark.parametrize('x,angle,expected', [(.051, 0., 'wave_translation_limit'),
+    (0., .031, 'wave_yaw_limit')])
+def test_wave_active_envelope_remains_fail_closed(x, angle, expected):
+    r = Rig(wave=True, contract=True)
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit('WAVE_RIGHT') and r.core.preset_sent(r.t)
+    assert r.core.preset_ack(0, 0, 400)
+    r.player, r.joint, r.x, r.a = 2, .3, x, angle
+    r.feed()
+    r.core.preset_query(0, 0, 400, received=r.t)
+    r.core.tick()
+    assert r.core.status == 'UNKNOWN' and r.core.reason == expected
+
+
+def test_wave_returns_to_official_pose_without_overwriting_measured_baseline():
+    r = Rig(wave=True, contract=True, return_pose=dict.fromkeys(RIGHT_ARM, .3))
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.submit('WAVE_RIGHT') and r.core.preset_sent(r.t)
+    assert r.core.preset_ack(0, 0, 400)
+    r.player, r.joint = 2, .6
+    r.feed()
+    r.core.preset_query(0, 0, 400, received=r.t)
+    r.core.tick()
+    r.player, r.joint = 0, 0.
+    for _ in range(125):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    assert not r.core.terminal  # Returning to arbitrary pre-action pose is insufficient.
+    r.joint = .3
+    for _ in range(125):
+        r.feed()
+        r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.tick()
+    summary = r.core.summary()
+    assert summary['status'] == 'COMPLETED'
+    assert summary['joint_return_rad'] == 0.
+    assert summary['joint_baseline_return_rad'] == .3
+    assert summary['joint_excursion_rad'] == .6
+    assert summary['wave_return_reference'] == 'official_animation_terminal_frame'

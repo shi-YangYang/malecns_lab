@@ -1,5 +1,6 @@
 import type { Atlas } from '../../atlas/src/types';
 import { BrainView } from './brain';
+import { LiveStatus, activeStates, canEmergencyStop } from './live-status';
 import { loadAtlas, validBatch, validManifest, validCapture, replayAt, validReplayBatch } from './data';
 import type { ExperimentStatus, OpenRecord, Snapshot, TelemetryBatch, TelemetryManifest, TelemetrySummary, Task } from './types';
 import './style.css';
@@ -15,15 +16,15 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T { return do
 function option(value: string, label: string): HTMLOptionElement { const item = document.createElement('option'); item.value = value; item.textContent = label; return item; }
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
-  <header class="titlebar"><div class="brand">${icon('brain')}<span>MaleCNS <b>Lab</b></span></div><span class="titlebar-divider"></span><span class="workspace-label">实验工作台</span><div class="titlebar-right"><span class="experiment-state" id="experiment-state">未运行</span><button class="tool-button primary" id="prepare">准备验证</button><button class="tool-button" id="start" disabled>开始</button><button class="tool-button stop" id="stop" disabled>紧急停止</button><label class="select-shell record-shell"><span class="sr-only">实验记录</span><select id="record-select" aria-label="实验记录"><option value="">实时</option></select>${icon('arrow')}</label><button class="icon-button" id="refresh-records" aria-label="刷新实验记录" title="刷新记录">${icon('reset')}</button></div></header>
+  <header class="titlebar"><div class="brand">${icon('brain')}<span>MaleCNS <b>Lab</b></span></div><span class="titlebar-divider"></span><span class="workspace-label">脑控验证</span><div class="titlebar-right"><span class="experiment-state" id="experiment-state">未运行</span><button class="tool-button primary" id="prepare" disabled>准备验证</button><button class="tool-button" id="start" disabled>开始</button><button class="tool-button stop" id="stop" disabled>紧急停止</button><label class="select-shell record-shell"><span class="sr-only">实验记录</span><select id="record-select" aria-label="实验记录"><option value="">实时</option></select>${icon('arrow')}</label><button class="icon-button" id="refresh-records" aria-label="刷新实验记录" title="刷新记录">${icon('reset')}</button></div></header>
   <main>
     <div class="notice" id="notice" role="alert" hidden></div>
-    <div class="taskbar" id="taskbar" aria-label="互动任务"><div class="task-buttons"><button class="tool-button" data-task="GREET" disabled>打招呼</button><button class="tool-button" data-task="FACE_LEFT" disabled>向左致意</button><button class="tool-button" data-task="FACE_RIGHT" disabled>向右致意</button><button class="tool-button" data-task="SHOW_FORWARD" disabled>向前展示</button><button class="tool-button" data-task="END_INTERACTION" disabled>结束互动</button></div><span id="behavior-state" role="status">未运行</span></div>
+    <div class="taskbar" id="taskbar" aria-label="互动任务"><div class="task-buttons"><button class="tool-button" data-task="GREET" disabled>打招呼</button><button class="tool-button" data-task="FACE_LEFT" disabled>面向左侧</button><button class="tool-button" data-task="FACE_RIGHT" disabled>面向右侧</button><button class="tool-button" data-task="SHOW_FORWARD" disabled>向前展示</button><button class="tool-button" data-task="END_INTERACTION" disabled>结束互动</button></div><span id="behavior-state" role="status">未运行</span></div>
     <div class="workspace" id="workspace">
       <section class="panel simulation-panel" aria-labelledby="simulation-title">
         <div class="panel-heading"><div class="panel-title">${icon('robot')}<h2 id="simulation-title">X2 仿真</h2></div><div class="panel-actions"><label class="select-shell" id="media-selector" hidden><select id="media-kind" aria-label="回放画面类型"><option value="sample">采样</option><option value="video">视频</option></select></label><button class="tool-button" id="video-play" hidden>播放</button><span class="badge" id="simulation-state">未运行</span></div></div>
         <div class="simulation-notice" id="simulation-notice" hidden>先 Pause、Reset，确认直立暂停后 Run，再点击“开始”。</div>
-        <div class="simulation-stage" id="simulation-stage"><video id="recorded-video" class="recorded-frame" preload="metadata" muted playsinline disablepictureinpicture hidden></video><img id="recorded-frame" class="recorded-frame" alt="本次仿真采样画面" hidden/><div class="empty-simulation" id="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">准备实验后连接仿真</span></div></div>
+        <div class="simulation-stage" id="simulation-stage"><video id="recorded-video" class="recorded-frame" preload="metadata" muted playsinline disablepictureinpicture hidden></video><img id="recorded-frame" class="recorded-frame" alt="本次仿真采样画面" hidden/><div class="empty-simulation" id="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">点击“准备验证”连接</span></div></div>
       </section>
       <div class="splitter" id="splitter" role="separator" aria-label="调整仿真与脑图宽度" aria-orientation="vertical" aria-valuemin="35" aria-valuemax="65" aria-valuenow="48" tabindex="0"><span></span></div>
       <section class="panel brain-panel" aria-labelledby="brain-title">
@@ -45,11 +46,13 @@ let history: TelemetryBatch[] = [], replay: OpenRecord | null = null, replayInde
 let replayFrameSequence: number | null = null, replayPreviousBatch = false, replayCursor: string | null = null;
 let snapshot: Snapshot | null = null, displaySkipped = 0, lastSequence = 0;
 let ratio = 48, disposed = false, pending = false, modeVersion = 0;
+const liveStatus = new LiveStatus();
+let lifecyclePending = false, stopPending = false;
+let pollTimer: ReturnType<typeof setTimeout> | null = null, polling = false, pollRequested = false;
 let lastVisible: boolean | null = null;
 let videoMode = false;
 const recordedVideo = element<HTMLVideoElement>('recorded-video');
 function clearVideo(): void { recordedVideo.pause(); recordedVideo.removeAttribute('src'); recordedVideo.load(); videoMode = false; element<HTMLSelectElement>('media-kind').value = 'sample'; }
-const activeStates = new Set(['preparing', 'awaiting_simulation', 'running', 'stopping']);
 const stateLabels: Record<ExperimentStatus['state'], string> = { idle: '未运行', preparing: '正在准备', awaiting_simulation: '等待仿真启动', running: '实验进行中', stopping: '正在停止', completed: '已完成', cancelled: '已停止', failed: '实验失败' };
 
 function showError(error: unknown): void {
@@ -157,38 +160,43 @@ function drawActivity(): void {
   raster.innerHTML = `<path d="M32 3V69H546" class="chart-grid"/><path d="${marks}" class="spike-mark"/>`;
 }
 function updateStatus(value: ExperimentStatus): void {
+  const controlsPending = pending || stopPending;
   element('media-selector').hidden = !replay?.video.complete;
   element('video-play').hidden = !videoMode;
   element('recorded-video').hidden = !videoMode;
   element('video-play').textContent = recordedVideo.paused ? '播放' : '暂停';
   const behaviorNames: Record<string, string> = { HOLD: '待命', ADVANCE: '前进', TURN_LEFT: '左转', TURN_RIGHT: '右转', WAVE_RIGHT: '挥手' };
-  const phaseNames: Record<string, string> = { computing: '脑正在计算', executing: '正在执行', rejected: '输出被拒绝', waiting_task: '等待任务' };
   element('taskbar').hidden = Boolean(replay);
-  app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => { button.disabled = pending || Boolean(replay) || value.state !== 'running'; });
-  element('behavior-state').textContent = value.state === 'running' ? [value.qualification_only ? '候选验证' : '', phaseNames[value.phase ?? ''] ?? value.message, behaviorNames[value.behavior ?? ''] ?? ''].filter(Boolean).join(' · ') : stateLabels[value.state];
-  element('behavior-state').title = value.reason ?? (value.qualification_only ? '挥手尚未开放；本轮用于收集候选模型的实际证据。' : '');
+  const brainActive = value.mode === 'brain_control' && value.brain_controlled === true;
+  app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => {
+    button.disabled = controlsPending || Boolean(replay) || value.state !== 'running' || !brainActive || value.phase === 'initializing';
+    button.title = '向脑模型提交互动任务';
+  });
+  element('behavior-state').textContent = value.state === 'running' ? [value.message, value.phase === 'executing' ? behaviorNames[value.behavior ?? ''] : ''].filter(Boolean).join(' · ') : stateLabels[value.state];
+  element('behavior-state').title = value.reason ?? '动作由当前候选脑模型选择；此会话用于受保护验证';
   const busy = activeStates.has(value.state);
   const issue = telemetryIssue(value);
   element('experiment-state').textContent = stateLabels[value.state];
   element('experiment-state').title = value.message;
   element('experiment-state').classList.toggle('failed', value.state === 'failed');
-  element<HTMLButtonElement>('prepare').disabled = pending || busy || !value.resources_stopped || Boolean(replay) || !api;
-  element<HTMLButtonElement>('start').disabled = pending || value.state !== 'awaiting_simulation' || Boolean(value.request_pending) || Boolean(replay);
-  element<HTMLButtonElement>('stop').disabled = pending || !busy || value.state === 'stopping';
-  recordSelect.disabled = busy || pending;
+  element<HTMLButtonElement>('prepare').disabled = controlsPending || busy || !value.resources_stopped || Boolean(replay) || !api;
+  element<HTMLButtonElement>('start').disabled = controlsPending || value.state !== 'awaiting_simulation' || Boolean(value.request_pending) || Boolean(replay);
+  element<HTMLButtonElement>('stop').disabled = !canEmergencyStop(value, lifecyclePending, stopPending);
+  recordSelect.disabled = busy || controlsPending;
   element('simulation-notice').hidden = value.state !== 'awaiting_simulation' || Boolean(replay);
   const visible = !replay && !document.hidden;
   if (api && visible !== lastVisible) { lastVisible = visible; void api.setSimulationVisible(visible).catch(showError); }
   element('simulation-state').textContent = videoMode ? '原生视频' : replay ? replay.capture.replay ? '采样回放' : '回放无画面' : value.simulator_ready && !value.resources_stopped ? '实时画面' : stateLabels[value.state];
   element('simulation-message').textContent = replay ? replay.capture.replay ? '此处未采集' : '脑活动回放' : stateLabels[value.state];
-  element('simulation-detail').textContent = replay ? replay.capture.state === 'absent' ? '此记录未归档画面' : replay.capture.replay ? '' : '画面档案不完整' : value.state === 'idle' ? '准备实验后连接仿真' : value.message;
+  element('simulation-detail').textContent = replay ? replay.capture.state === 'absent' ? '此记录未归档画面' : replay.capture.replay ? '' : '画面档案不完整' : value.state === 'idle' ? '点击“准备验证”连接' : value.message;
   const stale = !replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined && snapshot.transport_delay_ms > 2000;
-  element('brain-state').textContent = videoMode ? '视频未对齐' : issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : replay ? replayPreviousBatch ? '上一批' : current ? '回放' : '尚无批次' : current ? busy ? stale ? '等待新批次' : '实时' : '最后一批' : busy ? '等待遥测' : '未运行';
-  element('brain-state').classList.toggle('mint', !issue && !stale && !replay && busy && Boolean(current));
-  element('brain-state').title = videoMode ? '此视频没有经过验证的首帧时间锚点，脑活动不与视频配对。可切回采样查看同次主机时间记录。' : issue || (!replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `最后一批距今 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : replay ? replay.capture.replay ? '同次主机时间关联；像素没有仿真源时间，不代表物理帧同步。' : '已封存真实遥测；未归档画面' : '尚无本次控制脑遥测');
+  const timeUnknown = !replay && current && brainActive && snapshot?.transport_delay_ms == null;
+  element('brain-state').textContent = videoMode ? '视频未对齐' : issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : replay ? replayPreviousBatch ? '上一批' : current ? '回放' : '尚无批次' : current ? brainActive ? timeUnknown ? '时间未知' : stale ? '等待新批次' : '实时' : '最后一批' : brainActive ? '等待遥测' : busy ? '等待脑就绪' : '未运行';
+  element('brain-state').classList.toggle('mint', !issue && !timeUnknown && !stale && !replay && brainActive && Boolean(current));
+  element('brain-state').title = videoMode ? '视频未取得同步时间，脑活动不与视频配对。' : issue || (timeUnknown ? '主机时钟暂不可用，无法确认当前同步状态。' : !replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `主机取时点的批次年龄 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : replay ? replay.capture.replay ? '截图记录于主机时间区间；没有仿真像素源时间。' : '已封存真实遥测；未归档画面' : '尚无本次控制脑遥测');
   for (const id of ['previous-batch', 'next-batch', 'batch-number']) element(id).hidden = !replay || videoMode;
-  element<HTMLButtonElement>('previous-batch').disabled = pending || !replay || replayIndex <= 0;
-  element<HTMLButtonElement>('next-batch').disabled = pending || !replay || replayIndex >= (replay.capture.replay?.entries.length ?? replay.sequences.length) - 1;
+  element<HTMLButtonElement>('previous-batch').disabled = controlsPending || !replay || replayIndex <= 0;
+  element<HTMLButtonElement>('next-batch').disabled = controlsPending || !replay || replayIndex >= (replay.capture.replay?.entries.length ?? replay.sequences.length) - 1;
   if (replay) {
     const count = replay.capture.replay?.entries.length ?? replay.sequences.length;
     element('batch-number').textContent = `${replayIndex + 1}/${count}`;
@@ -204,6 +212,7 @@ function updateStatus(value: ExperimentStatus): void {
   else if (element('notice').textContent === lastStatusNotice) clearError();
   lastStatusNotice = statusNotice;
 }
+function renderStatus(): void { if (liveStatus.current) updateStatus(liveStatus.current); }
 async function refreshRecords(): Promise<void> {
   if (!api) return;
   const records = await api.listRecords();
@@ -213,14 +222,22 @@ async function refreshRecords(): Promise<void> {
   recordSelect.value = selected;
 }
 async function action(kind: 'prepare' | 'start' | 'stop'): Promise<void> {
-  if (!api || pending) return;
-  clearError(); pending = true;
-  if (snapshot) updateStatus(snapshot.status);
+  if (!api || !liveStatus.current || (kind === 'stop' ? !canEmergencyStop(liveStatus.current, lifecyclePending, stopPending) : pending || stopPending)) return;
+  const revision = liveStatus.beginChange();
+  clearError();
+  if (kind === 'stop') stopPending = true;
+  else { pending = true; lifecyclePending = true; }
+  renderStatus();
   try {
     if (kind === 'prepare') { manifest = null; summary = null; current = null; history = []; lastSequence = 0; displaySkipped = 0; brain.setGroups([]); groupSelect.replaceChildren(); groupSelect.disabled = true; element('spike-label').textContent = '神经元脉冲 · 未记录'; drawActivity(); }
-    const status = await api[kind](); updateStatus(status);
+    const status = await api[kind]();
+    if (liveStatus.accept(status, revision)) renderStatus();
   } catch (error) { showError(error); }
-  finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
+  finally {
+    if (kind === 'stop') stopPending = false;
+    else { pending = false; lifecyclePending = false; }
+    renderStatus(); requestPoll();
+  }
 }
 async function showReplay(index: number): Promise<void> {
   if (!api || !replay || videoMode) return;
@@ -249,34 +266,54 @@ async function showReplay(index: number): Promise<void> {
       const sequence = replay.sequences[index], previous = replay.sequences[index - 1] ?? 0;
       if (sequence !== previous + 1) showError(`此处缺少 ${sequence - previous - 1} 批记录，未补造数据。`);
     }
-  } finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
+  } finally { pending = false; renderStatus(); }
+}
+function requestPoll(): void {
+  if (disposed) return;
+  if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; }
+  if (polling) { pollRequested = true; return; }
+  void poll();
 }
 async function poll(): Promise<void> {
   if (disposed) return;
-  if (api && !document.hidden) {
+  polling = true;
+  if (api) {
+    const revision = liveStatus.revision;
     try {
       const next = await api.getSnapshot();
-      const previousState = snapshot?.status.state; snapshot = next;
-      if (!replay) {
+      const previousState = liveStatus.current?.state;
+      if (!liveStatus.accept(next.status, revision)) return;
+      snapshot = next;
+      // Status and emergency controls must update even while the window is hidden.
+      renderStatus();
+      if (!replay && !document.hidden) {
         if (next.manifest) useManifest(next.manifest);
         const previousSummary = summary;
         useSummary(next.summary, next.status.run_id);
         if (next.batch) useBatch(next.batch);
         if (previousSummary?.dropped_batches !== summary?.dropped_batches || previousSummary?.status !== summary?.status) updateDataQuality();
       }
-      updateStatus(next.status);
+      renderStatus();
       if (next.read_error || next.simulation_error) showError([next.read_error, next.simulation_error, next.status.state === 'failed' ? next.status.message : '', telemetryIssue(next.status)].filter(Boolean).join('；'));
       if (previousState !== next.status.state && !activeStates.has(next.status.state)) await refreshRecords();
     } catch (error) { showError(error); }
+    finally { schedulePoll(); }
+  } else schedulePoll();
+}
+function schedulePoll(): void {
+  polling = false;
+  if (!disposed) {
+    pollTimer = setTimeout(() => { pollTimer = null; void poll(); }, pollRequested ? 0 : document.hidden ? 1000 : 250);
   }
-  if (!disposed) setTimeout(() => { void poll(); }, 250);
+  pollRequested = false;
 }
 app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => button.addEventListener('click', async () => {
-  if (!api || pending || replay) return;
-  clearError(); pending = true;
-  try { await api.task(button.dataset.task as Task); }
+  if (!api || pending || stopPending || replay) return;
+  const revision = liveStatus.beginChange();
+  clearError(); pending = true; renderStatus();
+  try { const status = await api.task(button.dataset.task as Task); if (liveStatus.accept(status, revision)) renderStatus(); }
   catch (error) { showError(error); }
-  finally { pending = false; if (snapshot) updateStatus(snapshot.status); }
+  finally { pending = false; renderStatus(); requestPoll(); }
 }));
 for (const kind of ['prepare', 'start', 'stop'] as const) element(kind).addEventListener('click', () => { void action(kind); });
 element('refresh-records').addEventListener('click', () => { void refreshRecords().catch(showError); });
@@ -300,10 +337,10 @@ recordSelect.addEventListener('change', async () => {
     } else if (snapshot?.manifest) { useManifest(snapshot.manifest); useSummary(snapshot.summary, snapshot.status.run_id); if (snapshot.batch) useBatch(snapshot.batch); updateDataQuality(); }
     else { brain.setGroups([]); groupSelect.replaceChildren(); groupSelect.disabled = true; drawActivity(); }
   } catch (error) { showError(error); }
-  finally { pending = false; if (snapshot) updateStatus(snapshot.status); setBounds(); }
+  finally { pending = false; renderStatus(); setBounds(); }
 });
 element('media-kind').addEventListener('change', async () => {
-  if (!replay || pending || (snapshot && activeStates.has(snapshot.status.state))) return;
+  if (!replay || pending || stopPending || (liveStatus.current && activeStates.has(liveStatus.current.state))) return;
   ++modeVersion; recordedVideo.pause();
   videoMode = element<HTMLSelectElement>('media-kind').value === 'video';
   if (videoMode) {
@@ -311,22 +348,22 @@ element('media-kind').addEventListener('change', async () => {
     recordedVideo.src = replay.video.media_url;
     current = null; history = []; drawActivity();
   } else { recordedVideo.removeAttribute('src'); recordedVideo.load(); await showReplay(replayIndex).catch(showError); }
-  if (snapshot) updateStatus(snapshot.status);
+  renderStatus();
 });
 element('video-play').addEventListener('click', () => {
-  if (!videoMode || !replay || (snapshot && activeStates.has(snapshot.status.state))) return;
+  if (!videoMode || !replay || (liveStatus.current && activeStates.has(liveStatus.current.state))) return;
   if (recordedVideo.paused) void recordedVideo.play().catch(showError); else recordedVideo.pause();
 });
 for (const event of ['play', 'pause', 'ended']) recordedVideo.addEventListener(event, () => { element('video-play').textContent = recordedVideo.paused ? '播放' : '暂停'; });
 recordedVideo.addEventListener('error', () => { if (videoMode) { recordedVideo.pause(); showError('视频无法解码或档案校验失败'); } });
-document.addEventListener('visibilitychange', () => { if (document.hidden) recordedVideo.pause(); if (snapshot) updateStatus(snapshot.status); if (!document.hidden) setBounds(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) recordedVideo.pause(); renderStatus(); if (!document.hidden) { setBounds(); requestPoll(); } });
 async function start(): Promise<void> {
   atlas = await loadAtlas(); brain = new BrainView(element('brain'), atlas);
   element('soma-count').textContent = `${atlas.positioned_count.toLocaleString('en-US')} 个`;
   element('reset-view').addEventListener('click', () => brain.reset()); groupSelect.addEventListener('change', drawActivity);
-  window.addEventListener('beforeunload', () => { recordedVideo.pause(); disposed = true; brain.dispose(); });
+  window.addEventListener('beforeunload', () => { recordedVideo.pause(); disposed = true; if (pollTimer !== null) clearTimeout(pollTimer); brain.dispose(); });
   drawActivity();
   if (!api) { element<HTMLButtonElement>('prepare').disabled = true; showError('请在 Electron 桌面应用中使用实验操作。'); return; }
-  await refreshRecords(); setBounds(); void poll();
+  await refreshRecords(); setBounds(); requestPoll();
 }
 start().catch(error => { showError(error); app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach(control => { control.disabled = true; }); });

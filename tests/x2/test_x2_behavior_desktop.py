@@ -196,6 +196,52 @@ def test_worker_phase_fields_do_not_collide_with_coordinator_status_fields():
     assert rows[1][2]['behavior_phase']=='START'
 
 
+def test_worker_rejection_and_final_hold_remain_visible_in_status():
+    runtime=object.__new__(BehaviorRuntime)
+    rows=[]
+    runtime.status=lambda state,message,**fields:rows.append((message,fields))
+    runtime.phase_status({'phase':'rejected','reason':'invalid_hold_phase','task':'SHOW_FORWARD','behavior':'HOLD'})
+    runtime.phase_status({'phase':'rejected','reason':'unavailable_skill','task':'GREET','behavior':'WAVE_RIGHT'})
+    runtime.phase_status({'phase':'waiting_task','reason':'模型选择待命，已确认停稳','task':'SHOW_FORWARD',
+                          'behavior':'HOLD','behavior_phase':'FINISH','decision_seq':11})
+    assert [message for message,_ in rows] == ['模型选择待命，但阶段无效','模型选择的动作尚未开放','模型选择待命，已确认停稳']
+    assert rows[0][1]['reason']=='invalid_hold_phase'
+    assert rows[-1][1]['decision_seq']==11 and rows[-1][1]['behavior']=='HOLD'
+
+
+def test_show_forward_fixed_decision_crosses_both_gates_to_velocity_publisher():
+    """Transport regression only: fixed output is not learned behavior or Sim evidence."""
+    from .test_x2_skill_profile import profile_rig
+    rig=profile_rig()
+    commands=Commands(io.StringIO('{"command":"task","task":"SHOW_FORWARD"}\n'))
+    commands.read()
+    task,_=commands.tasks.get_nowait()
+    hostclock=Clock(10000.)
+    host=ClockExchange('run','session',hostclock)
+    remote=RemoteExchange('run','session',lambda:rig.t)
+    query=host.request(task,'forward-request')
+    packet=remote.observe(query,Feedback(valid=True,age_s=.01,source='official_sim_odom_and_mc',
+                                       standing=True,mc_mode='STAND_DEFAULT'),[])
+    hostclock.value+=.1
+    observation,_=host.accept(packet)
+    host_gate=DecisionGate('run','session','policy','checkpoint','input')
+    host_gate.observe(observation)
+    bad=decision(observation,behavior='HOLD',phase='CONTINUE')
+    assert host_gate.admit(bad,hostclock()).reason=='invalid_hold_phase'
+    chosen=decision(observation,sequence=2,behavior='ADVANCE',phase='START')
+    assert host_gate.admit(chosen,hostclock()).accepted
+    received,remote_observation,_=remote.consume(dict(schema=SCHEMA,kind='decision',run_id='run',
+        session_id='session',nonce=packet['nonce'],decision=chosen.to_dict()))
+    remote_gate=DecisionGate('run','session','policy','checkpoint','input')
+    remote_gate.observe(remote_observation)
+    assert remote_gate.admit(received,rig.t).accepted
+    assert rig.core.submit_decision(received,remote_observation.received_monotonic)
+    rig.feed()
+    rig.core.tick()
+    assert rig.commands[-1]==pytest.approx((.1,0.,0.))
+    assert not rig.presets
+
+
 class FixtureState:
     def __init__(self,number): self.number=number
     def detach(self): return self
@@ -225,6 +271,163 @@ def fixture_session():
     session=NeuralSession(policy,'checkpoint','run','session',SimpleNamespace(begin_decision=lambda *args:None),
         lambda kind,**fields:records.append((kind,fields)))
     return session,policy,records
+
+
+def frozen_event_fixture():
+    """Real session/gate with a scripted output fixture, never a brain/model."""
+    import time
+    session, policy, records = fixture_session()
+    policy.set_runtime_context = lambda *args: None
+
+    def snapshot(sequence, watermark, status='IDLE', *, request='request', task='SHOW_FORWARD'):
+        observation = Observation('run', 'session', sequence, request, task, time.monotonic(),
+            capabilities=('HOLD', 'ADVANCE'), feedback=Feedback(valid=True, age_s=.03,
+                source='official', standing=True, status=status,
+                behavior='HOLD' if status == 'IDLE' else 'ADVANCE',
+                execution_id='' if status == 'IDLE' else 'skill-1',
+                request_id='' if status == 'IDLE' else 'request'))
+        session.runtime_context(observation, dict(protection_state='READY', event_sequence=watermark,
+            facts=dict(failures=[], core_status=status, source_registered=True, armed=True,
+                stable_preparation_completed=True, fresh_body=True, ownership_supported=True)))
+        return observation
+
+    def event(sequence, status, **fields):
+        value = ExecutionEvent('run', 'session', sequence, 1, 'skill-1', 'request', 'sim', 'skills',
+            status, 'ADVANCE', time.monotonic(),
+            stop_evidence={'stop_confirmed': status in ('COMPLETED', 'CANCELLED')}, **fields)
+        session.execution_event(value)
+        return value
+
+    policy.behavior, policy.phase = 'ADVANCE', 'START'
+    _, admitted = session.infer(snapshot(1, -1))
+    assert admitted.accepted
+    return session, policy, records, snapshot, event
+
+
+def test_frozen_event_backlog_preserves_fifo_and_suppresses_start_and_finish_until_current():
+    session, policy, records, snapshot, event = frozen_event_fixture()
+    for sequence, status in enumerate(('ACCEPTED', 'STARTED', 'COMPLETED')):
+        event(sequence, status)
+    assert session.gate.active is None
+    # The physical skill has already completed; the first replay still sees ACCEPTED.
+    chosen, admission = session.infer(snapshot(2, 2, 'COMPLETED'))
+    assert admission.reason == 'neural_event_backlog' and not admission.accepted
+    assert session.gate.active is None and chosen.decision_seq not in session.gate._admitted
+    assert [e.event_seq for e in session.pending_neural_events] == [1, 2]
+    policy.behavior, policy.phase = 'HOLD', 'FINISH'
+    chosen, admission = session.infer(snapshot(3, 2, 'COMPLETED'))
+    assert admission.reason == 'neural_event_backlog' and session.gate.active is None
+    # Even an unrelated saved completion cannot turn this replay into request completion.
+    session.execution_results[chosen.decision_seq] = ExecutionEvent(
+        'run', 'session', 9, chosen.decision_seq, 'fixture-hold', 'request', 'sim', 'skills',
+        'COMPLETED', 'HOLD', chosen.neural_end_step, stop_evidence={'stop_confirmed': True})
+    assert not session.finish_ends_request(chosen)
+    assert [e.event_seq for e in session.pending_neural_events] == [2]
+    # The terminal fact is consumed, not discarded. It now agrees with the current snapshot.
+    policy.behavior, policy.phase = 'ADVANCE', 'START'
+    _, admission = session.infer(snapshot(4, 2, 'COMPLETED'))
+    assert admission.accepted and not session.pending_neural_events
+    assert session.consumed_event_sequence == 2 and session.state.number == 4
+    assert [str(o.feedback.status) for o in policy.inputs] == ['IDLE', 'ACCEPTED', 'STARTED', 'COMPLETED']
+    assert all(o.feedback.age_s == .03 for o in policy.inputs)
+    assert len([row for kind, row in records if kind == 'raw_decision']) == 4
+    assert not session.pending_rejections
+    replay = [row for kind, row in records if kind == 'neural_event_admission'][1]
+    assert replay['selected_event_seq'] == 0 and replay['snapshot_event_high_watermark'] == 2
+
+
+def test_frozen_event_backlog_rechecks_events_received_by_same_request_post_infer_refresh():
+    session, policy, records, snapshot, event = frozen_event_fixture()
+    event(0, 'ACCEPTED')
+    observation = snapshot(2, 0, 'ACCEPTED')
+    policy.behavior, policy.phase = 'ADVANCE', 'CONTINUE'
+
+    def refresh():
+        event(1, 'STARTED')
+        event(2, 'COMPLETED')
+        snapshot(3, 2, 'COMPLETED')
+        return None  # This is the worker's same-request refresh contract.
+
+    chosen, admission = session.infer(observation, refresh)
+    assert not admission.accepted and admission.reason == 'neural_event_backlog'
+    assert chosen.decision_seq not in session.gate._admitted and session.gate.active is None
+    assert session.consumed_event_sequence == 0
+    assert [e.event_seq for e in session.pending_neural_events] == [1, 2]
+    context = session.decision_event_contexts[chosen.decision_seq]
+    assert context['selected_event_seq'] == context['snapshot_event_high_watermark'] == 0
+    assert context['post_refresh_event_high_watermark'] == 2
+    assert context['projected_feedback_matches_snapshot'] and context['backlog']
+    assert any(kind == 'raw_decision' for kind, _ in records)
+
+
+@pytest.mark.parametrize('behavior,phase', [('HOLD', 'FINISH'), ('ADVANCE', 'START')])
+def test_frozen_event_backlog_end_prioritizes_only_actual_brain_stop(behavior, phase):
+    session, policy, _, snapshot, event = frozen_event_fixture()
+    event(0, 'ACCEPTED')
+    event(1, 'STARTED')
+    policy.behavior, policy.phase = behavior, phase
+    chosen, admission = session.infer(snapshot(2, 1, 'STARTED', request='end', task='END_INTERACTION'))
+    assert str(chosen.behavior) == behavior and str(chosen.phase) == phase
+    assert [e.event_seq for e in session.pending_neural_events] == [1]
+    if behavior == 'HOLD':
+        assert admission.accepted and admission.active_execution_id == 'skill-1'
+        assert session.decision_event_contexts[chosen.decision_seq]['end_stop_priority']
+        assert not session.finish_ends_request(chosen)
+        event(2, 'CANCELLED', finish_decision_seq=chosen.decision_seq, finish_request_id='end')
+        assert session.finish_ends_request(chosen) and session.gate.active is None
+    else:
+        assert not admission.accepted and admission.reason == 'end_requires_brain_hold'
+        assert session.gate.active['execution_id'] == 'skill-1'
+        # END never grants motion even after the FIFO has caught up.
+        _, admission = session.infer(snapshot(3, 1, 'STARTED', request='end', task='END_INTERACTION'))
+        assert not admission.accepted and admission.reason == 'end_requires_brain_hold'
+        assert not session.pending_neural_events
+
+
+def test_frozen_waiting_hold_keeps_request_open_without_overriding_ready_hold():
+    session, policy, _ = fixture_session()
+    policy.set_runtime_context = lambda *args: None
+    observation = Observation('run', 'session', 1, 'request', 'SHOW_FORWARD', 10.,
+        capabilities=('HOLD', 'ADVANCE'), feedback=Feedback(valid=True, source='official', standing=False))
+    chosen = decision(observation)
+    session.execution_results[chosen.decision_seq] = ExecutionEvent(
+        'run', 'session', 0, chosen.decision_seq, 'hold-1', 'request', 'sim', 'skills',
+        'COMPLETED', 'HOLD', 11., stop_evidence={'stop_confirmed': True})
+    session.decision_inputs[chosen.decision_seq] = (observation, {'protection_state': 'RECOVERING'})
+    assert session.confirmed_finish(chosen)
+    assert not session.finish_ends_request(chosen)
+    session.decision_inputs[chosen.decision_seq] = (observation, {'protection_state': 'READY'})
+    assert not session.finish_ends_request(chosen)
+    ready = replace(observation, feedback=replace(observation.feedback, standing=True))
+    # No teacher/task plan is consulted to force the model to move.
+    session.decision_inputs[chosen.decision_seq] = (ready, {'protection_state': 'READY'})
+    assert session.finish_ends_request(chosen)
+    session.decision_inputs[chosen.decision_seq] = (replace(observation, task='END_INTERACTION'),
+        {'protection_state': 'RECOVERING'})
+    assert session.finish_ends_request(chosen)
+
+
+def test_frozen_finish_uses_projected_input_after_poll_context_eviction():
+    import time
+    session, policy, _ = fixture_session()
+    policy.set_runtime_context = lambda *args: None
+    observation = Observation('run', 'session', 1, 'request', 'SHOW_FORWARD', time.monotonic(),
+        capabilities=('HOLD', 'ADVANCE'), feedback=Feedback(valid=True, source='official', standing=True))
+    session.runtime_contexts[1] = {'protection_state': 'READY', 'event_sequence': 0}
+    session.pending_neural_events.append(ExecutionEvent(
+        'run', 'session', 0, 0, 'old-skill', 'previous', 'sim', 'skills',
+        'RUNNING', 'ADVANCE', time.monotonic()))
+    chosen, _ = session.infer(observation)
+    assert policy.inputs[-1].feedback.request_id == 'previous'
+    assert str(policy.inputs[-1].feedback.status) == 'RUNNING'
+    # Polling can remove the input context and observe the old action completed.
+    session.runtime_contexts.clear()
+    session.observe(replace(observation, observation_seq=2))
+    session.execution_results[chosen.decision_seq] = ExecutionEvent(
+        'run', 'session', 1, chosen.decision_seq, 'hold-1', 'request', 'sim', 'skills',
+        'COMPLETED', 'HOLD', time.monotonic(), stop_evidence={'stop_confirmed': True})
+    assert session.confirmed_finish(chosen)
+    assert not session.finish_ends_request(chosen)
 
 
 def test_gate_refresh_does_not_consume_repeated_task_request_edge():

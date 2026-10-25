@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sys
 
-DIRECTORY = 'aimdk-preset-v1_0_0'
+DIRECTORY = 'aimdk-preset-v1_0_0-cancel-v2'
 LINUX_ROOT = Path('/workspace') / DIRECTORY
 ARCHIVE = 'aimdk-sdk-v1_0_0-aimdk-aarch64-a424add7-artifacts.zip'
 ZIP_SHA = '5bbcf724d54fb28f153db0d272f9acb7906bb1d2cac7dd7ccdc699a5c7eeab35'
@@ -23,7 +23,22 @@ EVIDENCE = {
     'selected-sources.json': '3113d897dc55dd928e606d27f1b327c564592e07ea13f60a4bb706c44abd3b74',
     'compatibility-inspection.json': '8af884b74726ee9f2fbaa699566ab9ef65cdec1837fb9cc19d78642a93f340a8',
 }
-SCHEMA = 'malecns.x2.preset-compat.v1'
+SCHEMA = 'malecns.x2.preset-compat.v2'
+# The motion=0 path and global (not task-specific) query were inspected in
+# these exact official binaries. A version label alone cannot enable the probe.
+MC_CONTRACT = {
+    'mc/lib/libmc_module_main_service.so': '8a73ec6555bcec2c37a18085fa599adf26bcceb974e370e641a880f39bc580e3',
+    'mc/lib/libmc_manager_motion.so': 'a63e6d7e1c0705a0eeb29a07abad14310c97c8796eed804a51a359fe070a9b1e',
+    'mc/lib/libmc_runner_animation_player.so': 'b256374e35510360cc02bcda0d93b2150e85880b75ecb95e37a51fb11fd913ce',
+    'mc/bin/mc_param/src/robot/lx2501_3_t2d5/motion_handler.yaml': 'dd7949fce4e0ba25a2d337748c181101a6760fd585cc32eb6bd52035072ca152',
+    'mc/bin/mc_param/src/robot/lx2501_3_t2d5/classic/animation_player.yaml': 'd7b533981404e2ee51c7a2ddca95782f1385ecda423f65889a51bd018ffad2da',
+    'mc/bin/mc_param/src/robot/lx2501_3_t2d5/classic/animation/SM_wave_right_hand.csv': '23554287aba6b32dd488a1b52ce1c9bdfd6134cf1469494a1f8a4aaa94399760',
+}
+
+
+def verify_mc_contract(packages):
+    verify_inventory(Path(packages), MC_CONTRACT, exact=False)
+    return dict(MC_CONTRACT)
 
 
 def sha(path):
@@ -100,6 +115,9 @@ def verify_build(root, *, accepted=True):
     selected_sources(root)
     if sha(root.parent / MC_LIBRARY) != MC_SHA:
         raise ValueError('MC library changed')
+    contract = verify_mc_contract(root.parent)
+    if prepared.get('mc_contract_sha256') != contract:
+        raise ValueError('Prepared MC contract changed')
     build = read(root / 'build.json')
     if (build['schema'] != SCHEMA or build['prepared_sha256'] != sha(root / 'prepared.json')
             or build['platform'] != 'Linux/x86_64' or build['returncode'] != 0):
@@ -112,7 +130,7 @@ def verify_build(root, *, accepted=True):
                 or inspection['prepared_sha256'] != sha(root / 'prepared.json')
                 or inspection['mc_sha256'] != MC_SHA or not inspection['recursive_layout_verified']):
             raise ValueError('Missing matching runtime inspection')
-    return dict(schema=SCHEMA, zip_sha256=ZIP_SHA, mc_sha256=MC_SHA,
+    return dict(schema=SCHEMA, zip_sha256=ZIP_SHA, mc_sha256=MC_SHA, mc_contract_sha256=contract,
                 prepared_sha256=sha(root / 'prepared.json'), build_sha256=sha(root / 'build.json'),
                 inspection_sha256=sha(root / 'inspection.json') if accepted else None)
 

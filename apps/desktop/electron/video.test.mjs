@@ -97,7 +97,7 @@ test('video media route handles GET HEAD and one Range, rejects tampering, symli
   await rm(file); await symlink(path.join(f.root,'brain_ready.json'),file); await assert.rejects(videoResponse(new Request(url),f.root,archive),/符号链接/);
 });
 
-async function preloadFixture({ hold = false, manualStop = false, receive = null } = {}) {
+async function preloadFixture({ hold = false, manualStop = false, receive = null, hidden = false, connected = true } = {}) {
   const source = await readFile(new URL('./simulation-preload.cjs', import.meta.url),'utf8');
   assert.ok(!source.includes('contextBridge.')); assert.ok(!source.includes('postMessage'));
   const commands = new Map(), calls = [], recorderEvents = new Map(); let recorder, fps, options, release;
@@ -106,9 +106,29 @@ async function preloadFixture({ hold = false, manualStop = false, receive = null
   const track = { addEventListener(){}, stop(){} }, visible = new Canvas();
   class Recorder { static isTypeSupported(v){return v==='video/webm;codecs=vp8';} constructor(_stream, opts){options=opts;this.mimeType=opts.mimeType;recorder=this;this.state='inactive';} addEventListener(name,fn){recorderEvents.set(name,fn);} start(slice){assert.equal(slice,1000);this.state='recording';recorderEvents.get('start')({timeStamp:1});} stop(){this.state='inactive';if (!manualStop) setImmediate(() => {recorderEvents.get('dataavailable')({timeStamp:5,timecode:1000,data:new Blob([media])});recorderEvents.get('stop')({timeStamp:6});});} }
   let now = 0;
-  vm.runInNewContext(source,{require:()=>({ipcRenderer:{on:(name,fn)=>commands.set(name,fn),invoke:async(channel,value)=>{calls.push({channel,...value}); if (receive) return receive(channel, value); if (hold && channel === 'video:event') await blocked; return {accepted:true,sequence:value.sequence};}}}),crypto:{randomUUID:()=> 'clock'},performance:{now:()=>++now,timeOrigin:1},document:{hidden:false,querySelectorAll:()=>[visible],documentElement:{classList:{contains:()=>true}},addEventListener(){}},window:{addEventListener(){}},getComputedStyle:()=>({visibility:'visible',display:'block'}),HTMLCanvasElement:Canvas,MediaRecorder:Recorder,Uint8Array,Blob,Promise,setTimeout:(fn,ms)=>ms===240000?0:setTimeout(fn,ms),clearTimeout,setInterval:()=>0,clearInterval});
+  vm.runInNewContext(source,{require:()=>({ipcRenderer:{on:(name,fn)=>commands.set(name,fn),send:(channel,value)=>calls.push({channel,...value}),invoke:async(channel,value)=>{calls.push({channel,...value}); if (receive) return receive(channel, value); if (hold && channel === 'video:event') await blocked; return {accepted:true,sequence:value.sequence};}}}),crypto:{randomUUID:()=> 'clock'},performance:{now:()=>++now,timeOrigin:1},document:{hidden,querySelectorAll:()=>[visible],documentElement:{classList:{contains:()=>connected}},addEventListener(){}},window:{addEventListener(){}},getComputedStyle:()=>({visibility:'visible',display:'block'}),HTMLCanvasElement:Canvas,MediaRecorder:Recorder,Uint8Array,Blob,Promise,setTimeout:(fn,ms)=>ms===240000?0:setTimeout(fn,ms),clearTimeout,setInterval:()=>0,clearInterval});
   return { commands, calls, recorderEvents, release, get recorder(){return recorder;}, get fps(){return fps;}, get options(){return options;} };
 }
+test('video source preflight reports actual hidden and disconnected canvas without starting a recorder', async () => {
+  const request = { generation: 2, nonce: 'b'.repeat(32) };
+  for (const [options, expected] of [[{}, true], [{ hidden: true }, false], [{ connected: false }, false]]) {
+    const f = await preloadFixture(options);
+    f.commands.get('simulation:source-check')(null, request);
+    const reply = f.calls[0];
+    assert.equal(reply.channel, 'simulation:source-status'); assert.equal(reply.ready, expected);
+    assert.equal(reply.nonce, request.nonce); assert.equal(reply.generation, request.generation);
+    assert.equal(f.recorder, undefined); assert.equal(f.calls.length, 1);
+    if (!expected) {
+      const facts = JSON.parse(reply.reason.slice(reply.reason.indexOf('：') + 1));
+      assert.equal(facts.hidden, options.hidden ?? false); assert.equal(facts.connected, options.connected ?? true);
+      // A real start with the same invalid source must still report a fault.
+      f.commands.get('video:command')(null, { generation: 2, token: 'a'.repeat(64), kind: 'start' });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.ok(f.calls.some(call => call.channel === 'video:fault'));
+      assert.equal(f.recorder, undefined);
+    }
+  }
+});
 test('video isolated preload encodes fixed canvas and sends final data before stopped', async () => {
   const f = await preloadFixture(); const {commands, recorderEvents, calls} = f;
   const auth = {generation:2,token:'a'.repeat(64)}; commands.get('video:command')(null,{...auth,kind:'start'}); await new Promise(r=>setImmediate(r));
