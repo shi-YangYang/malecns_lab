@@ -7,7 +7,7 @@ import type { ExperimentStatus, Snapshot, TelemetryBatch, TelemetryManifest, Tel
 import './style.css';
 
 const icons = {
-  brain: '<path d="M9 4a3 3 0 0 0-5 2 4 4 0 0 0-1 7 4 4 0 0 0 6 5m6-14a3 3 0 0 1 5 2 4 4 0 0 1 1 7 4 4 0 0 1-6 5M9 3v18m6-18v18M5 10h4m6 4h4"/>',
+  fly: '<path d="m10.5 4-1-2m4 2 1-2M10 9C6 3 1 5 3 10c1 3 4 4 7 1m4-2c4-6 9-4 7 1-1 3-4 4-7 1M10 10 6 8m8 2 4-2M10 13l-5 2-2 3m11-5 5 2 2 3M10 17l-3 3v2m7-5 3 3v2"/><ellipse cx="10.5" cy="5.5" rx="1.5" ry="1.8"/><ellipse cx="13.5" cy="5.5" rx="1.5" ry="1.8"/><ellipse cx="12" cy="9.5" rx="2" ry="2.5"/><ellipse cx="12" cy="16" rx="2.4" ry="4.5"/><path d="M10 15h4m-4 3h4"/>',
   robot: '<rect x="5" y="5" width="14" height="14" rx="4"/><path d="M12 2v3M8 10h1m6 0h1M9 15h6M2 10v5m20-5v5"/>',
   reset: '<path d="M4 5v5h5M4 10a8 8 0 1 1 1 8"/>',
   forward: '<path d="m3 5 8 7-8 7zm10 0 8 7-8 7z" fill="currentColor" stroke="none"/>',
@@ -23,8 +23,7 @@ function option(value: string, label: string): HTMLOptionElement { const item = 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <header class="titlebar">
-    <div class="brand">${icon('brain')}<span>MaleCNS Lab</span></div>
-    <span class="titlebar-divider"></span><span class="workspace-label">脑模型验证</span>
+    <div class="brand">${icon('fly')}<span>MaleCNS</span></div>
     <div class="titlebar-right">
       <span class="experiment-state" id="experiment-state">未运行</span>
       <button class="tool-button primary" id="start" disabled>开始</button>
@@ -40,7 +39,6 @@ app.innerHTML = `
           <div class="empty-simulation" id="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">点击“开始”连接</span></div>
         </div>
         <div class="simulation-footer">
-          <div id="behavior-state" class="simulation-status" role="status" hidden></div>
           <nav class="taskbar" id="taskbar" aria-label="互动任务">
             <div class="task-buttons">
               <button class="action-button" data-task="SHOW_FORWARD" aria-label="前进 1 米" disabled>${icon('forward')}<span>前进</span></button>
@@ -163,16 +161,12 @@ function drawActivity(): void {
 }
 function updateStatus(value: ExperimentStatus): void {
   const controlsPending = pending || stopPending;
-  const behaviorNames: Record<string, string> = { HOLD: '待命', ADVANCE: '前进', TURN_LEFT: '左转', TURN_RIGHT: '右转', WAVE_RIGHT: '挥手' };
   const brainActive = value.mode === 'brain_control' && value.brain_controlled === true;
   app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => {
     button.disabled = controlsPending || !canSubmitTask(value, button.dataset.task as Task);
     button.classList.toggle('is-active', value.action_busy === true && value.task === button.dataset.task);
     button.title = value.action_busy && button.dataset.task !== 'END_INTERACTION' ? '当前动作结束并停稳后可用' : '向脑模型提交互动任务';
   });
-  element('behavior-state').textContent = value.state === 'running' ? [value.message, value.phase === 'executing' ? behaviorNames[value.behavior ?? ''] : ''].filter(Boolean).join(' · ') : '';
-  element('behavior-state').hidden = !element('behavior-state').textContent;
-  element('behavior-state').title = value.reason ?? '动作由当前候选脑模型选择；此会话用于受保护验证';
   const busy = activeStates.has(value.state);
   const issue = telemetryIssue(value);
   element('experiment-state').textContent = value.state === 'preparing' ? value.message : stateLabels[value.state];

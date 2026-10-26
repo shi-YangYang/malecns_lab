@@ -28,8 +28,6 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 }
 .brand { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; letter-spacing: -.35px; white-space: nowrap; color: #edf3f8; }
 .brand svg { width: 28px; height: 28px; color: var(--mint); }
-.titlebar-divider { width: 1px; height: 20px; background: #20313e; margin: 0 20px; }
-.workspace-label { font-size: 12px; color: #8c9eb0; white-space: nowrap; }
 .titlebar-right { display: flex; align-items: center; gap: 9px; margin-left: auto; -webkit-app-region: no-drag; }
 .experiment-state { display: flex; align-items: center; gap: 7px; margin-right: 10px; font-size: 11px; white-space: nowrap; color: #91a5b7; }
 .experiment-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #44d995; }
@@ -60,8 +58,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .empty-simulation span { font-size: 11px; line-height: 1.8; }
 /* These controls are BELOW the native WebContentsView, never covered by it. */
 .simulation-footer { flex-shrink: 0; padding: 0 12px 8px; background: linear-gradient(0deg, #07111b, transparent); }
-.simulation-status { height: 24px; line-height: 24px; min-width: 0; padding: 0 6px; color: #60798d; font-size: 10px; }
-#behavior-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-buttons { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 2px 0; }
 .action-button { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; border-radius: 0; color: #9db2c4; background: transparent; padding: 8px 6px 4px; font-size: 12px; }
 .action-button + .action-button::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 7px; width: 1px; background: #223442; }
@@ -98,7 +94,6 @@ main { display: flex; flex: 1; min-height: 0; }
 @keyframes message-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 1220px) {
-  .workspace-label, .titlebar-divider { display: none; }
   .titlebar-right { gap: 7px; }
   .titlebar { padding-right: 16px; }
   .activity-panel { padding-left: 14px; padding-right: 14px; }
