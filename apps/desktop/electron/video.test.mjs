@@ -8,6 +8,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { SimulationVideo, VIDEO_LIMITS, NOVNC_HASHES, trustedVideo, verifyNoVNC, readVideoArchive, videoRange, videoResponse } from './video.mjs';
 import { SIMULATION_URL } from './boundaries.mjs';
+import { MEDIA_LIMITS_PROFILE } from './recording.mjs';
+const startLimits = { limits_profile: MEDIA_LIMITS_PROFILE, limits: VIDEO_LIMITS };
 const id = 'desktop-20261023-115959-abcdef12';
 const media = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 9, 8, 7, 6]); // Contract fixture, NOT decodable video evidence.
 async function fixture(t, overrides = {}) {
@@ -57,6 +59,63 @@ test('video archive binds identities, exact raw bytes, final chunk and clock evi
   await assert.rejects(readVideoArchive(f.root, id, f.session, { ...f.telemetry, checkpoint_id: 'other' }), /身份/);
   assert.throws(() => f.video.receive(event(5, 'chunk', { data: media, final: true })), /终止/);
 });
+test('video current and legacy limits remain distinct and the host keeps a 480 second hard stop', async t => {
+  const deadlines = [], original = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+    if (ms >= 240000) { deadlines.push({ callback, ms }); return 0; }
+    return original(callback, ms, ...args);
+  });
+  const f = await fixture(t), archive = await complete(f);
+  assert.equal(VIDEO_LIMITS.duration_ms, 480000);
+  assert.deepEqual(deadlines.map(d => d.ms), [480000]);
+  assert.equal(archive.manifest.limits_profile, MEDIA_LIMITS_PROFILE);
+  assert.deepEqual(f.commands.find(c => c.kind === 'start').limits, VIDEO_LIMITS);
+  const file = path.join(f.root, 'simulation_video/manifest.json');
+  const manifest = JSON.parse(await readFile(file)); delete manifest.limits_profile;
+  await writeFile(file, JSON.stringify(manifest));
+  await assert.rejects(readVideoArchive(f.root, id, f.session, f.telemetry), /来源或时间锚点/);
+  manifest.limits.duration_ms = 240000; await writeFile(file, JSON.stringify(manifest));
+  assert.equal((await readVideoArchive(f.root, id, f.session, f.telemetry)).complete, true);
+  manifest.limits_profile = 'unbounded'; await writeFile(file, JSON.stringify(manifest));
+  await assert.rejects(readVideoArchive(f.root, id, f.session, f.telemetry), /来源或时间锚点/);
+  const active = await fixture(t); deadlines.at(-1).callback();
+  assert.match(active.failures[0], /480 秒上限/);
+  assert.ok(active.commands.some(c => c.kind === 'stop'));
+});
+
+test('continuous video limit keeps final data and seals an explicitly truncated window', async t => {
+  let f; const limits = [];
+  f = await fixture(t, { initialWindow: true, onLimit: reason => { limits.push(reason); f.video.requestStop(reason); } });
+  await f.video.receive(event(1, 'started', { start_call_ms: 90, mime: VIDEO_LIMITS.mime, width: 1280, height: 800 }));
+  const probe = f.commands.find(v => v.kind === 'clock');
+  f.video.receiveClock({ nonce: probe.nonce, performance_ms: 100, time_origin_ms: 1, clock_id: 'clock' });
+  await f.video.receive(event(2, 'chunk', { data: media, timecode_ms: 0, final: false }));
+  f.video.limit('duration_limit'); f.video.limit('duplicate_limit');
+  assert.equal(limits.length, 1); assert.deepEqual(f.failures, []);
+  await f.video.receive(event(3, 'chunk', { data: media, timecode_ms: 1000, final: true }));
+  await f.video.receive(event(4, 'stopped', { final_sequence: 3, stop_call_ms: 250 }));
+  await f.video.seal();
+  const archive = await readVideoArchive(f.root, id, f.session, f.telemetry);
+  assert.equal(archive.complete, true); assert.equal(archive.manifest.archive_scope, 'initial_window');
+  assert.equal(archive.summary.truncation_reason, 'duration_limit');
+  assert.equal(archive.summary.complete_means, 'window_sealed_not_full_session');
+  assert.equal(archive.summary.bytes, media.length * 2);
+  assert.equal(f.context.status.state, 'running');
+});
+
+test('continuous video capacity callback reserves final chunks and never hides write errors', async t => {
+  let f; const limits = [];
+  f = await fixture(t, { initialWindow: true, onLimit: reason => { limits.push(reason); f.video.requestStop(reason); } });
+  await f.video.receive(event(1, 'started', { start_call_ms: 90, mime: VIDEO_LIMITS.mime, width: 1280, height: 800 }));
+  // Simulated counter avoids generating a 232 MiB fixture; this is not media evidence.
+  f.video.bytes = VIDEO_LIMITS.file_bytes - 3 * VIDEO_LIMITS.chunk_bytes - media.length;
+  await f.video.receive(event(2, 'chunk', { data: media, timecode_ms: 0, final: false }));
+  assert.equal(limits.length, 1); assert.equal(f.video.stopping, true); assert.deepEqual(f.failures, []);
+  assert.equal(VIDEO_LIMITS.file_bytes - f.video.bytes, 3 * VIDEO_LIMITS.chunk_bytes);
+  f.video.journal.writeFile = async () => { throw new Error('ENOSPC final journal'); };
+  await assert.rejects(f.video.receive(event(3, 'chunk', { data: media, timecode_ms: 1000, final: true })), /ENOSPC/);
+  assert.match(f.failures[0], /ENOSPC/);
+});
 test('video refuses wrong order, oversize, missing final data and concurrent writes', async t => {
   const f = await fixture(t);
   assert.throws(() => f.video.receive(event(2, 'chunk', { data: media, final: false })), /序号/);
@@ -100,14 +159,14 @@ test('video media route handles GET HEAD and one Range, rejects tampering, symli
 async function preloadFixture({ hold = false, manualStop = false, receive = null, hidden = false, connected = true } = {}) {
   const source = await readFile(new URL('./simulation-preload.cjs', import.meta.url),'utf8');
   assert.ok(!source.includes('contextBridge.')); assert.ok(!source.includes('postMessage'));
-  const commands = new Map(), calls = [], recorderEvents = new Map(); let recorder, fps, options, release;
+  const commands = new Map(), calls = [], recorderEvents = new Map(), deadlines = []; let recorder, fps, options, release;
   const blocked = new Promise(resolve => { release = resolve; });
   class Canvas { width = 640; height = 400; isConnected = true; getBoundingClientRect(){return {width:640,height:400};} captureStream(value){fps=value;return {getAudioTracks:()=>[],getVideoTracks:()=>[track],getTracks:()=>[track]};} }
   const track = { addEventListener(){}, stop(){} }, visible = new Canvas();
   class Recorder { static isTypeSupported(v){return v==='video/webm;codecs=vp8';} constructor(_stream, opts){options=opts;this.mimeType=opts.mimeType;recorder=this;this.state='inactive';} addEventListener(name,fn){recorderEvents.set(name,fn);} start(slice){assert.equal(slice,1000);this.state='recording';recorderEvents.get('start')({timeStamp:1});} stop(){this.state='inactive';if (!manualStop) setImmediate(() => {recorderEvents.get('dataavailable')({timeStamp:5,timecode:1000,data:new Blob([media])});recorderEvents.get('stop')({timeStamp:6});});} }
   let now = 0;
-  vm.runInNewContext(source,{require:()=>({ipcRenderer:{on:(name,fn)=>commands.set(name,fn),send:(channel,value)=>calls.push({channel,...value}),invoke:async(channel,value)=>{calls.push({channel,...value}); if (receive) return receive(channel, value); if (hold && channel === 'video:event') await blocked; return {accepted:true,sequence:value.sequence};}}}),crypto:{randomUUID:()=> 'clock'},performance:{now:()=>++now,timeOrigin:1},document:{hidden,querySelectorAll:()=>[visible],documentElement:{classList:{contains:()=>connected}},addEventListener(){}},window:{addEventListener(){}},getComputedStyle:()=>({visibility:'visible',display:'block'}),HTMLCanvasElement:Canvas,MediaRecorder:Recorder,Uint8Array,Blob,Promise,setTimeout:(fn,ms)=>ms===240000?0:setTimeout(fn,ms),clearTimeout,setInterval:()=>0,clearInterval});
-  return { commands, calls, recorderEvents, release, get recorder(){return recorder;}, get fps(){return fps;}, get options(){return options;} };
+  vm.runInNewContext(source,{require:()=>({ipcRenderer:{on:(name,fn)=>commands.set(name,fn),send:(channel,value)=>calls.push({channel,...value}),invoke:async(channel,value)=>{calls.push({channel,...value}); if (receive) return receive(channel, value); if (hold && channel === 'video:event') await blocked; return {accepted:true,sequence:value.sequence};}}}),crypto:{randomUUID:()=> 'clock'},performance:{now:()=>++now,timeOrigin:1},document:{hidden,querySelectorAll:()=>[visible],documentElement:{classList:{contains:()=>connected}},addEventListener(){}},window:{addEventListener(){}},getComputedStyle:()=>({visibility:'visible',display:'block'}),HTMLCanvasElement:Canvas,MediaRecorder:Recorder,Uint8Array,Blob,Promise,setTimeout:(fn,ms)=>{if(ms>=240000){deadlines.push({fn,ms});return 0;}return setTimeout(fn,ms);},clearTimeout,setInterval:()=>0,clearInterval});
+  return { commands, calls, recorderEvents, deadlines, release, get recorder(){return recorder;}, get fps(){return fps;}, get options(){return options;} };
 }
 test('video source preflight reports actual hidden and disconnected canvas without starting a recorder', async () => {
   const request = { generation: 2, nonce: 'b'.repeat(32) };
@@ -122,7 +181,7 @@ test('video source preflight reports actual hidden and disconnected canvas witho
       const facts = JSON.parse(reply.reason.slice(reply.reason.indexOf('：') + 1));
       assert.equal(facts.hidden, options.hidden ?? false); assert.equal(facts.connected, options.connected ?? true);
       // A real start with the same invalid source must still report a fault.
-      f.commands.get('video:command')(null, { generation: 2, token: 'a'.repeat(64), kind: 'start' });
+      f.commands.get('video:command')(null, { generation: 2, token: 'a'.repeat(64), kind: 'start', ...startLimits });
       await new Promise(resolve => setImmediate(resolve));
       assert.ok(f.calls.some(call => call.channel === 'video:fault'));
       assert.equal(f.recorder, undefined);
@@ -131,7 +190,7 @@ test('video source preflight reports actual hidden and disconnected canvas witho
 });
 test('video isolated preload encodes fixed canvas and sends final data before stopped', async () => {
   const f = await preloadFixture(); const {commands, recorderEvents, calls} = f;
-  const auth = {generation:2,token:'a'.repeat(64)}; commands.get('video:command')(null,{...auth,kind:'start'}); await new Promise(r=>setImmediate(r));
+  const auth = {generation:2,token:'a'.repeat(64)}; commands.get('video:command')(null,{...auth,kind:'start',...startLimits}); await new Promise(r=>setImmediate(r));
   recorderEvents.get('dataavailable')({timeStamp:2,timecode:0,data:new Blob([media])}); await new Promise(r=>setImmediate(r));
   commands.get('video:command')(null,{...auth,kind:'stop'}); await new Promise(r=>setImmediate(r)); await new Promise(r=>setImmediate(r));
   assert.equal(f.fps,15); assert.deepEqual(JSON.parse(JSON.stringify(f.options)),{mimeType:'video/webm;codecs=vp8',videoBitsPerSecond:2500000});
@@ -139,9 +198,38 @@ test('video isolated preload encodes fixed canvas and sends final data before st
   assert.equal(calls.at(-1).final_sequence,3); assert.equal(f.recorder.state,'inactive');
 });
 
+test('video preload matches the host 480 second budget and refuses changed limits', async () => {
+  const auth = { generation: 2, token: 'a'.repeat(64), kind: 'start' };
+  for (const changed of [{ limits_profile: 'unbounded', limits: VIDEO_LIMITS },
+                         { limits_profile: MEDIA_LIMITS_PROFILE, limits: { ...VIDEO_LIMITS, duration_ms: 240000 } }]) {
+    const f = await preloadFixture(); f.commands.get('video:command')(null, { ...auth, ...changed });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.recorder, undefined); assert.match(f.calls.find(c => c.channel === 'video:fault').reason, /上限版本/);
+  }
+  const f = await preloadFixture(); f.commands.get('video:command')(null, { ...auth, ...startLimits });
+  assert.deepEqual(f.deadlines.map(d => d.ms), [480000]);
+  f.deadlines[0].fn(); await new Promise(resolve => setImmediate(resolve));
+  assert.match(f.calls.find(c => c.channel === 'video:fault').reason, /480 秒上限/);
+  assert.equal(f.recorder.state, 'inactive');
+});
+
+test('continuous preload requests normal window closure with a 2 second finalization reserve', async () => {
+  const f = await preloadFixture(), auth = { generation: 2, token: 'a'.repeat(64) };
+  f.commands.get('video:command')(null, { ...auth, kind: 'start', ...startLimits, archive_scope: 'initial_window' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.deadlines.map(d => d.ms), [478000]);
+  f.deadlines[0].fn(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls.find(c => c.channel === 'video:limit').reason, 'duration_limit');
+  assert.equal(f.calls.some(c => c.channel === 'video:fault'), false);
+  f.commands.get('video:command')(null, { ...auth, kind: 'stop' });
+  await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve));
+  f.commands.get('simulation:source-check')(null, { generation: 2, nonce: 'b'.repeat(32) });
+  assert.equal(f.calls.at(-1).channel, 'simulation:source-status'); assert.equal(f.calls.at(-1).ready, true);
+});
+
 test('video preload permits only one pending chunk beside the in-flight data and faults on excess', async () => {
   const f = await preloadFixture({hold:true}), auth = {generation:2,token:'a'.repeat(64)};
-  f.commands.get('video:command')(null,{...auth,kind:'start'});
+  f.commands.get('video:command')(null,{...auth,kind:'start',...startLimits});
   for (let i=0;i<3;i++) f.recorderEvents.get('dataavailable')({timeStamp:2+i,timecode:i*1000,data:new Blob([media])});
   await new Promise(r=>setImmediate(r));
   assert.equal(f.calls.filter(c=>c.channel==='video:event').length,1);
@@ -159,7 +247,7 @@ test('video preload stop boundary seals queued timeslice and true final bytes on
     if (value.sequence === 3 || value.sequence === 4) await acks[value.sequence - 3].promise;
     return ack;
   } });
-  const auth = f.video.authorization, command = value => p.commands.get('video:command')(null, { ...auth, ...value });
+  const auth = f.video.authorization, command = value => p.commands.get('video:command')(null, { ...auth, ...startLimits, ...value });
   const data = (timeStamp, timecode, bytes) => p.recorderEvents.get('dataavailable')({ timeStamp, timecode, data: new Blob([bytes]) });
   const tick = () => new Promise(r => setImmediate(r));
   const queued = Buffer.from([1, 2, 3]), last = Buffer.from([4, 5]);
@@ -201,7 +289,7 @@ test('video preload stop boundary without stop event cannot publish a complete a
   const f = await fixture(t);
   let started; const ready = new Promise(resolve => { started = resolve; });
   const p = await preloadFixture({ manualStop: true, receive: async (_channel, value) => { const ack = await f.video.receive(value); started(); return ack; } });
-  const auth = f.video.authorization, command = kind => p.commands.get('video:command')(null, { ...auth, kind });
+  const auth = f.video.authorization, command = kind => p.commands.get('video:command')(null, { ...auth, ...startLimits, kind });
   command('start'); await ready; f.video.requestStop(); command('stop');
   p.recorderEvents.get('dataavailable')({ timeStamp: 3, timecode: 0, data: new Blob([media]) });
   await f.video.seal(Date.now() + 25);

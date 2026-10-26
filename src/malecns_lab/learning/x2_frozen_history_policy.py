@@ -21,10 +21,17 @@ from types import SimpleNamespace
 
 from ..control.x2_behavior import (Decision, JOINT_READOUT_CLASSES,
     JOINT_READOUT_SCHEMA, digest, require)
-from ..control.x2_interaction import frozen_full_interaction_profile
-from ..control.x2_skill_profile import frozen_full_skill_profile
+from ..control.x2_interaction import (measured_action_interaction_profile,
+    precision_action_interaction_profile, settled_action_interaction_profile,
+    balance_sway_action_interaction_profile, quarter_turn_action_interaction_profile,
+    integral_action_interaction_profile, compensated_action_interaction_profile)
+from ..control.x2_skill_profile import (measured_action_skill_profile,
+    precision_action_skill_profile, settled_action_skill_profile, balance_sway_action_skill_profile,
+    quarter_turn_action_skill_profile, integral_action_skill_profile, compensated_action_skill_profile)
 
 SCHEMA = "malecns_lab.x2_frozen_history_policy.v1"
+TURN_PROFILES = ("measured", "precision", "settled", "quarter-turn", "integral", "compensated")
+WAVE_PROFILES = ("baseline", "balance-sway")
 RESEARCH = Path("data/x2_model_redesign_20261024_r1")
 CANDIDATE_RELATIVE = RESEARCH / "b_current_history_v1"
 SEEDS = (24102431, 24102432, 24102433)
@@ -62,8 +69,24 @@ def _check(path, expected):
             and _sha(path) == expected, "Frozen asset changed: " + str(path))
 
 
-def inspect_frozen_history_candidate(root, path):
+def inspect_frozen_history_candidate(root, path, *, turn_profile="measured", wave_profile="baseline"):
     """Authenticate a single fixed candidate without importing model code."""
+    require(turn_profile in TURN_PROFILES, "Unsupported frozen turn profile")
+    require(wave_profile in WAVE_PROFILES, "Unsupported frozen wave profile")
+    require(wave_profile == 'baseline' or turn_profile in ('measured', 'quarter-turn', 'integral', 'compensated'), 'Wave balance-sway requires measured, quarter-turn, integral or compensated profile')
+    require(turn_profile != 'quarter-turn' or wave_profile == 'balance-sway', 'Quarter-turn requires balance-sway wave profile')
+    require(turn_profile != 'integral' or wave_profile == 'balance-sway', 'Integral requires balance-sway wave profile')
+    require(turn_profile != 'compensated' or wave_profile == 'balance-sway', 'Compensated requires balance-sway wave profile')
+    interaction = {'measured': measured_action_interaction_profile,
+        'precision': precision_action_interaction_profile, 'settled': settled_action_interaction_profile,
+        'quarter-turn': quarter_turn_action_interaction_profile, 'integral': integral_action_interaction_profile,
+        'compensated': compensated_action_interaction_profile}[turn_profile]()
+    execution = {'measured': measured_action_skill_profile,
+        'precision': precision_action_skill_profile, 'settled': settled_action_skill_profile,
+        'quarter-turn': quarter_turn_action_skill_profile, 'integral': integral_action_skill_profile,
+        'compensated': compensated_action_skill_profile}[turn_profile]()
+    if wave_profile == 'balance-sway' and turn_profile == 'measured':
+        interaction, execution = balance_sway_action_interaction_profile(), balance_sway_action_skill_profile()
     root, path = Path(root).resolve(), Path(path).resolve()
     require(path == root / CANDIDATE_RELATIVE, "Only the fixed B candidate is supported")
     artifacts = {str(RESEARCH / name): value for name, value in PINNED.items()}
@@ -93,10 +116,11 @@ def inspect_frozen_history_candidate(root, path):
         _check(root / name, expected)
     sources[str(Path(__file__).resolve().relative_to(root))] = _sha(__file__)
     input_map = dict(numeric_engine_id=ENGINE_ID, channels=origin["plan"]["channels"],
-        numeric_contract=cache["numeric_contract"], input="real observation only; foreign behavior HOLD mask")
+        numeric_contract=cache["numeric_contract"], input="real observation only; foreign behavior HOLD mask",
+        relative_heading_offsets_rad=interaction['relative_heading_offsets_rad'])
     policy = dict(schema=SCHEMA, numeric_engine_id=ENGINE_ID,
-        interaction_profile=frozen_full_interaction_profile(),
-        execution_profile=frozen_full_skill_profile(), qualification_only=True,
+        interaction_profile=interaction,
+        execution_profile=execution, qualification_only=True,
         can_deploy=False, raw_input_to_readout_bypass=False,
         initialization="same frozen 600-step root per request; zero all three GRU histories",
         readout=dict(seeds=list(SEEDS), epoch=600, classes=list(JOINT_READOUT_CLASSES),
@@ -172,7 +196,25 @@ def readout_class(torch, root):
 
 
 def load_frozen_history_policy(root, path, metadata):
-    full = inspect_frozen_history_candidate(root, path)
+    execution = metadata["policy"].get("execution_profile")
+    wave_profile = "baseline"
+    if execution == measured_action_skill_profile():
+        turn_profile = "measured"
+    elif execution == precision_action_skill_profile():
+        turn_profile = "precision"
+    elif execution == settled_action_skill_profile():
+        turn_profile = "settled"
+    elif execution == balance_sway_action_skill_profile():
+        turn_profile, wave_profile = "measured", "balance-sway"
+    elif execution == quarter_turn_action_skill_profile():
+        turn_profile, wave_profile = "quarter-turn", "balance-sway"
+    elif execution == integral_action_skill_profile():
+        turn_profile, wave_profile = "integral", "balance-sway"
+    elif execution == compensated_action_skill_profile():
+        turn_profile, wave_profile = "compensated", "balance-sway"
+    else:
+        raise ValueError("Registered frozen execution profile is not an allowed contract")
+    full = inspect_frozen_history_candidate(root, path, turn_profile=turn_profile, wave_profile=wave_profile)
     require(metadata["checkpoint_id"] == full["checkpoint_id"]
             and all(full["policy"].get(k) == v for k, v in metadata["policy"].items()),
             "Registered frozen candidate identity differs")

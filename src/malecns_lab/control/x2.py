@@ -52,11 +52,14 @@ class X2MotionAdapter:
     def __init__(self, publish: Callable[[tuple[float, float, float]], None], *,
                  clock: Callable[[], float] = time.monotonic,
                  odom_max_age: float = 0.25, mc_max_age: float = 0.5,
-                 allow_empty_source_claim: bool = False):
+                 allow_empty_source_claim: bool = False, max_segment_seconds: float = 5.):
         for value in (odom_max_age, mc_max_age):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("feedback age limits must be finite and positive")
         self.publish, self.clock = publish, clock
+        if not math.isfinite(max_segment_seconds) or not 0 < max_segment_seconds <= 10.:
+            raise ValueError('Motion segment budget must be within (0, 10] seconds')
+        self.max_segment_seconds = max_segment_seconds
         self.odom_max_age, self.mc_max_age = odom_max_age, mc_max_age
         self.armed = False
         self.state, self.reason = "DISARMED", "not_armed"
@@ -74,6 +77,8 @@ class X2MotionAdapter:
         self._claim_deadline: Optional[float] = None
         self._claim_request_time: Optional[float] = None
         self._claim_request_sequence = 0
+        self._first_nonzero_published_at: Optional[float] = None
+        self._startup_publish_deadline: Optional[float] = None
         self._startup_transition_deadline: Optional[float] = None
         self._startup_request_sequence = 0
         self._startup_transition_pending = False
@@ -113,6 +118,7 @@ class X2MotionAdapter:
 
     def _begin_stop(self, now: float, reason: str) -> None:
         self._expires = -math.inf
+        self._startup_transition_pending = False
         self.reason = reason
         if self.armed:
             self.state = "STOPPING"
@@ -207,6 +213,7 @@ class X2MotionAdapter:
             self._reset_window()
         # A late RUNNING sample must not hide an unresolved, expired transition.
         if (self.state in ("CLAIMING", "FORWARD") and self._startup_transition_pending
+                and self._startup_transition_deadline is not None
                 and self._last_clock >= self._startup_transition_deadline):
             self._fail("startup_transition_timeout", self._last_clock)
         self._mc_last_time = stamp
@@ -233,7 +240,7 @@ class X2MotionAdapter:
         return True
 
     def _startup_transition_allowed(self, now: float) -> bool:
-        """Only a new owned sample inside the initial request's fixed window."""
+        """Only a new owned sample inside the first successful publish's window."""
         return (self.state in ("CLAIMING", "FORWARD")
                 and self._startup_transition_deadline is not None
                 and now < self._startup_transition_deadline
@@ -278,7 +285,11 @@ class X2MotionAdapter:
             return "intent_expired"
         if self.state == "CLAIMING" and now >= self._claim_deadline:
             return "claim_timeout"
-        if self._startup_transition_pending and now >= self._startup_transition_deadline:
+        if (self._first_nonzero_published_at is None and self._startup_publish_deadline is not None
+                and now >= self._startup_publish_deadline):
+            return "startup_publish_timeout"
+        if (self._startup_transition_pending and self._startup_transition_deadline is not None
+                and now >= self._startup_transition_deadline):
             return "startup_transition_timeout"
         return self.ready_reason(now, allow_empty_source=self.state == "CLAIMING")
 
@@ -287,21 +298,23 @@ class X2MotionAdapter:
         if now is None:
             return False
         try:
-            valid = math.isfinite(ttl) and 0 < ttl <= 5.0
+            valid = math.isfinite(ttl) and 0 < ttl <= self.max_segment_seconds
         except TypeError:
             valid = False
         active = self.state in ("CLAIMING", "FORWARD")
         reason = self._active_reason(now) if active else self.ready_reason(now, allow_empty_source=True)
         if not valid:
             reason = "invalid_intent_ttl"
-        elif self._segment_start is not None and (not active or now >= self._segment_start+5.0):
+        elif self._segment_start is not None and (not active or now >= self._segment_start+self.max_segment_seconds):
             reason = "stop_required_before_restart"
         if reason:
             self._fail(reason, now)
             return False
         if not active:
             self._segment_start = now
-            self._startup_transition_deadline = now + STARTUP_TRANSITION_TIMEOUT
+            self._first_nonzero_published_at = None
+            self._startup_publish_deadline = now + STARTUP_TRANSITION_TIMEOUT
+            self._startup_transition_deadline = None
             self._startup_request_sequence = self._mc_sequence
             self._startup_transition_pending = False
             if self.mc.source == "":
@@ -312,7 +325,7 @@ class X2MotionAdapter:
                 self.state, self.reason = "CLAIMING", "claiming_empty_source"
             else:
                 self.state, self.reason = "FORWARD", "forward_intent"
-        self._expires = min(now+ttl, self._segment_start+5.0)
+        self._expires = min(now+ttl, self._segment_start+self.max_segment_seconds)
         self._reset_window()
         return True
 
@@ -365,6 +378,15 @@ class X2MotionAdapter:
             self.state = "STOPPED"
             self._segment_start = None
 
+    def _publish_effective(self, command):
+        """Return what was sent, after the publisher succeeds.
+
+        Adapters that transform commands must return the final effective value.
+        The ordinary publisher callback keeps its existing no-return contract.
+        """
+        self.publish(command)
+        return command
+
     def tick(self) -> dict:
         now = self._now()
         attempts = []
@@ -375,14 +397,23 @@ class X2MotionAdapter:
                     self._fail(reason, self._last_clock)
             command = FORWARD if self.state in ("CLAIMING", "FORWARD") else ZERO
             try:
-                self.publish(command)
-                attempts.append({"command": command, "ok": True})
+                effective = self._publish_effective(command)
+                attempts.append({"command": effective, "ok": True})
+                if (effective != ZERO and self.state in ("CLAIMING", "FORWARD")
+                        and self._first_nonzero_published_at is None):
+                    published_at = self._now()
+                    if published_at is not None:
+                        self._first_nonzero_published_at = published_at
+                        self._startup_transition_deadline = published_at + STARTUP_TRANSITION_TIMEOUT
+                    else:
+                        self._publish_effective(ZERO)
+                        attempts.append({"command": ZERO, "ok": True})
             except Exception as exc:
                 attempts.append({"command": command, "ok": False, "error": repr(exc)})
                 self._fail("publish_error", self._last_clock)
                 if command != ZERO:
                     try:
-                        self.publish(ZERO)
+                        self._publish_effective(ZERO)
                         attempts.append({"command": ZERO, "ok": True})
                     except Exception as zero_exc:
                         attempts.append({"command": ZERO, "ok": False, "error": repr(zero_exc)})
@@ -395,6 +426,8 @@ class X2MotionAdapter:
                 "odom_age": None if now is None or self.odom is None else now-self.odom.received,
                 "mc_age": None if now is None or self.mc is None else now-self.mc.received,
                 "claim_deadline": self._claim_deadline,
+                "first_nonzero_published_at": self._first_nonzero_published_at,
+                "startup_publish_deadline": self._startup_publish_deadline,
                 "startup_transition_deadline": self._startup_transition_deadline,
                 "startup_transition_pending": self._startup_transition_pending,
                 "ownership_confirmed_at": self.ownership_confirmed_at,

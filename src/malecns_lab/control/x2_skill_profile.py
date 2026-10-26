@@ -1,6 +1,7 @@
 """Fixed simulation qualification profile, independent of brain/task selection."""
 from copy import deepcopy
 import json
+import math
 
 from .x2_skills import SKILL_PACK_ID, validate_command_durations
 
@@ -10,6 +11,22 @@ PROFILE_ID = "malecns.x2.sim.advance1-turn2.v1"
 SIM_WAVE_PROFILE_ID = "malecns.x2.sim.advance1-turn2-wave1002.v1"
 SIM_FIXED_ADVANCE_PROFILE_ID = "malecns.x2.sim.advance-fixed02-1s-turn2.v1"
 SIM_FROZEN_FULL_PROFILE_ID = "malecns.x2.sim.frozen-fixed02-turn04-wave1002.v1"
+SIM_FEEDBACK_FULL_PROFILE_ID = "malecns.x2.sim.frozen-fixed02-turn04-feedback035-wave1002.v2"
+SIM_HIGH_TURN_FULL_PROFILE_ID = "malecns.x2.sim.frozen-fixed02-turn08-feedback035-wave1002.v3"
+SIM_MEASURED_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-wave1002.v4"
+SIM_TAPERED_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-taper04-wave1002.v5"
+SIM_PRECISION_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-pd-wave1002.v6"
+SIM_SETTLED_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-settled08-wave1002.v7"
+SIM_BALANCE_SWAY_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-wave-yaw006.v8"
+SIM_QUARTER_TURN_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-final5-wave-yaw006.v9"
+SIM_INTEGRAL_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-pid1-wave-yaw006.v10"
+SIM_COMPENSATED_ACTION_PROFILE_ID = "malecns.x2.sim.frozen-advance1m-turn90-pid1-stopped-comp-wave-yaw006.v11"
+MEASURED_ACTION_PROFILE_IDS = (SIM_MEASURED_ACTION_PROFILE_ID, SIM_TAPERED_ACTION_PROFILE_ID,
+                               SIM_PRECISION_ACTION_PROFILE_ID, SIM_SETTLED_ACTION_PROFILE_ID,
+                               SIM_BALANCE_SWAY_ACTION_PROFILE_ID, SIM_QUARTER_TURN_ACTION_PROFILE_ID,
+                               SIM_INTEGRAL_ACTION_PROFILE_ID, SIM_COMPENSATED_ACTION_PROFILE_ID)
+FEEDBACK_FULL_PROFILE_IDS = (SIM_FEEDBACK_FULL_PROFILE_ID, SIM_HIGH_TURN_FULL_PROFILE_ID, *MEASURED_ACTION_PROFILE_IDS)
+FULL_ACTION_PROFILE_IDS = (SIM_FROZEN_FULL_PROFILE_ID, *FEEDBACK_FULL_PROFILE_IDS)
 
 
 def candidate_skill_profile(*, wave_enabled=False):
@@ -28,7 +45,9 @@ def validate_candidate_skill_profile(value):
     """Reject any different registration before transport can publish commands."""
     if not isinstance(value, dict):
         raise ValueError("Missing candidate skill profile")
-    validate_command_durations(value.get("command_seconds_by_behavior"))
+    validate_command_durations(value.get("command_seconds_by_behavior"),
+        max_seconds=10. if value.get('profile_id') in MEASURED_ACTION_PROFILE_IDS else
+            5. if value.get('profile_id') in FEEDBACK_FULL_PROFILE_IDS else 2.)
     expected = skill_profile_by_id(value.get("profile_id"))
     if json.dumps(value, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):
         raise ValueError("Candidate skill profile differs from the fixed simulation configuration")
@@ -55,6 +74,26 @@ def fixed_advance_skill_profile():
 
 
 def skill_profile_by_id(profile_id):
+    if profile_id == SIM_COMPENSATED_ACTION_PROFILE_ID:
+        return compensated_action_skill_profile()
+    if profile_id == SIM_INTEGRAL_ACTION_PROFILE_ID:
+        return integral_action_skill_profile()
+    if profile_id == SIM_QUARTER_TURN_ACTION_PROFILE_ID:
+        return quarter_turn_action_skill_profile()
+    if profile_id == SIM_BALANCE_SWAY_ACTION_PROFILE_ID:
+        return balance_sway_action_skill_profile()
+    if profile_id == SIM_SETTLED_ACTION_PROFILE_ID:
+        return settled_action_skill_profile()
+    if profile_id == SIM_PRECISION_ACTION_PROFILE_ID:
+        return precision_action_skill_profile()
+    if profile_id == SIM_TAPERED_ACTION_PROFILE_ID:
+        return tapered_action_skill_profile()
+    if profile_id == SIM_MEASURED_ACTION_PROFILE_ID:
+        return measured_action_skill_profile()
+    if profile_id == SIM_HIGH_TURN_FULL_PROFILE_ID:
+        return high_turn_full_skill_profile()
+    if profile_id == SIM_FEEDBACK_FULL_PROFILE_ID:
+        return feedback_full_skill_profile()
     if profile_id == SIM_FROZEN_FULL_PROFILE_ID:
         return frozen_full_skill_profile()
     if profile_id == SIM_FIXED_ADVANCE_PROFILE_ID:
@@ -78,6 +117,138 @@ def frozen_full_skill_profile():
             timeout_seconds=6., post_response_standing_seconds=1.,
             claim='preparation only; no verified yaw reanchoring or turn-then-wave qualification'),
         qualification_scope='all-action neural SIM integration pending actual acceptance; original model FAIL retained')
+    return value
+
+
+def feedback_full_skill_profile():
+    """New bounded feedback candidate; keep the historical two-second contract."""
+    value = frozen_full_skill_profile()
+    value.update(profile_id=SIM_FEEDBACK_FULL_PROFILE_ID,
+        command_seconds_by_behavior=dict(ADVANCE=1., TURN_LEFT=5., TURN_RIGHT=5.))
+    value['turn_execution'].update(mode='measured_angle_bounded_velocity', command_seconds=5.,
+        evidence_scope='candidate; full-brain consecutive-action SIM acceptance pending',
+        acceptance='reach signed 0.35 rad before the 5 s cap, then confirm angular stop and positive signed displacement; unmet target fails; explicit cancellation stays cancellation')
+    return value
+
+
+def high_turn_full_skill_profile():
+    """Isolated 0.8 rad/s SIM comparison; all v2 feedback guards are retained."""
+    value = feedback_full_skill_profile()
+    value['profile_id'] = SIM_HIGH_TURN_FULL_PROFILE_ID
+    value['turn_execution'].update(left_rad_s=.8, right_rad_s=-.8,
+        evidence_scope='single-speed SIM qualification candidate; startup-threshold hypothesis unverified')
+    return value
+
+
+def measured_action_skill_profile():
+    """Measured one-metre/quarter-turn simulation actions; not qualification."""
+    value = high_turn_full_skill_profile()
+    value.update(profile_id=SIM_MEASURED_ACTION_PROFILE_ID,
+        command_seconds_by_behavior=dict(ADVANCE=10., TURN_LEFT=10., TURN_RIGHT=10.))
+    value['advance_execution'] = dict(mode='measured_distance_bounded_velocity', velocity_m_s=[.2, 0., 0.],
+        command_seconds=10., measured_stop_distance_m=1.,
+        intensity_semantics='record original positive model intensity; do not scale ADVANCE velocity',
+        acceptance='reach 1 m along initial body forward axis, then confirm stop and final forward distance >= 1 m',
+        qualification_scope='new measured-distance SIM candidate; no qualification inherited from the one-second primitive')
+    value['turn_execution'].update(command_seconds=10., measured_stop_angle_rad=math.pi / 2,
+        evidence_scope='new 90-degree SIM candidate; genuine heading input changed from +/-0.45 to +/-pi/2; no retraining',
+        acceptance='reach signed pi/2, then confirm stop and final signed angle >= pi/2; record actual overshoot; no precision qualification')
+    return value
+
+
+def tapered_action_skill_profile():
+    """One bounded terminal-speed reduction; preserve the original v4 evidence."""
+    value = measured_action_skill_profile()
+    value['profile_id'] = SIM_TAPERED_ACTION_PROFILE_ID
+    value['turn_execution'].update(mode='measured_angle_two_speed_velocity',
+        slowdown_remaining_angle_rad=.5, terminal_speed_rad_s=.4,
+        slowdown_rule='once remaining measured signed angle is in (0, 0.5] rad, reduce magnitude to 0.4 rad/s; no acceleration or deadline renewal',
+        evidence_scope='unverified terminal-speed candidate; v4 measured 1.06/1.14 rad/s at zero and 90.8/99.0 degree final turns; unchanged genuine pi/2 input and weights')
+    return value
+
+
+def balance_sway_action_skill_profile():
+    """Opt-in SIM wave envelope candidate; final return guards are unchanged."""
+    value = measured_action_skill_profile()
+    value['profile_id'] = SIM_BALANCE_SWAY_ACTION_PROFILE_ID
+    value['wave_execution'] = dict(active_yaw_limit_rad=.06, return_yaw_limit_rad=.03,
+        evidence_scope='unverified engineering candidate, not an official safety limit; no action acceptance inherited from v4 or the helper/cancellation contract',
+        acceptance='active yaw <= 0.06 rad; final return still <= 0.03 rad with all original stationary, arm-return, freshness and deadline guards')
+    return value
+
+
+def quarter_turn_action_skill_profile():
+    """Same v8 execution, with a symmetric measured stopped-angle criterion."""
+    value = balance_sway_action_skill_profile()
+    value['profile_id'] = SIM_QUARTER_TURN_ACTION_PROFILE_ID
+    value['turn_execution'].update(final_tolerance_rad=math.radians(5.),
+        acceptance='cross the original signed pi/2 target before the unchanged 10 s cap, then confirm original measured stop, motion, direction and no protection; final absolute target error <= 5 degrees; late target feedback cannot rescue timeout',
+        evidence_scope='new terminal criterion matching the existing driver +/-5 degree criterion; v8 stopped at 88.741 degrees after crossing but failed its one-sided final bound; physical v9 qualification pending')
+    return value
+
+
+def precision_action_skill_profile():
+    """Unqualified, opt-in terminal-heading controller; no new brain decision."""
+    value = measured_action_skill_profile()
+    value['profile_id'] = SIM_PRECISION_ACTION_PROFILE_ID
+    value['turn_execution'].update(mode='measured_heading_pd_bounded_correction',
+        feedback_controller=dict(position_gain=2., angular_rate_gain=.25,
+            final_tolerance_rad=math.radians(5.), settle_entry_error_rad=math.radians(2.5),
+            settle_entry_speed_rad_s=.15, max_corrections=2, total_deadline_seconds=22.,
+            stall_window_seconds=2., stall_min_angle_rad=.01),
+        controller_rule='clip(2 * (original signed goal - measured accumulated angle) - 0.25 * measured angular speed, -0.8, +0.8); no integral or minimum speed',
+        correction_rule='at most two internal corrections after confirmed stop and standing readiness; preserve origin, goal and execution identity; all motion ends by original START + 10 s; total close deadline START + 22 s',
+        acceptance='final absolute heading error <= 5 degrees and original measured stop plus standing readiness; crossing pi/2 alone is insufficient; stalled, exhausted or expired control fails',
+        evidence_scope='unverified PD and finite-correction candidate; MC small-command response and convergence unknown; v4 remains default; genuine heading, neural weights and history unchanged')
+    return value
+
+
+def integral_action_skill_profile():
+    """One opt-in anti-windup PID candidate; no precision qualification claim."""
+    value = balance_sway_action_skill_profile()
+    value['profile_id'] = SIM_INTEGRAL_ACTION_PROFILE_ID
+    value['execution_poll_seconds_by_behavior'] = dict(TURN_LEFT=36., TURN_RIGHT=36.)
+    value['turn_execution'].update(mode='measured_heading_pid_bounded_correction',
+        feedback_controller=dict(position_gain=2., angular_rate_gain=.25,
+            integral_gain=1., integral_limit_rad_s=.8, max_sample_dt_seconds=.05,
+            final_tolerance_rad=math.radians(5.), settle_entry_error_rad=math.radians(2.5),
+            settle_entry_speed_rad_s=.15, max_corrections=1, nonzero_budget_seconds=10.,
+            stop_timeout_seconds=12., total_deadline_seconds=34.,
+            stall_window_seconds=2., stall_min_angle_rad=.01,
+            max_sample_records=512, max_stage_records=64),
+        controller_rule='clip(2 * original heading error - 0.25 * measured angular speed + I, -0.8, +0.8); I gain 1/s^2, bounded +/-0.8; integrate each fresh new odom once using dt <=0.05s; same-direction P+I+D saturation freezes I, opposite direction may unwind',
+        integral_reset='zero on error sign change, stopping, cancellation, protection, stale feedback and each new request; no integration while stopping; a stale sample gap is skipped',
+        correction_rule='one internal correction only after fresh measured STOPPED and standing; preserve original origin/goal; cumulative actual published nonzero <=10s, per segment TTL <=10s and remaining budget; each stop <=12s; START+34s hard deadline with final 12s stop-only; CONTINUE renews no budget; non-improving correction fails',
+        acceptance='original measured stop and standing readiness with final absolute heading error <=5 degrees; crossing alone never completes; stall requires continuous saturation for 2s with net angle progress <0.01rad',
+        evidence_scope='unverified fixed integral candidate targeting the v6 low-speed stall; zero-command recoil and closed-loop convergence remain unverified; old profiles/default and neural inputs/weights unchanged')
+    return value
+
+
+def compensated_action_skill_profile():
+    """One same-request measured residual compensation; independently opt-in."""
+    value = integral_action_skill_profile()
+    value['profile_id'] = SIM_COMPENSATED_ACTION_PROFILE_ID
+    value['turn_execution'].update(mode='measured_heading_pid_single_stopped_residual_compensation',
+        reference_compensation=dict(max_first_stopped_error_rad=math.radians(15.),
+            measured_angle_limit_rad=math.radians(105.)),
+        controller_rule='same v10 bounded PID; only its tracking error and settle entry use the internal reference; original target, brain heading and final +/-5 degree scoring never change',
+        correction_rule='one correction only after fresh real STOPPED plus standing, no protection/cancellation and original error >5 and <=15 degrees; internal reference = original signed target + (original signed target - first stopped angle); >15 degrees fails without clipping; v10 10s cumulative nonzero/22s motion/34s total/12s stop budgets do not renew; measured absolute angle >105 degrees latches failure and zero, not a guarantee against physical overshoot',
+        evidence_scope='unverified same-request compensation candidate; no across-run bias, no gain search or inherited v10 precision qualification; old profiles/default and neural inputs/weights unchanged')
+    return value
+
+
+def settled_action_skill_profile():
+    """Opt-in finite corrections using only the measured +/-0.8 command."""
+    value = measured_action_skill_profile()
+    value['profile_id'] = SIM_SETTLED_ACTION_PROFILE_ID
+    value['execution_poll_seconds_by_behavior'] = dict(TURN_LEFT=48., TURN_RIGHT=48.)
+    value['turn_execution'].update(mode='measured_stopped_heading_finite_correction',
+        settled_controller=dict(final_tolerance_rad=math.radians(5.), max_corrections=2,
+            nonzero_budget_seconds=10., stop_timeout_seconds=12., total_deadline_seconds=46.),
+        controller_rule='same brain START and original signed goal; command +/-0.8 toward measured error until goal crossing, then zero and confirm full stop; no forward, integral, deadzone or fixed braking offset',
+        correction_rule='at most two internal corrections after fresh stopped standing feedback; a correction must reduce absolute stopped error or fail; cumulative nonzero command time <= 10 s; each stop <= 12 s; hard deadline START + 46 s, last 12 s stop only; CONTINUE renews no budget',
+        acceptance='original measured stop plus standing readiness and final absolute heading error <= 5 degrees; crossing alone is insufficient',
+        evidence_scope='unverified finite-correction candidate; +/-0.8 moved both directions but short correction convergence is unknown; v4 remains default; genuine heading, neural weights and history unchanged')
     return value
 
 

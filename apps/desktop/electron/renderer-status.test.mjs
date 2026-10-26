@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/live-status.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-const { LiveStatus, canEmergencyStop } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { LiveStatus, canEmergencyStop, canSubmitTask } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const status = state => ({ state, resources_stopped: state === 'idle' });
 
 test('prepare acknowledgement persists and an older idle poll cannot roll it back', () => {
@@ -46,4 +46,17 @@ test('emergency stop remains available during ordinary operations, including pre
   }
   assert.equal(canEmergencyStop(status('stopping'), true, false), false);
   assert.equal(canEmergencyStop(status('idle'), false, false), false);
+});
+
+test('ordinary task buttons wait through computation, execution and stopping; END stays available', () => {
+  const ready = { state: 'running', mode: 'brain_control', brain_controlled: true, phase: 'waiting_task', action_busy: false };
+  assert.equal(canSubmitTask(ready, 'SHOW_FORWARD'), true);
+  for (const phase of ['queued', 'computing', 'executing', 'settling', 'request_rejected']) {
+    const busy = { ...ready, phase, action_busy: true, task: 'SHOW_FORWARD' };
+    for (const task of ['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD']) assert.equal(canSubmitTask(busy, task), false);
+    assert.equal(canSubmitTask(busy, 'END_INTERACTION'), true);
+  }
+  assert.equal(canSubmitTask({ ...ready, request_pending: true }, 'FACE_LEFT'), false);
+  assert.equal(canSubmitTask({ ...ready, action_busy: true, task: 'END_INTERACTION' }, 'END_INTERACTION'), false);
+  assert.equal(canSubmitTask({ ...ready, state: 'stopping' }, 'END_INTERACTION'), false);
 });

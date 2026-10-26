@@ -8,15 +8,17 @@ import pytest
 from malecns_lab.control.x2_behavior import DecisionGate
 from malecns_lab.control.x2_interaction import (
     frozen_full_interaction_profile, frozen_history_interaction_profile,
-    validate_interaction_profile,
+    validate_interaction_profile, measured_action_interaction_profile,
 )
 from malecns_lab.control.x2_skill_profile import (
     SIM_FROZEN_FULL_PROFILE_ID, frozen_full_skill_profile,
     fixed_advance_skill_profile, candidate_skill_profile, validate_candidate_skill_profile,
+    measured_action_skill_profile,
 )
 from malecns_lab.control.x2_skills import SkillCommand, RIGHT_ARM, VelocityCore
 from malecns_lab.experiments.x2_behavior_bridge import (
     candidate_executor, WaveSession, WaveStandPreparation, runtime_context_snapshot, observed_base_stop_basis,
+    cleanup_base_stop_basis,
 )
 from malecns_lab.learning.x2_frozen_history_policy import CANDIDATE_RELATIVE, inspect_frozen_history_candidate
 from malecns_lab.runtime.x2.behavior import MAX_DECISIONS
@@ -52,8 +54,8 @@ def test_full_profile_preserves_brain_contract_and_binds_fixed_motion_without_ta
     assert candidate_skill_profile(wave_enabled=True)['wave_contract'] == p['wave_contract']
     metadata = inspect_frozen_history_candidate(Path(__file__).resolve().parents[2],
         Path(__file__).resolve().parents[2]/CANDIDATE_RELATIVE)
-    assert metadata['policy']['interaction_profile'] == interaction
-    assert metadata['policy']['execution_profile'] == p and not metadata['policy']['can_deploy']
+    assert metadata['policy']['interaction_profile'] == measured_action_interaction_profile()
+    assert metadata['policy']['execution_profile'] == measured_action_skill_profile() and not metadata['policy']['can_deploy']
     DecisionGate('run','session','policy','checkpoint','input',sim_wave_profile_id=SIM_FROZEN_FULL_PROFILE_ID)
     with pytest.raises(ValueError):
         DecisionGate('run','session','policy','checkpoint','input',sim_wave_profile_id='invented')
@@ -127,3 +129,76 @@ def test_brain_selected_wave_waits_for_single_sd_and_end_withdraws_unsent_wave(t
             assert helpers[0].requests == [dict(motion=1002, area=2, interrupt=False)]
             assert any(kind=='wave_sd_standing' for kind,_ in records)
             assert r.core.command.intensity == .5 and r.core.command.behavior == 'WAVE_RIGHT'
+
+
+def recovered_protected_wave():
+    r = rig()
+    r.source = ''
+    r.feed()
+    r.core.preset_query(0, 0, 1, received=r.t)
+    assert r.core.submit(SkillCommand(0, 'brain-wave', 'WAVE_RIGHT', 'START', .5, r.t))
+    r.core.preset_dispatch()
+    assert r.core.preset_sent(r.t) and r.core.preset_ack(0, 0, 400)
+    r.player, r.joint = 2, .3
+    r.feed(); r.core.preset_query(0, 0, 400, received=r.t); r.core.tick()
+    assert r.core.status == 'STARTED'
+    r.a = .031
+    r.feed(); r.core.preset_query(0, 0, 400, received=r.t); r.core.tick()
+    assert r.core.status == 'UNKNOWN' and r.core.reason == 'wave_yaw_limit'
+    r.core.cancel('fixture_cleanup')
+    assert cleanup_base_stop_basis(r.core) is None
+    r.player, r.joint, r.a = 0, 0., 0.
+    for _ in range(125):
+        r.feed(); r.core.preset_query(0, 0, 1, received=r.t)
+        r.core.standing_ready(); r.core.tick()
+    assert r.core.wave_return_confirmed and r.core.terminal
+    assert r.core.motion.state == 'STOPPING'
+    return r
+
+
+def test_cleanup_base_stop_confirms_measured_recovery_without_clearing_failed_wave():
+    r = recovered_protected_wave()
+    failures, events = list(r.core.motion.failures), list(r.core.events)
+    assert observed_base_stop_basis(r.core) is None
+    assert observed_base_stop_basis(r.core, allow_unsent_wave=True) is None
+    assert cleanup_base_stop_basis(r.core) == 'cleanup_protected_wave_returned_unclaimed_stationary_standing'
+    assert r.core.status == 'UNKNOWN' and r.core.reason == 'wave_yaw_limit'
+    assert r.core.motion.failures == failures and r.core.events == events
+    assert runtime_context_snapshot(r.core, SimpleNamespace(valid=True), 1)['protection_state'] == 'LATCHED'
+    assert not r.core.submit(SkillCommand(1, 'next-wave', 'WAVE_RIGHT', 'START', .5, r.t))
+
+
+@pytest.mark.parametrize('changed', ['moving', 'rotating', 'stale_odom', 'stale_mc', 'stale_joints',
+    'stale_query', 'playing', 'joint_position', 'joint_speed', 'unconfirmed_return',
+    'not_terminal', 'base_motion', 'short_stop_window'])
+def test_cleanup_base_stop_requires_current_stop_and_wave_recovery_evidence(changed):
+    from dataclasses import replace
+    r = recovered_protected_wave()
+    if changed == 'moving':
+        r.feed(speed=.021)
+    elif changed == 'rotating':
+        r.feed(wz=.031)
+    elif changed == 'stale_odom':
+        r.core.motion.odom = replace(r.core.motion.odom, received=r.t-.26)
+    elif changed == 'stale_mc':
+        r.core.motion.mc = replace(r.core.motion.mc, received=r.t-.51)
+    elif changed == 'stale_joints':
+        r.core.joints_at = r.t-.26
+    elif changed == 'stale_query':
+        r.core.query_at = r.t-.51
+    elif changed == 'playing':
+        r.player = 2; r.feed()
+    elif changed == 'joint_position':
+        r.joint = .16; r.feed()
+    elif changed == 'joint_speed':
+        r.core.joints[RIGHT_ARM[0]] = (0., .08)
+    elif changed == 'unconfirmed_return':
+        r.core.wave_return_confirmed = False
+    elif changed == 'not_terminal':
+        r.core.terminal = False
+    elif changed == 'base_motion':
+        r.core.motion.base_motion_requested = True
+    elif changed == 'short_stop_window':
+        r.core.motion.request_stop('fresh_cleanup_stop', failure=False)
+    assert cleanup_base_stop_basis(r.core) is None
+    assert r.core.status == 'UNKNOWN' and 'wave_yaw_limit' in r.core.motion.failures

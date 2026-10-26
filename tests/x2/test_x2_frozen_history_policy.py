@@ -1,5 +1,6 @@
 """Local adapter contract with a fake brain; no full graph or device startup."""
 from dataclasses import dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,50 @@ from malecns_lab.learning.x2_frozen_history_policy import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize('selection', ['precision', 'settled'])
+def test_turn_profile_changes_execution_identity_but_not_neural_contract(monkeypatch, selection):
+    from malecns_lab.learning import x2_frozen_history_policy as module
+    from malecns_lab.control.x2_skill_profile import (
+        SIM_MEASURED_ACTION_PROFILE_ID, SIM_PRECISION_ACTION_PROFILE_ID, SIM_SETTLED_ACTION_PROFILE_ID)
+    # These are identity/selection checks, not a second artifact-hash audit.
+    monkeypatch.setattr(module, '_check', lambda *args: None)
+    measured = module.inspect_frozen_history_candidate(ROOT, ROOT / CANDIDATE_RELATIVE)
+    precision = module.inspect_frozen_history_candidate(ROOT, ROOT / CANDIDATE_RELATIVE,
+                                                       turn_profile=selection)
+    a, b = measured['policy'], precision['policy']
+    assert a['execution_profile']['profile_id'] == SIM_MEASURED_ACTION_PROFILE_ID
+    assert b['execution_profile']['profile_id'] == (
+        SIM_PRECISION_ACTION_PROFILE_ID if selection == 'precision' else SIM_SETTLED_ACTION_PROFILE_ID)
+    assert measured['checkpoint_id'] != precision['checkpoint_id'] and a['policy_id'] != b['policy_id']
+    for key in ('numeric_engine_id', 'input_map_id', 'artifacts', 'readout', 'initialization', 'source_sha256'):
+        assert a[key] == b[key]
+    assert not a['can_deploy'] and not b['can_deploy']
+    with pytest.raises(ValueError, match='Unsupported frozen turn profile'):
+        module.inspect_frozen_history_candidate(ROOT, ROOT / CANDIDATE_RELATIVE, turn_profile='custom')
+
+
+@pytest.mark.parametrize('selection', ['measured', 'precision', 'settled'])
+def test_turn_profile_loader_reauthenticates_and_rejects_metadata_overrides(monkeypatch, selection):
+    from malecns_lab.learning import x2_frozen_history_policy as module
+    factory = {'measured': module.measured_action_skill_profile,
+               'precision': module.precision_action_skill_profile, 'settled': module.settled_action_skill_profile}[selection]
+    seen = []
+    def inspect(root, path, *, turn_profile, wave_profile):
+        assert wave_profile == 'baseline'
+        seen.append(turn_profile)
+        return dict(checkpoint_id='authenticated-id', policy=dict(execution_profile=factory()))
+    monkeypatch.setattr(module, 'inspect_frozen_history_candidate', inspect)
+    metadata = dict(checkpoint_id='forged-id', policy=dict(execution_profile=factory()))
+    with pytest.raises(ValueError, match='identity differs'):
+        module.load_frozen_history_policy(ROOT, ROOT / CANDIDATE_RELATIVE, metadata)
+    assert seen == [selection]
+    altered = deepcopy(metadata)
+    altered['policy']['execution_profile']['turn_execution']['command_seconds'] = 999.
+    with pytest.raises(ValueError, match='not an allowed contract'):
+        module.load_frozen_history_policy(ROOT, ROOT / CANDIDATE_RELATIVE, altered)
+    assert seen == [selection]  # Rejected before reconstruction or numerical loading.
 
 
 @dataclass(frozen=True)

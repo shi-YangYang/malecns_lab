@@ -163,6 +163,73 @@ def test_missing_or_external_candidate_fails_before_any_runtime(tmp_path):
         candidate(tmp_path,outside)
 
 
+@pytest.mark.parametrize('selection', ['precision', 'settled'])
+def test_turn_profile_is_explicit_fixed_b_only_and_cli_defaults_to_measured(tmp_path, monkeypatch, capsys, selection):
+    from malecns_lab.runtime.x2 import behavior as module
+    from malecns_lab.learning import x2_frozen_history_policy as frozen
+    fixed = tmp_path / frozen.CANDIDATE_RELATIVE
+    fixed.mkdir(parents=True)
+    seen = []
+    def inspect(root, path, *, turn_profile, wave_profile):
+        assert wave_profile == 'baseline'
+        seen.append(turn_profile)
+        return {'selection': turn_profile}
+    monkeypatch.setattr(frozen, 'inspect_frozen_history_candidate', inspect)
+    assert module.candidate(tmp_path, fixed)[1] == {'selection': 'measured'}
+    assert module.candidate(tmp_path, fixed, turn_profile=selection)[1] == {'selection': selection}
+    legacy = tmp_path / 'data/legacy'; legacy.mkdir()
+    with pytest.raises(ValueError, match='requires the fixed B'):
+        module.candidate(tmp_path, legacy, turn_profile=selection)
+    assert seen == ['measured', selection]
+    assert module.main([]) == 0
+    assert json.loads(capsys.readouterr().out)['turn_profile'] == 'measured'
+    assert module.main(['--turn-profile', selection]) == 0
+    assert json.loads(capsys.readouterr().out)['turn_profile'] == selection
+
+
+@pytest.mark.parametrize('ready_at,global_deadline,exit_at,error,elapsed', [
+    (23.6, 100., None, None, 23.6),
+    (None, 100., None, 'Bridge readiness expired', 30.),
+    (23.6, 12., None, 'Bridge readiness expired', 12.),
+    (None, 100., 2., 'Behavior bridge startup failed', 2.),
+])
+def test_bridge_initialization_wait_is_bounded_and_checks_process_exit(
+        tmp_path, monkeypatch, ready_at, global_deadline, exit_at, error, elapsed):
+    from malecns_lab.runtime.x2 import behavior as module
+    runtime = object.__new__(BehaviorRuntime)
+    runtime.output, runtime.remote, runtime.docker = tmp_path, '/private/run', ['docker']
+    runtime.skill_profile = module.candidate_skill_profile()
+    runtime.interaction = module.interaction_profile()
+    runtime.session_limits = {'session_contract_id': 'fixture-session'}
+    runtime.session_running = runtime.tasks_open = False
+    clock, guarded, statuses, spawned = Clock(0.), [], [], []
+    ready = dict(skill_profile=runtime.skill_profile,
+                 capabilities=runtime.interaction['capabilities'],
+                 wave_enabled=runtime.interaction['wave_enabled'],
+                 session_contract_id='fixture-session')
+    def sleep(seconds):
+        clock.value = round(clock.value + seconds, 6)
+        if ready_at is not None and clock.value >= ready_at:
+            (tmp_path/'bridge_ready.json').write_text(json.dumps(ready))
+    def spawn(command, log):
+        spawned.append((command, log))
+        return SimpleNamespace(poll=lambda: 1 if exit_at is not None and clock.value >= exit_at else None)
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=clock, sleep=sleep))
+    runtime.spawn, runtime.deadline = spawn, lambda: global_deadline
+    runtime.guard = lambda: guarded.append(clock.value)
+    runtime.status = lambda *args, **kwargs: statuses.append((args, kwargs))
+    if error:
+        with pytest.raises(ValueError, match=error):
+            runtime.start_behavior_bridge()
+        assert not runtime.session_running and not runtime.tasks_open and not statuses
+    else:
+        runtime.start_behavior_bridge()
+        assert runtime.session_running and runtime.tasks_open
+        assert statuses[-1][1]['phase'] == 'waiting_task'
+    assert clock.value == elapsed and len(spawned) == 1
+    assert guarded and max(guarded) <= elapsed
+
+
 def test_emergency_write_failure_does_not_skip_owned_resource_cleanup(tmp_path,monkeypatch):
     from malecns_lab.runtime.x2 import behavior as module
     runtime=object.__new__(BehaviorRuntime)
@@ -172,6 +239,142 @@ def test_emergency_write_failure_does_not_skip_owned_resource_cleanup(tmp_path,m
     monkeypatch.setattr(module,'atomic',lambda *args:(_ for _ in ()).throw(OSError('disk full')))
     runtime.shutdown_behavior('emergency')
     assert cleaned==[True] and runtime.stop_confirmed is None and runtime.errors
+
+
+def failure_cause_runtime(tmp_path):
+    """Host orchestration only: every process, startup and shutdown is a fixture."""
+    from malecns_lab.runtime.x2 import behavior as module
+    statuses = []
+    runtime = BehaviorRuntime(tmp_path, module.ROOT, Commands(io.StringIO()), statuses.append,
+                              tmp_path/'candidate', {'policy': {}})
+    runtime.preflight = runtime.prepare = runtime.start_simulator = runtime.start_behavior_bridge = lambda: None
+    runtime.guard = lambda: None
+    runtime.bridge = SimpleNamespace(poll=lambda: None)
+    runtime.host = SimpleNamespace(poll=lambda: 1)
+    runtime.command = lambda *args, **kwargs: SimpleNamespace(stdout='')
+    def shutdown(reason):
+        runtime.resources_stopped = True
+        runtime.stop_confirmed = False
+    runtime.shutdown_behavior = shutdown
+    (tmp_path/'behavior_worker_result.json').write_text(json.dumps(
+        {'status': 'failed', 'reason': 'TimeoutError:Remote observation timed out'}))
+    return runtime, statuses
+
+
+def failure_cause_packet(runtime, *, sequence=10, status='UNKNOWN', reason='wave_yaw_limit'):
+    event = ExecutionEvent(runtime.run_id, runtime.session_id, sequence, 10, 'skill-10', 'request-2',
+        'sim', 'skills', status, 'WAVE_RIGHT', 385.067682182,
+        raw_feedback={'reason': reason}, stop_evidence={'stop_confirmed': False}, protection_reason=reason)
+    return dict(schema=SCHEMA, run_id=runtime.run_id, session_id=runtime.session_id, event=event.to_dict())
+
+
+@pytest.mark.parametrize('exit_source', ['worker', 'worker_race', 'bridge'])
+def test_failure_cause_preserves_protection_before_worker_or_bridge_exit(tmp_path, exit_source):
+    runtime, statuses = failure_cause_runtime(tmp_path)
+    packet = failure_cause_packet(runtime)
+    write = lambda: (tmp_path/'execution_latest.json').write_text(json.dumps(packet))
+    if exit_source == 'worker_race':
+        runtime.guard = write  # Event arrives after the first read, before the original worker check.
+    else:
+        write()
+    if exit_source == 'bridge':
+        runtime.bridge = SimpleNamespace(poll=lambda: 1)
+    shutdown = runtime.shutdown_behavior
+    def cleanup(reason):
+        # A tail event and cleanup exception cannot displace the first protection.
+        (tmp_path/'execution_latest.json').write_text(json.dumps(
+            failure_cause_packet(runtime, sequence=11, reason='cleanup_stop_timeout')))
+        (tmp_path/'bridge_summary.json').write_text(json.dumps(
+            {'status': 'UNKNOWN', 'reason': 'RuntimeError:Execution protection latched: wave_yaw_limit'}))
+        runtime.errors.append('container_cleanup:fixture failure')
+        shutdown(reason)
+    runtime.shutdown_behavior = cleanup
+    result = runtime.execute_behavior()
+    assert result['state'] == 'failed' and result['reason'] == 'Execution protection: wave_yaw_limit'
+    assert result['execution_failure']['event_seq'] == 10
+    assert result['execution_failure']['remote_received_monotonic'] == 385.067682182
+    assert result['execution_failure']['stop_evidence'] == {'stop_confirmed': False}
+    assert result['stop_confirmed'] is False
+    assert 'behavior_worker_result.json:TimeoutError:Remote observation timed out' in result['secondary_errors']
+    original = 'Behavior bridge exited' if exit_source == 'bridge' else 'Brain worker: TimeoutError:Remote observation timed out'
+    assert 'ValueError:'+original in result['secondary_errors']
+    assert 'bridge_summary.json:RuntimeError:Execution protection latched: wave_yaw_limit' in result['secondary_errors']
+    assert 'container_cleanup:fixture failure' in result['secondary_errors']
+    assert statuses[-1]['message'] == '动作保护停止：wave_yaw_limit'
+    assert statuses[-1]['stop_confirmed'] is False
+    assert json.loads((tmp_path/'behavior_host_summary.json').read_text()) == result
+
+
+@pytest.mark.parametrize('layer,field', [('outer', 'schema'), ('outer', 'run_id'), ('outer', 'session_id'),
+                                        ('event', 'schema'), ('event', 'run_id'), ('event', 'session_id')])
+def test_failure_cause_rejects_foreign_or_incompatible_evidence(tmp_path, layer, field):
+    runtime, _ = failure_cause_runtime(tmp_path)
+    packet = failure_cause_packet(runtime)
+    (packet if layer == 'outer' else packet['event'])[field] = 'foreign'
+    (tmp_path/'execution_latest.json').write_text(json.dumps(packet))
+    result = runtime.execute_behavior()
+    assert result['reason'] == 'ValueError:Brain worker: TimeoutError:Remote observation timed out'
+    assert result['execution_failure'] is None and result['stop_confirmed'] is False
+    assert any(error.startswith('execution_evidence_rejected:') for error in result['secondary_errors'])
+
+
+@pytest.mark.parametrize('status,reason', [('COMPLETED', 'wave_yaw_limit'), ('UNKNOWN', None)])
+def test_failure_cause_requires_failed_status_and_real_protection_field(tmp_path, status, reason):
+    runtime, _ = failure_cause_runtime(tmp_path)
+    (tmp_path/'execution_latest.json').write_text(json.dumps(failure_cause_packet(runtime, status=status, reason=reason)))
+    result = runtime.execute_behavior()
+    assert result['execution_failure'] is None
+    assert result['reason'] == 'ValueError:Brain worker: TimeoutError:Remote observation timed out'
+
+
+def test_failure_cause_does_not_accept_replayed_sequence_or_cleanup_only_failure(tmp_path):
+    runtime, _ = failure_cause_runtime(tmp_path)
+    path = tmp_path/'execution_latest.json'
+    path.write_text(json.dumps(failure_cause_packet(runtime, sequence=11, status='RUNNING', reason=None)))
+    runtime.capture_execution_failure()
+    path.write_text(json.dumps(failure_cause_packet(runtime, sequence=10)))
+    shutdown = runtime.shutdown_behavior
+    def cleanup(reason):
+        path.write_text(json.dumps(failure_cause_packet(runtime, sequence=12, reason='cleanup_stop_timeout')))
+        shutdown(reason)
+    runtime.shutdown_behavior = cleanup
+    result = runtime.execute_behavior()
+    assert result['execution_failure'] is None
+    assert result['reason'] == 'ValueError:Brain worker: TimeoutError:Remote observation timed out'
+
+
+def test_failure_cause_latches_first_valid_protection_once(tmp_path):
+    runtime, _ = failure_cause_runtime(tmp_path)
+    path = tmp_path/'execution_latest.json'
+    path.write_text(json.dumps(failure_cause_packet(runtime, status='FAILED')))
+    runtime.capture_execution_failure()
+    path.write_text(json.dumps(failure_cause_packet(runtime, sequence=11, reason='later_stop_timeout')))
+    result = runtime.execute_behavior()
+    assert result['reason'] == 'Execution protection: wave_yaw_limit'
+    assert result['execution_failure']['status'] == 'FAILED'
+    assert result['execution_failure']['event_seq'] == 10
+
+
+@pytest.mark.parametrize('failure', [None, 'emergency_write', 'log_write'])
+def test_request_budget_failure_never_publishes_ready_and_notifies_before_state_save(tmp_path, monkeypatch, failure):
+    from malecns_lab.learning import x2_behavior_session as module
+    rows, phases = [], []
+    task = dict(run_id='run', session_id='session', request_id='request', task='SHOW_FORWARD')
+    if failure == 'emergency_write':
+        monkeypatch.setattr(module, 'atomic', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
+    def record(kind, **fields):
+        if failure == 'log_write':
+            raise OSError('log full')
+        rows.append((kind, fields))
+    with pytest.raises(OSError if failure else RuntimeError):
+        module.fail_request_budget(tmp_path, task, 32, record, lambda name, **fields: phases.append((name, fields)))
+    assert len(phases) == 1 and phases[0][0] == 'request_failed'
+    assert phases[0][1]['task_success'] is False and phases[0][1]['stop_confirmed'] is None
+    assert phases[0][1]['independent_protection'] is True
+    assert not any(kind == 'request_waiting' for kind, _ in rows)
+    if failure != 'emergency_write':
+        emergency = json.loads((tmp_path/'emergency.json').read_text())
+        assert emergency['request_id'] == 'request' and emergency['reason'] == 'decision_budget_reached'
 
 def test_executor_fact_envelope_keeps_original_and_finish_decisions_separate():
     raw=dict(decision_seq=4,execution_id='skill-4',request_id='first',behavior='TURN_LEFT',
@@ -188,22 +391,27 @@ def test_executor_fact_envelope_keeps_original_and_finish_decisions_separate():
 
 def test_worker_phase_fields_do_not_collide_with_coordinator_status_fields():
     runtime=object.__new__(BehaviorRuntime)
+    runtime.action_busy=runtime.request_pending=False
+    runtime.active_request_id=runtime.active_task=None
     rows=[]
     runtime.status=lambda state,message,**fields:rows.append((state,message,fields))
     runtime.phase_status({'phase':'waiting_task','qualification_only':True})
-    runtime.phase_status({'phase':'executing','behavior_phase':'START','task':'FACE_LEFT'})
+    runtime.active_request_id='request';runtime.active_task='FACE_LEFT';runtime.action_busy=True
+    runtime.phase_status({'phase':'executing','behavior_phase':'START','task':'FACE_LEFT','request_id':'request'})
     assert rows[0][2]=={'phase':'waiting_task','qualification_only':True}
     assert rows[1][2]['behavior_phase']=='START'
 
 
 def test_worker_rejection_and_final_hold_remain_visible_in_status():
     runtime=object.__new__(BehaviorRuntime)
+    runtime.action_busy=runtime.request_pending=True
+    runtime.active_request_id='request';runtime.active_task='SHOW_FORWARD'
     rows=[]
     runtime.status=lambda state,message,**fields:rows.append((message,fields))
-    runtime.phase_status({'phase':'rejected','reason':'invalid_hold_phase','task':'SHOW_FORWARD','behavior':'HOLD'})
-    runtime.phase_status({'phase':'rejected','reason':'unavailable_skill','task':'GREET','behavior':'WAVE_RIGHT'})
+    runtime.phase_status({'phase':'rejected','reason':'invalid_hold_phase','task':'SHOW_FORWARD','behavior':'HOLD','request_id':'request'})
+    runtime.phase_status({'phase':'rejected','reason':'unavailable_skill','task':'GREET','behavior':'WAVE_RIGHT','request_id':'request'})
     runtime.phase_status({'phase':'waiting_task','reason':'模型选择待命，已确认停稳','task':'SHOW_FORWARD',
-                          'behavior':'HOLD','behavior_phase':'FINISH','decision_seq':11})
+                          'behavior':'HOLD','behavior_phase':'FINISH','decision_seq':11,'request_id':'request','stop_confirmed':True})
     assert [message for message,_ in rows] == ['模型选择待命，但阶段无效','模型选择的动作尚未开放','模型选择待命，已确认停稳']
     assert rows[0][1]['reason']=='invalid_hold_phase'
     assert rows[-1][1]['decision_seq']==11 and rows[-1][1]['behavior']=='HOLD'
@@ -358,6 +566,128 @@ def test_frozen_event_backlog_rechecks_events_received_by_same_request_post_infe
     assert context['post_refresh_event_high_watermark'] == 2
     assert context['projected_feedback_matches_snapshot'] and context['backlog']
     assert any(kind == 'raw_decision' for kind, _ in records)
+
+
+def closed_hold_fixture():
+    """The run's final HOLD creates three unconsumed events after physical completion."""
+    import time
+    session, policy, records = fixture_session()
+    policy.set_runtime_context = lambda *args: None
+    sequence = 0
+    def snapshot(*, request='old-request', task='SHOW_FORWARD'):
+        nonlocal sequence
+        sequence += 1
+        observation = Observation('run', 'session', sequence, request, task, time.monotonic(),
+            capabilities=('HOLD', 'ADVANCE', 'TURN_LEFT'), feedback=Feedback(valid=True, age_s=.03,
+                source='official', standing=True, status='COMPLETED' if sequence > 1 else 'IDLE',
+                behavior='HOLD', execution_id='closed-hold' if sequence > 1 else '',
+                request_id='old-request' if sequence > 1 else ''))
+        session.runtime_context(observation, dict(protection_state='READY', event_sequence=2 if sequence > 1 else -1,
+            facts=dict(failures=[], core_status='COMPLETED', source_registered=True, armed=True,
+                stable_preparation_completed=True, fresh_body=True, ownership_supported=True)))
+        return observation
+    finish, admission = session.infer(snapshot())
+    assert admission.accepted
+    for i, status in enumerate(('ACCEPTED', 'STARTED', 'COMPLETED')):
+        session.execution_event(ExecutionEvent('run', 'session', i, finish.decision_seq,
+            'closed-hold', finish.request_id, 'sim', 'skills', status, 'HOLD', time.monotonic(),
+            stop_evidence={'stop_confirmed': status == 'COMPLETED'}))
+    assert session.gate.active is None and session.finish_ends_request(finish)
+    return session, policy, records, snapshot, finish
+
+
+def test_closed_hold_consumes_its_three_events_before_next_request_without_emitting_skills():
+    session, policy, records, snapshot, finish = closed_hold_fixture()
+    policy.behavior, policy.phase = 'TURN_LEFT', 'START'
+    assert session.drain_finished_request(finish, snapshot, lambda: False, lambda: None, decision_limit=160)
+    assert [str(o.feedback.status) for o in policy.inputs] == ['IDLE', 'ACCEPTED', 'STARTED', 'COMPLETED']
+    assert all(o.request_id == finish.request_id for o in policy.inputs)
+    assert session.consumed_event_sequence == 2 and not session.pending_neural_events
+    assert session.gate.active is None and list(session.gate._admitted) == [finish.decision_seq]
+    drained = [r for kind, r in records if kind == 'raw_decision' and 'closed_request_finish_decision_seq' in r]
+    assert len(drained) == 3 and all(r['decision']['behavior'] == 'TURN_LEFT' for r in drained)
+    assert all(r['reason'] == 'closed_request_event_drain' and not r['accepted']
+        for kind, r in records if kind == 'admission' and r['decision_seq'] > finish.decision_seq)
+    assert len([r for kind, r in records if kind == 'request_closing_complete']) == 1
+    # The next first neural input sees the actual terminal snapshot, with no old FIFO backlog.
+    chosen, admission = session.infer(snapshot(request='new-request', task='FACE_LEFT'))
+    assert admission.accepted and chosen.behavior == 'TURN_LEFT'
+    assert session.decision_event_contexts[chosen.decision_seq]['pending_event_count'] == 0
+    assert policy.inputs[-1].request_changed and policy.inputs[-1].feedback.status == 'COMPLETED'
+
+
+def test_end_interrupts_closure_without_completing_or_overwriting_new_request():
+    session, policy, records, snapshot, finish = closed_hold_fixture()
+    policy.behavior, policy.phase = 'TURN_LEFT', 'START'
+    assert not session.drain_finished_request(finish, snapshot,
+        lambda: len(policy.inputs) > 1, lambda: None, decision_limit=160)
+    assert len(policy.inputs) == 2 and len(session.pending_neural_events) == 2
+    assert not any(kind == 'request_closing_complete' for kind, _ in records)
+    assert session.gate.active is None
+    policy.behavior, policy.phase = 'HOLD', 'FINISH'
+    chosen, admission = session.infer(snapshot(request='new-end', task='END_INTERACTION'))
+    assert admission.accepted and chosen.request_id == 'new-end'
+
+
+@pytest.mark.parametrize('outcome', ['restored', 'timeout', 'end', 'emergency', 'latched'])
+def test_closure_waits_for_the_original_standing_rule_without_consuming_or_unlocking(outcome):
+    session, policy, records, snapshot, finish = closed_hold_fixture()
+    clock = Clock(0.)
+    waits = []
+    def body_snapshot():
+        observation = snapshot()
+        if outcome == 'latched':
+            session.runtime_contexts[observation.observation_seq]['protection_state'] = 'LATCHED'
+        # Model the real run's STOPPED/READY body with its standing window rebuilding.
+        if outcome != 'restored' or len(waits) < 2:
+            return replace(observation, feedback=replace(observation.feedback, standing=False))
+        return observation
+    def wait(seconds):
+        assert len(policy.inputs) == 1 and session.consumed_event_sequence == -1
+        assert len(session.pending_neural_events) == 3 and session.gate.active is None
+        waits.append(seconds)
+        clock.value += 31. if outcome == 'timeout' else seconds
+    def guard():
+        if outcome == 'emergency' and waits:
+            raise InterruptedError('independent_emergency_stop')
+    def drain():
+        return session.drain_finished_request(finish, body_snapshot,
+            lambda: outcome == 'end' and bool(waits), guard, decision_limit=160, clock=clock, wait=wait)
+    if outcome == 'restored':
+        assert drain() and waits == [.1, .1]
+        assert session.consumed_event_sequence == 2 and len(policy.inputs) == 4
+        assert len([r for k, r in records if k == 'request_closing_wait_stopped']) == 1
+        assert len([r for k, r in records if k == 'request_closing_stopped_restored']) == 1
+    else:
+        if outcome == 'end':
+            assert not drain()
+        else:
+            with pytest.raises(InterruptedError if outcome == 'emergency' else ValueError,
+                               match='emergency|timed out|latched'):
+                drain()
+        assert len(policy.inputs) == 1 and session.consumed_event_sequence == -1
+        assert len(session.pending_neural_events) == 3
+        assert not any(k == 'request_closing_complete' for k, _ in records)
+        if outcome == 'latched':
+            assert not waits
+
+
+@pytest.mark.parametrize('failure', ['emergency', 'timeout', 'decision_budget', 'missing_stop'])
+def test_closure_failure_never_reports_ready_or_synthesizes_event_consumption(failure):
+    session, policy, records, snapshot, finish = closed_hold_fixture()
+    if failure == 'missing_stop':
+        session.execution_results[finish.decision_seq] = replace(
+            session.execution_results[finish.decision_seq], stop_evidence={'stop_confirmed': False})
+    def guard():
+        if failure == 'emergency':
+            raise InterruptedError('independent_emergency_stop')
+    times = iter((0., 61.))
+    with pytest.raises(InterruptedError if failure == 'emergency' else ValueError):
+        session.drain_finished_request(finish, snapshot, lambda: False, guard,
+            decision_limit=1 if failure == 'decision_budget' else 160,
+            clock=(lambda: next(times)) if failure == 'timeout' else (lambda: 0.))
+    assert session.consumed_event_sequence == -1 and len(session.pending_neural_events) == 3
+    assert len(policy.inputs) == 1 and not any(kind == 'request_closing_complete' for kind, _ in records)
 
 
 @pytest.mark.parametrize('behavior,phase', [('HOLD', 'FINISH'), ('ADVANCE', 'START')])

@@ -123,7 +123,9 @@ def test_production_host_registration_and_bridge_constructor_share_fixed_profile
     monkeypatch.setattr(desktop,'ASSETS',())
     runtime = desktop.BehaviorRuntime(tmp_path,desktop.ROOT,desktop.Commands(io.StringIO()),lambda value:None,
         tmp_path/'candidate',dict(checkpoint_id='checkpoint',policy={}))
-    ready = dict(checkpoint_id='checkpoint',run_id=runtime.run_id,session_id=runtime.session_id)
+    ready = dict(checkpoint_id='checkpoint',run_id=runtime.run_id,session_id=runtime.session_id,
+                 skill_profile_id=runtime.skill_profile['profile_id'],
+                 session_contract_id=runtime.session_limits['session_contract_id'])
     desktop.atomic(tmp_path/'brain_ready.json',ready)
     spawned = []
     def spawn(*args):

@@ -568,6 +568,8 @@ def test_claim_time_counts_toward_five_second_cap_after_ack_and_renewals():
 def test_new_owned_startup_transition_recovers_running_without_extending_intent(claim, mode):
     core, clock, sent = claiming() if claim else running()
     deadline = core.intent_deadline
+    published_at = core._first_nonzero_published_at
+    assert published_at == clock.now
     clock.advance(.1)
     feedback(core, action_status=200, mode=mode)
     core.tick()
@@ -584,13 +586,15 @@ def test_new_owned_startup_transition_recovers_running_without_extending_intent(
         core.tick()
     assert core.state == "FORWARD"
     assert core.intent_deadline == deadline
+    assert core._startup_transition_deadline == published_at + .5
     assert not core.failures
 
 
 @pytest.mark.parametrize("claim", [False, True])
 def test_repeated_transition_and_renewals_cannot_extend_initial_half_second(claim):
     core, clock, sent = claiming() if claim else running()
-    started = clock.now
+    started = core._first_nonzero_published_at
+    assert started is not None
     for _ in range(4):
         clock.advance(.1)
         feedback(core, action_status=200)
@@ -611,7 +615,8 @@ def test_repeated_transition_and_renewals_cannot_extend_initial_half_second(clai
 
 def test_late_running_sample_cannot_hide_unresolved_startup_transition():
     core, clock, sent = claiming()
-    started = clock.now
+    started = core._first_nonzero_published_at
+    assert started is not None
     for _ in range(4):
         clock.advance(.1)
         feedback(core, action_status=200)

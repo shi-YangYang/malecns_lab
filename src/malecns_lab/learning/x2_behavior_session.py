@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import time
 import uuid
 
@@ -27,7 +28,29 @@ SOURCE_AGE_SECONDS = .75
 TASK_REQUEST_SECONDS = 120.
 HEADING_SOURCE = 'requested_relative_heading_from_actual_odom'
 DEFERRED_NEURAL_REASONS = frozenset((
-    'neural_event_backlog', 'neural_event_snapshot_mismatch', 'end_requires_brain_hold'))
+    'neural_event_backlog', 'neural_event_snapshot_mismatch', 'end_requires_brain_hold',
+    'completed_action_request'))
+FINISH_DRAIN_MAX_DECISIONS = 8
+FINISH_DRAIN_SECONDS = 60.
+SESSION_PROFILES = ('qualification', 'continuous')
+
+
+def session_profile_limits(name='qualification'):
+    require(name in SESSION_PROFILES, 'Unknown behavior session profile')
+    continuous = name == 'continuous'
+    return dict(session_profile=name, session_contract_id='malecns.x2.session.'+name+('.v2' if continuous else '.v1'),
+        request_scope='measured_single_brain_selected_action.v1' if continuous else 'brain_finish.v1',
+        wall_seconds=None if continuous else 900., vm_seconds=None if continuous else 480.,
+        worker_wall_seconds=None if continuous else 865., bridge_wall_seconds=None if continuous else 445.,
+        max_decisions=None if continuous else 160, max_requests=None if continuous else 50,
+        cleanup_seconds=35., disk_reserve_bytes=1024**3, supervisor_timeout_seconds=5.)
+
+
+def validate_session_profile(reg):
+    expected = session_profile_limits(reg.get('session_profile'))
+    require(all(key in reg and reg[key] == value for key, value in expected.items()),
+            'Registered session limits differ from the explicit profile')
+    return expected
 
 
 def heading_goal(target):
@@ -36,7 +59,7 @@ def heading_goal(target):
             ('current_odom', 'current_yaw_rad', 'heading_error_rad')}
 
 
-def validate_heading_target(target, feedback, query, remote_sequence, remote_now):
+def validate_heading_target(target, feedback, query, remote_sequence, remote_now, *, profile=None):
     """Audit a geometric request against its original and current raw odometry."""
     if query['task'] not in HEADING_OFFSETS:
         require(target is None and feedback.heading_error_rad == 0., 'Unexpected heading target')
@@ -67,8 +90,8 @@ def validate_heading_target(target, feedback, query, remote_sequence, remote_now
     require(target['current_odom']['sequence'] >= target['origin_odom']['sequence']
             and target['current_odom']['remote_received_monotonic'] >= target['origin_odom']['remote_received_monotonic'],
             'Heading odometry precedes request origin')
-    expected = dict(relative_heading_goal(query['task'], origin), current_yaw_rad=current)
-    expected['heading_error_rad'] = relative_heading_error(query['task'], expected, current)
+    expected = dict(relative_heading_goal(query['task'], origin, profile=profile), current_yaw_rad=current)
+    expected['heading_error_rad'] = relative_heading_error(query['task'], expected, current, profile=profile)
     require(all(type(target.get(k)) in (int,float) and math.isfinite(target[k])
                 and abs(target[k]-v) <= 1e-8 for k,v in expected.items())
             and abs(feedback.yaw_rad-current) <= 1e-8
@@ -105,6 +128,24 @@ def append(stream, kind, **fields):
     stream.flush()
 
 
+def fail_request_budget(directory, task, decision_seq, record, phase):
+    """Exhaustion is a protected session failure, never a synthetic brain FINISH."""
+    fields = dict(request_id=task['request_id'], task=task['task'],
+                  decision_seq=decision_seq, reason='decision_budget_reached',
+                  task_success=False, stop_confirmed=None, independent_protection=True)
+    try:
+        atomic(directory/'emergency.json', dict(run_id=task['run_id'], session_id=task['session_id'],
+            host_monotonic=time.monotonic(), **fields))
+    finally:
+        # Notify the host before neural-state serialization. Either the bridge's
+        # emergency file or the host's bounded shutdown can stop this session.
+        try:
+            record('request_failed', **fields)
+        finally:
+            phase('request_failed', **fields)
+    raise RuntimeError('Request decision budget exhausted without confirmed brain FINISH')
+
+
 class ClockExchange:
     """One-use nonce bounds transit by host RTT; source age remains remote."""
     def __init__(self, run_id, session_id, clock=time.monotonic, *, profile=None):
@@ -115,8 +156,10 @@ class ClockExchange:
         self.sequence = 0
         self.last_remote_sequence = 0
         self.heading_targets = {}
+        self.request_sequences = {}
 
-    def request(self, task, request_id, after_event_seq=-1, *, last_consumed_request_id=None):
+    def request(self, task, request_id, after_event_seq=-1, *, last_consumed_request_id=None,
+                closed_request_ack=None, request_sequence=None):
         require(task in TASKS and isinstance(request_id, str) and request_id, 'Invalid task request')
         require(last_consumed_request_id is None or isinstance(last_consumed_request_id, str)
                 and last_consumed_request_id, 'Invalid consumed request')
@@ -126,7 +169,17 @@ class ClockExchange:
             nonce=uuid.uuid4().hex, sequence=self.sequence, request_id=request_id, task=task,
             after_event_seq=after_event_seq, last_consumed_request_id=last_consumed_request_id,
             host_sent_monotonic=self.clock())
+        if request_sequence is not None:
+            require(type(request_sequence) is int and request_sequence > 0, 'Invalid request sequence')
+            self.request_sequences[request_id] = request_sequence
+            self.pending.update(request_sequence=request_sequence, closed_request_ack=deepcopy(closed_request_ack))
         return dict(self.pending)
+
+    def retire_requests(self, through_request_sequence, keep_request_id):
+        require(self.pending is None, 'Cannot retire an outstanding observation')
+        self.heading_targets = {k: v for k, v in self.heading_targets.items()
+            if k == keep_request_id or self.request_sequences.get(k, math.inf) > through_request_sequence}
+        self.request_sequences = {k: v for k, v in self.request_sequences.items() if k in self.heading_targets}
 
     def accept(self, packet):
         p, now = self.pending, self.clock()
@@ -134,6 +187,9 @@ class ClockExchange:
         require(packet.get('schema') == SCHEMA and packet.get('kind') == 'observation'
                 and all(packet.get(k) == p[k] for k in ('run_id','session_id','nonce','sequence','request_id','task')),
                 'Observation identity/nonce differs')
+        if 'request_sequence' in p:
+            require(packet.get('request_sequence') == p['request_sequence']
+                    and packet.get('closed_request_ack') == p['closed_request_ack'], 'Closure ACK response differs')
         elapsed = now-p['host_sent_monotonic']
         require(0 <= elapsed <= ROUND_TRIP_SECONDS, 'Observation round trip expired')
         require(type(packet.get('remote_sequence')) is int and packet['remote_sequence'] > self.last_remote_sequence,
@@ -150,7 +206,7 @@ class ClockExchange:
         require(feedback.valid and abs(feedback.age_s-age) <= 1e-8, 'Source validity/age differs')
         require('heading_target' in packet, 'Missing heading target metadata')
         target = packet['heading_target']
-        validate_heading_target(target, feedback, p, packet['remote_sequence'], packet['remote_issued_monotonic'])
+        validate_heading_target(target, feedback, p, packet['remote_sequence'], packet['remote_issued_monotonic'], profile=self.profile)
         goal = heading_goal(target) if target is not None else None
         require(p['request_id'] not in self.heading_targets or self.heading_targets[p['request_id']] == goal,
                 'Heading target moved within request')
@@ -184,9 +240,12 @@ def host_event(value, run_id, session_id, received):
 
 
 class NeuralSession:
-    def __init__(self, policy, checkpoint_id, run_id, session_id, telemetry, record):
+    def __init__(self, policy, checkpoint_id, run_id, session_id, telemetry, record, *, continuous=False):
         from ..control.x2_behavior import DecisionGate
         self.policy, self.checkpoint_id, self.telemetry, self.record = policy, checkpoint_id, telemetry, record
+        self.single_action_requests = continuous
+        require(not continuous or hasattr(policy, 'set_runtime_context'),
+                'Single-action request scope requires measured runtime context')
         identity = getattr(policy, 'identity', {})
         self.profile = identity.get('interaction_profile', interaction_profile())
         capabilities = profile_capabilities(self.profile)
@@ -197,9 +256,11 @@ class NeuralSession:
         execution = skill_profile_by_id(self.profile['skill_profile_id'])
         self.execution_poll_seconds = (26. + execution.get('wave_preparation', {}).get('timeout_seconds', 0.)
                                        if self.profile['wave_enabled'] else 15.)
+        self.execution_poll_seconds_by_behavior = dict(execution.get('execution_poll_seconds_by_behavior', {}))
         self.gate = DecisionGate(run_id, session_id, policy.policy_id, checkpoint_id, policy.encoder.input_map_id,
             max_age_s=DECISION_SECONDS,
-            sim_wave_profile_id=self.profile['skill_profile_id'] if 'WAVE_RIGHT' in capabilities else None)
+            sim_wave_profile_id=self.profile['skill_profile_id'] if 'WAVE_RIGHT' in capabilities else None,
+            monotonic_execution_ids=continuous, single_action_requests=continuous)
         self.state = policy.initial_state(session_id, telemetry=telemetry)
         self.decision_seq = 0
         self.last_observation = None
@@ -213,6 +274,23 @@ class NeuralSession:
         self.pending_neural_events = deque()
         self.consumed_event_sequence = -1
         self.record('session_reset', reason='explicit_new_session', state_id=policy.state_identity(self.state)['state_id'])
+
+    def retire_closed_request(self, request_sequence, *, retire=True):
+        """Called only after the real closure drain; keep every unconsumed event."""
+        require(not self.pending_neural_events and not self.pending_rejections and self.gate.active is None,
+                'Cannot retire unconsumed execution feedback')
+        require(not hasattr(self.policy, 'set_runtime_context') or self.consumed_event_sequence == self.gate.last_event_seq,
+                'Neural event consumption has not reached the closure watermark')
+        ack = dict(event_seq=self.gate.last_event_seq, decision_seq=self.gate.last_decision_seq,
+                   request_sequence=request_sequence, request_id=self.last_consumed_request_id)
+        if not retire:
+            return ack
+        self.gate.retire_history(ack['event_seq'], ack['decision_seq'])
+        for values in (self.execution_results, self.heading_targets, self.runtime_contexts,
+                       self.decision_inputs, self.decision_event_contexts):
+            values.clear()
+        self.record('closed_request_ack', **ack)
+        return ack
 
     def observe(self, observation, *, usage='gate_refresh'):
         require(not self.profile['wave_enabled'] or tuple(map(str, observation.capabilities)) == profile_capabilities(self.profile),
@@ -274,6 +352,11 @@ class NeuralSession:
         """A waiting HOLD is not a completed request; never infer task success."""
         if not self.confirmed_finish(decision):
             return False
+        if self.single_action_requests:
+            observation, _ = self.decision_inputs.get(decision.decision_seq, (self.last_observation, None))
+            if (observation is None or str(observation.task) != 'END_INTERACTION'
+                    or str(decision.behavior) != 'HOLD' or str(decision.phase) != 'FINISH'):
+                return False
         if not hasattr(self.policy, 'set_runtime_context'):
             return True
         if self.decision_event_contexts.get(decision.decision_seq, {}).get('deferred_reason'):
@@ -291,6 +374,12 @@ class NeuralSession:
                 and feedback.age_s <= SOURCE_AGE_SECONDS and feedback.standing
                 and not (str(feedback.status) in ('ACCEPTED', 'STARTED', 'RUNNING')
                          and feedback.request_id != observation.request_id))
+
+    def closure_permitted(self, decision):
+        return (self.gate.active is None and (
+            self.gate.completed_action(decision.request_id) == decision
+            or (str(decision.behavior) == 'HOLD' and str(decision.phase) == 'FINISH'
+                and self.finish_ends_request(decision))))
 
     def neural_observation(self, observation):
         """Project one real refusal into the fixed feedback slot without editing active execution."""
@@ -326,8 +415,110 @@ class NeuralSession:
                 active_execution_id=self.gate.active['execution_id'] if self.gate.active else None)
         return observation
 
-    def infer(self, observation, refresh=None):
+    def drain_finished_request(self, decision, snapshot, superseded, guard, *, decision_limit,
+                               clock=time.monotonic, wait=time.sleep, deadline=None):
+        """Consume real closure feedback before unlocking, without issuing another skill."""
+        require(self.closure_permitted(decision),
+                'Closure drain requires brain FINISH or completed single action and confirmed physical stop')
+        if not hasattr(self.policy, 'set_runtime_context'):
+            return not superseded()
+        end = min(clock() + FINISH_DRAIN_SECONDS, deadline if deadline is not None else math.inf)
+        count, waiting = 0, False
+        basis = 'measured_single_action' if str(decision.behavior) != 'HOLD' else 'brain_FINISH'
+        self.record('request_closing', request_id=decision.request_id, completion_decision_seq=decision.decision_seq,
+                    completion_basis=basis,
+                    max_decisions=FINISH_DRAIN_MAX_DECISIONS, timeout_seconds=FINISH_DRAIN_SECONDS)
+
+        def check():
+            guard()
+            if superseded():
+                self.record('request_closing_interrupted', request_id=decision.request_id, consumed=count)
+                return False
+            require(clock() < end, 'Request closure event drain timed out')
+            require(self.gate.active is None and self.gate.blocked_reason is None,
+                    'Request closure protection changed')
+            return True
+
+        def refresh():
+            if check():
+                snapshot()
+            return None
+
+        while check():
+            observation = snapshot()
+            if not check():
+                return False
+            require(observation.request_id == decision.request_id, 'Closure snapshot request changed')
+            context = self.runtime_contexts[observation.observation_seq]
+            require(context['protection_state'] != 'LATCHED', 'Request closure protection latched')
+            ready = (context['protection_state'] == 'READY' and observation.feedback.valid
+                     and observation.feedback.age_s <= SOURCE_AGE_SECONDS and observation.feedback.standing)
+            if not ready:
+                if not waiting:
+                    self.record('request_closing_wait_stopped', request_id=decision.request_id,
+                        observation_seq=observation.observation_seq, protection_state=context['protection_state'],
+                        feedback=observation.feedback.__dict__, consumed=count)
+                waiting = True
+                wait(.1)  # No neural consumption or command; the original total deadline still applies.
+                continue
+            if waiting:
+                self.record('request_closing_stopped_restored', request_id=decision.request_id,
+                    observation_seq=observation.observation_seq, consumed=count)
+                waiting = False
+            high_watermark = max(context['event_sequence'], self.gate.last_event_seq)
+            if not self.pending_neural_events:
+                require(self.consumed_event_sequence >= high_watermark, 'Closure event record missing')
+                self.record('request_closing_complete', request_id=decision.request_id, consumed=count,
+                            consumed_event_sequence=self.consumed_event_sequence, event_high_watermark=high_watermark)
+                return True
+            require(count < FINISH_DRAIN_MAX_DECISIONS and (decision_limit is None or self.decision_seq < decision_limit),
+                    'Request closure event drain decision budget reached')
+            self.infer(observation, refresh, finish_decision=decision)
+            count += 1
+        return False
+
+    def confirm_closed_request_ready(self, request_id, snapshot, superseded, guard, *, deadline,
+                                     clock=time.monotonic, wait=time.sleep):
+        """Recheck physical readiness after the remote consumption ACK.
+
+        ACK frees transport history; it does not establish current body state.
+        This wait shares the original closure deadline and performs no inference.
+        """
+        waiting = False
+        while True:
+            guard()
+            if superseded():
+                return False
+            require(clock() < deadline, 'Request closure ACK readiness timed out')
+            observation = snapshot()
+            guard()
+            if superseded():
+                return False
+            require(clock() < deadline and observation.request_id == request_id,
+                    'Request closure ACK readiness expired or request changed')
+            context = self.runtime_contexts[observation.observation_seq]
+            require(context['protection_state'] != 'LATCHED' and self.gate.blocked_reason is None
+                    and self.gate.active is None, 'Request closure ACK protection changed')
+            feedback = observation.feedback
+            ready = (context['protection_state'] == 'READY' and feedback.valid
+                     and feedback.age_s <= SOURCE_AGE_SECONDS and feedback.standing)
+            if ready:
+                if waiting:
+                    self.record('request_ack_stopped_restored', request_id=request_id,
+                                observation_seq=observation.observation_seq)
+                return True
+            if not waiting:
+                self.record('request_ack_wait_stopped', request_id=request_id,
+                            observation_seq=observation.observation_seq)
+            waiting = True
+            wait(.1)
+
+    def infer(self, observation, refresh=None, *, finish_decision=None):
         import torch
+        if finish_decision is not None:
+            require(observation.request_id == finish_decision.request_id
+                    and self.closure_permitted(finish_decision),
+                    'Only a confirmed closed request can suppress skill admission')
         snapshot = observation
         event_context = None
         if hasattr(self.policy, 'set_runtime_context'):
@@ -370,6 +561,9 @@ class NeuralSession:
                                         state_before_id=before, decision_seq=self.decision_seq)
         self.record('raw_decision', decision=decision.to_dict(), inference_seconds=time.monotonic()-started,
                     features_mv=output.features_mv.detach().cpu().tolist(),
+                    **({('closed_request_finish_decision_seq' if str(finish_decision.behavior) == 'HOLD'
+                         else 'closed_request_completion_decision_seq'): finish_decision.decision_seq}
+                       if finish_decision else {}),
                     **({'event_context': deepcopy(event_context)} if event_context is not None else {}))
         if refresh is not None:
             newest = refresh()
@@ -394,6 +588,10 @@ class NeuralSession:
                     deferred_reason = 'neural_event_backlog'
                 elif not event_context['projected_feedback_matches_snapshot']:
                     deferred_reason = 'neural_event_snapshot_mismatch'
+            if finish_decision is not None:
+                deferred_reason = 'closed_request_event_drain'
+            elif self.gate.completed_action(decision.request_id) is not None:
+                deferred_reason = 'completed_action_request'
             event_context.update(post_refresh_event_high_watermark=high_watermark,
                 consumed_event_seq=self.consumed_event_sequence,
                 pending_event_count=len(self.pending_neural_events), backlog=backlog,
@@ -401,6 +599,12 @@ class NeuralSession:
             self.record('neural_event_admission', decision_seq=decision.decision_seq,
                 observation_seq=decision.observation_seq, request_id=decision.request_id,
                 **event_context)
+        if finish_decision is not None:
+            # Keep raw prediction/history after the measured action or brain
+            # FINISH closes this request; do not create another skill or event.
+            deferred_reason = 'closed_request_event_drain'
+        elif self.gate.completed_action(decision.request_id) is not None:
+            deferred_reason = 'completed_action_request'
         if deferred_reason is not None:
             # Do not reserve a skill or manufacture rejection feedback for a
             # historical prediction. Its state and raw output remain recorded.
@@ -479,6 +683,8 @@ def run_worker(directory):
     import fcntl
     directory = Path(directory).resolve()
     reg = read_json(directory/'behavior_registration.json')
+    limits = validate_session_profile(reg)
+    continuous = limits['session_profile'] == 'continuous'
     require(os.getppid() == reg['parent_pid'] and str(directory) == reg['output'], 'Supervising parent required')
     root = Path(reg['root'])
     with (root/'data/.continuous-training.lock').open('a+') as lock:
@@ -502,6 +708,7 @@ def run_worker(directory):
     telemetry = session = None
     outcome = dict(status='failed', reason='initializing', decisions=0)
     started = time.monotonic()
+    last_disk_check = -math.inf
     with (directory/'behavior_events.jsonl').open('x') as evidence:
         def record(kind, **fields):
             append(evidence, kind, **fields)
@@ -509,8 +716,14 @@ def run_worker(directory):
             sampler.sample(name)
             atomic(directory/'behavior_phase.json', dict(phase=name, **fields))
         def guard():
+            nonlocal last_disk_check
             require(os.getppid() == reg['parent_pid'], 'Parent lost')
-            require(time.monotonic()-started < reg['worker_wall_seconds'], 'Worker wall budget expired')
+            now = time.monotonic()
+            require(reg['worker_wall_seconds'] is None or now-started < reg['worker_wall_seconds'], 'Worker wall budget expired')
+            if continuous and now-last_disk_check >= 1.:
+                require(shutil.disk_usage(directory).free >= limits['disk_reserve_bytes'], 'Worker disk reserve exhausted')
+                last_disk_check = now
+            require(sampler.error is None, 'Memory sampling failed: '+str(sampler.error))
             if (directory/'emergency.json').exists():
                 raise InterruptedError('independent_emergency_stop')
         try:
@@ -530,12 +743,13 @@ def run_worker(directory):
                         'Execution-derived candidate requires matching simulation qualification')
             identity = dict(execution_id=reg['session_id'], checkpoint_id=meta['checkpoint_id'],
                             source_files_sha256=reg['source_sha256'])
-            telemetry = BehaviorTelemetry(directory, policy, identity, reg['run_id'], reg['session_id'])
+            telemetry = BehaviorTelemetry(directory, policy, identity, reg['run_id'], reg['session_id'], continuous=continuous)
             require(telemetry.error is None, 'Telemetry unavailable: '+str(telemetry.error))
-            session = NeuralSession(policy, meta['checkpoint_id'], reg['run_id'], reg['session_id'], telemetry, record)
+            session = NeuralSession(policy, meta['checkpoint_id'], reg['run_id'], reg['session_id'], telemetry, record,
+                continuous=continuous)
             atomic(directory/'brain_ready.json', dict(policy_id=policy.policy_id, checkpoint_id=meta['checkpoint_id'],
                 input_map_id=policy.encoder.input_map_id, run_id=reg['run_id'], session_id=reg['session_id'],
-                skill_profile_id=session.profile['skill_profile_id']))
+                skill_profile_id=session.profile['skill_profile_id'], session_contract_id=limits['session_contract_id']))
             phase('waiting_task', qualification_only=True)
             exchange = ClockExchange(reg['run_id'],reg['session_id'],profile=session.profile)
             last_event = -1
@@ -544,6 +758,7 @@ def run_worker(directory):
             finished_request = None
             per_request_count = 0
             started_actions = 0
+            closed_request_ack = None
 
             def current_task():
                 if not (directory/'task.json').exists():
@@ -557,7 +772,9 @@ def run_worker(directory):
             def snapshot(request, *, gate_purpose=None):
                 nonlocal last_event
                 query = exchange.request(request['task'], request['request_id'], last_event,
-                    last_consumed_request_id=session.last_consumed_request_id)
+                    last_consumed_request_id=session.last_consumed_request_id,
+                    request_sequence=request['sequence'] if continuous else None,
+                    closed_request_ack=closed_request_ack)
                 atomic(directory/'observation_request.json', query)
                 end = time.monotonic()+ROUND_TRIP_SECONDS
                 while time.monotonic() < end:
@@ -575,13 +792,51 @@ def run_worker(directory):
                                 last_event = event.event_seq
                                 record('execution', event=event.to_dict())
                             record('observation_clocks', observation_seq=observation.observation_seq, **clocks)
+                            if continuous and closed_request_ack is not None:
+                                exchange.retire_requests(closed_request_ack['request_sequence'], request['request_id'])
                             if gate_purpose is not None:
                                 session.record_gate_refresh(observation, purpose=gate_purpose)
                             return observation, clocks
                     time.sleep(.02)
                 raise TimeoutError('Remote observation timed out')
 
-            while session.decision_seq < reg['max_decisions']:
+            def close_request(decision):
+                nonlocal closed_request_ack, finished_request
+                phase('computing', reason='正在完成动作反馈', task=task['task'],
+                      request_id=task['request_id'], closing=True)
+                def superseded():
+                    latest = current_task()
+                    return latest is not None and latest['sequence'] > last_task_sequence
+                closing_deadline = time.monotonic() + FINISH_DRAIN_SECONDS
+                drained = session.drain_finished_request(decision,
+                    lambda: snapshot(task, gate_purpose='closed_request_event_drain')[0],
+                    superseded, guard, decision_limit=reg['max_decisions'], deadline=closing_deadline)
+                outcome['decisions'] = session.decision_seq
+                guard()
+                require(telemetry.error is None, 'Telemetry failed: '+str(telemetry.error))
+                if not drained or superseded():
+                    return  # A newly accepted END owns the slot.
+                if continuous:
+                    closed_request_ack = session.retire_closed_request(task['sequence'], retire=False)
+                    ready = session.confirm_closed_request_ready(task['request_id'],
+                        lambda: snapshot(task, gate_purpose='closed_request_ack')[0],
+                        superseded, guard, deadline=closing_deadline)
+                    if not ready:
+                        return
+                    session.retire_closed_request(task['sequence'])
+                    if superseded():
+                        return
+                completed_action = str(decision.behavior) != 'HOLD'
+                basis = 'measured_single_action' if completed_action else 'brain_FINISH'
+                finished_request = task['request_id']
+                record('request_waiting', request_id=finished_request, reason=basis,
+                       completion_basis=basis, task_success=True if completed_action else None)
+                phase('waiting_task', reason='动作已完成并确认停稳' if completed_action else '模型选择待命，已确认停稳',
+                    task=task['task'], request_id=task['request_id'], behavior=str(decision.behavior),
+                    behavior_phase=str(decision.phase), decision_seq=decision.decision_seq,
+                    completion_basis=basis, stop_confirmed=True)
+
+            while reg['max_decisions'] is None or session.decision_seq < reg['max_decisions']:
                 guard()
                 newest = current_task()
                 if newest is None or newest['request_id'] == finished_request:
@@ -595,6 +850,10 @@ def run_worker(directory):
                 request_age = time.monotonic()-task['host_received_monotonic']
                 require(0 <= request_age <= TASK_REQUEST_SECONDS, 'Task request budget expired')
                 observation, clocks = snapshot(task)
+                completed = session.gate.completed_action(task['request_id'])
+                if completed is not None:
+                    close_request(completed)
+                    continue
                 # The executor advances independently while the unique brain is computing.
                 phase('computing', task=task['task'], request_id=task['request_id'],
                       request_age_s=request_age, decision_seq=session.decision_seq+1)
@@ -624,7 +883,8 @@ def run_worker(directory):
                     phase('executing', task=task['task'], behavior=str(decision.behavior), behavior_phase=str(decision.phase),
                           request_id=task['request_id'], decision_seq=decision.decision_seq)
                     # Poll actual events to close the gate; a new task may interrupt this wait.
-                    end = time.monotonic()+session.execution_poll_seconds
+                    end = time.monotonic()+session.execution_poll_seconds_by_behavior.get(
+                        str(decision.behavior), session.execution_poll_seconds)
                     while session.gate.active is not None and time.monotonic() < end:
                         guard()
                         latest = current_task()
@@ -636,27 +896,31 @@ def run_worker(directory):
                             raise RuntimeError('Execution protection latched: '+session.gate.blocked_reason)
                     if session.gate.active is not None and time.monotonic() >= end:
                         raise TimeoutError('Execution completion unconfirmed')
-                    if (str(decision.behavior) == 'HOLD' and str(decision.phase) == 'FINISH'
-                            and session.gate.active is None and session.finish_ends_request(decision)):
-                        finished_request = task['request_id']
-                        record('request_waiting', request_id=finished_request, reason='brain_hold', task_success=None)
-                        phase('waiting_task', reason='模型选择待命，已确认停稳', task=task['task'],
-                            request_id=task['request_id'], behavior=str(decision.behavior),
-                            behavior_phase=str(decision.phase), decision_seq=decision.decision_seq)
+                    if session.closure_permitted(decision):
+                        close_request(decision)
+                        continue
+                elif session.gate.completed_action(task['request_id']) is not None:
+                    # Completion may have arrived during inference or its refresh.
+                    close_request(session.gate.completed_action(task['request_id']))
+                    continue
                 elif admission.reason in DEFERRED_NEURAL_REASONS:
                     phase('computing', reason=admission.reason, task=task['task'],
-                        behavior=str(decision.behavior), decision_seq=decision.decision_seq)
+                        request_id=task['request_id'], behavior=str(decision.behavior), decision_seq=decision.decision_seq)
                 else:
-                    phase('rejected', reason=admission.reason, task=task['task'], behavior=str(decision.behavior))
+                    phase('rejected', reason=admission.reason, task=task['task'], request_id=task['request_id'],
+                          behavior=str(decision.behavior))
                     if (hasattr(policy, 'set_runtime_context') and not
                             (admission.reason == 'no_active_skill' and session.pending_neural_events)):
                         raise RuntimeError('Frozen neural debug decision rejected: '+admission.reason)
                 if per_request_count >= session.max_request_decisions:
-                    finished_request = task['request_id']
-                    record('request_waiting', request_id=finished_request, reason='decision_budget_reached', task_success=None)
-                    phase('waiting_task', reason='本次任务达到决策上限', task=task['task'])
+                    latest = current_task()
+                    if latest is not None and latest['sequence'] > last_task_sequence:
+                        continue  # A newly accepted END owns the request budget.
+                    fail_request_budget(directory, task, session.decision_seq, record, phase)
             outcome.update(status='completed', reason='bounded_decision_budget')
         except BaseException as error:
+            if session is not None:
+                outcome['decisions'] = session.decision_seq
             outcome.update(status='cancelled' if isinstance(error, InterruptedError) else 'failed',
                            reason=type(error).__name__+':'+str(error))
             try:

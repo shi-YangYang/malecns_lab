@@ -209,6 +209,12 @@ class SkillRuntime(desktop.Runtime):
                 time.sleep(min(1.5,max(0.,end-time.monotonic())))
         raise RuntimeError("Official SD not confirmed")
 
+    def verify_simulator_configuration(self):
+        """Official startup has no derived simulation configuration."""
+
+    def simulator_launch_shell(self):
+        return "printf '0\\n' | /opt/VirtualGL/bin/vglrun -d egl0 -ms 0 /usr/local/bin/x2-component sim > "+shlex.quote(self.remote+"/sim.log")+" 2>&1"
+
     def start_simulator(self):
         self.preflight()
         self.vm_started, self.owns_vm = time.monotonic(), True
@@ -229,8 +235,9 @@ class SkillRuntime(desktop.Runtime):
             "a=json.loads((p/'official_assets.json').read_text())['sha256'];"
             "assert {k:hashlib.sha256((pathlib.Path('/workspace')/k).read_bytes()).hexdigest() for k in a}==a")
         self.command(self.docker+["exec",desktop.CONTAINER,"python3","-c",check])
+        self.verify_simulator_configuration()
         self.command(self.docker+["exec","-d","-e","DRI_NO_MSAA=1","-e","VGL_SAMPLES=0","-e","LIBGL_KOPPER_DISABLE=true",
-            desktop.CONTAINER,"bash","-lc","printf '0\\n' | /opt/VirtualGL/bin/vglrun -d egl0 -ms 0 /usr/local/bin/x2-component sim > "+shlex.quote(self.remote+"/sim.log")+" 2>&1"])
+            desktop.CONTAINER,"bash","-lc",self.simulator_launch_shell()])
         self.command(self.docker+["exec","-d",desktop.CONTAINER,"bash","-lc","printf '0\\n' | /usr/local/bin/x2-component mc > "+shlex.quote(self.remote+"/mc.log")+" 2>&1"])
         self.wait_for_sd()
         self.simulator_ready=True

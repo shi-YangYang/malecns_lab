@@ -3,22 +3,42 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import asdict, replace
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import signal
+import shutil
 import time
 import uuid
 
 from ..learning.x2_behavior_session import (SCHEMA, TASKS, DECISION_SECONDS,
     SOURCE_AGE_SECONDS, HEADING_OFFSETS, HEADING_SOURCE, heading_goal, wrap_heading,
-    validate_heading_target, atomic, read_json, require)
+    validate_heading_target, atomic, read_json, require, validate_session_profile)
 from ..control.x2_skill_profile import (candidate_skill_profile, validate_candidate_skill_profile,
-    SIM_FIXED_ADVANCE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID)
+    SIM_FIXED_ADVANCE_PROFILE_ID, SIM_QUARTER_TURN_ACTION_PROFILE_ID, FULL_ACTION_PROFILE_IDS)
 from ..control.x2_skills import SOURCE
 from ..control.x2_interaction import (interaction_profile, validate_interaction_profile,
     relative_heading_goal, relative_heading_error, profile_capabilities)
+
+
+def _pump_callbacks(spin_once, node, core, *, clock=time.monotonic):
+    """Bound callback work; let the existing tick handle an observed v9 crossing."""
+    began = clock()
+    for _ in range(64):
+        if clock()-began >= .008:
+            break
+        spin_once(node, timeout_sec=.0001)
+        command = core.command
+        if (core.skill_profile_id == SIM_QUARTER_TURN_ACTION_PROFILE_ID
+                and command is not None and command.behavior in ('TURN_LEFT', 'TURN_RIGHT')
+                and not core.terminal and not core.cancel_requested and core.stop_at is None
+                and core.motion.state in ('CLAIMING', 'FORWARD')
+                and core.signed_angle * (1 if command.behavior == 'TURN_LEFT' else -1) >= core.turn_target_rad):
+            # No parking/state mutation here. Tick still validates fresh MC/odom
+            # and the active intent before it can acknowledge target crossing.
+            break
 
 
 def registered_skill_profile(directory, reg):
@@ -49,7 +69,7 @@ def candidate_executor(reg, publish, *, record=None, clock=time.monotonic, prese
     enabled = profile_capabilities(reg.get('interaction_profile', interaction_profile()))
     require(('WAVE_RIGHT' in enabled) == profile['wave_enabled'], 'Executor capability profile differs')
     wave = profile['wave_enabled']
-    fixed_advance = profile['profile_id'] in (SIM_FIXED_ADVANCE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID)
+    fixed_advance = profile['profile_id'] in (SIM_FIXED_ADVANCE_PROFILE_ID, *FULL_ACTION_PROFILE_IDS)
     require(not fixed_advance or (reg.get('qualification_only') is True and reg.get('simulation_only') is True
             and reg['interaction_profile']['skill_profile_id'] == profile['profile_id']),
             'Fixed ADVANCE requires matching simulation qualification')
@@ -82,6 +102,30 @@ def observed_base_stop_basis(core, *, allow_unsent_wave=False):
             and m is not None and o is not None and m.source == '' and stopped_at is not None
             and min(m.received, o.received)-stopped_at >= 1. and core.standing_ready()):
         return 'official_unclaimed_stationary_standing_after_stop'
+    return None
+
+
+def cleanup_base_stop_basis(core):
+    """Final cleanup evidence only; a recovered body does not clear protection."""
+    ordinary = observed_base_stop_basis(core)
+    if ordinary is not None:
+        return ordinary
+    from ..control.x2_skills import RIGHT_ARM
+    now = core.clock()
+    m, o, stopped_at = core.motion.mc, core.motion.odom, core.motion.stop_requested
+    if (core.wave_qualified and core.command is not None and core.command.behavior == 'WAVE_RIGHT'
+            and core.status in ('UNKNOWN', 'FAILED') and core.terminal and core.wave_return_confirmed
+            and core.preset_sent_at is not None and not core.motion.base_motion_requested
+            and core.motion.target == (0., 0., 0.) and core.motion.state == 'STOPPING'
+            and m is not None and o is not None and m.source == '' and stopped_at is not None
+            and min(m.received, o.received)-stopped_at >= 1.
+            and core._wave_feedback_ready(now) and core.player[1] == 0
+            and core.query_state == 1 and 0 <= now-core.query_at <= .5
+            and core.wave_return_pose is not None
+            and max(abs(core.joints[k][0]-core.wave_return_pose[k]) for k in RIGHT_ARM) <= .15
+            and max(abs(core.joints[k][1]) for k in RIGHT_ARM) < .08
+            and core.distance <= .02 and abs(core.signed_angle) <= .03 and core.standing_ready()):
+        return 'cleanup_protected_wave_returned_unclaimed_stationary_standing'
     return None
 
 
@@ -139,10 +183,27 @@ class WaveStandPreparation:
         self.request = self.future = None
 
 
+class SupervisorLease:
+    """Observe host heartbeat advances using only the bridge's local clock."""
+    def __init__(self, run_id, session_id, timeout=5., clock=time.monotonic):
+        self.run_id, self.session_id, self.timeout, self.clock = run_id, session_id, timeout, clock
+        self.sequence, self.received = -1, clock()
+
+    def check(self, value):
+        require((value.get('run_id'), value.get('session_id')) == (self.run_id, self.session_id)
+                and type(value.get('sequence')) is int and value['sequence'] >= self.sequence,
+                'Invalid supervisor heartbeat')
+        now = self.clock()
+        if value['sequence'] > self.sequence:
+            self.sequence, self.received = value['sequence'], now
+        require(0 <= now-self.received < self.timeout, 'Supervisor heartbeat expired')
+
+
 class RemoteExchange:
     """Nonce time is signed by this process's own clock and never renewed."""
-    def __init__(self, run_id, session_id, clock=time.monotonic, *, profile=None):
-        self.capabilities = profile_capabilities(interaction_profile() if profile is None else profile)
+    def __init__(self, run_id, session_id, clock=time.monotonic, *, profile=None, continuous=False):
+        self.profile = interaction_profile() if profile is None else profile
+        self.capabilities = profile_capabilities(self.profile)
         self.run_id, self.session_id, self.clock = run_id, session_id, clock
         self.issued = {}
         self.last_query = 0
@@ -150,6 +211,10 @@ class RemoteExchange:
         self.last_decision = -1
         self.used = set()
         self.heading_targets = {}
+        self.continuous = continuous
+        self.request_sequences = {}
+        self.last_request_sequence = 0
+        self.closed_request_ack = None
 
     def observe(self, query, feedback, events, *, odom=None, sampled_remote_monotonic=None,
                 feedback_sources=None, runtime_context=None):
@@ -159,6 +224,12 @@ class RemoteExchange:
         require(query.get('task') in TASKS and type(query.get('sequence')) is int
                 and query['sequence'] > self.last_query and isinstance(query.get('nonce'),str)
                 and len(query['nonce']) == 32 and query['nonce'] not in self.issued, 'Replayed observation query')
+        if self.continuous:
+            sequence = query.get('request_sequence')
+            require(type(sequence) is int and sequence >= self.last_request_sequence and sequence > 0
+                    and (sequence > self.last_request_sequence or query['request_id'] == self.last_request),
+                    'Replayed or changed task request sequence')
+            require('closed_request_ack' in query, 'Missing explicit closure ACK')
         now = self.clock()
         odom = deepcopy(odom)
         if sampled_remote_monotonic is not None:
@@ -175,18 +246,21 @@ class RemoteExchange:
             goal = self.heading_targets.get(query['request_id'])
             if goal is None:
                 goal = dict(source=HEADING_SOURCE,run_id=self.run_id,session_id=self.session_id,
-                    request_id=query['request_id'],task=query['task'],**relative_heading_goal(query['task'],feedback.yaw_rad),
+                    request_id=query['request_id'],task=query['task'],**relative_heading_goal(query['task'],feedback.yaw_rad,profile=self.profile),
                     established_remote_sequence=query['sequence'],established_remote_monotonic=now,origin_odom=odom)
-            error = relative_heading_error(query['task'],goal,feedback.yaw_rad)
+            error = relative_heading_error(query['task'],goal,feedback.yaw_rad,profile=self.profile)
             feedback = replace(feedback,heading_error_rad=error)
             target = dict(goal,current_odom=odom,current_yaw_rad=feedback.yaw_rad,heading_error_rad=error)
         else:
-            feedback = replace(feedback,heading_error_rad=relative_heading_error(query['task'],None,feedback.yaw_rad))
-        validate_heading_target(target,feedback,query,query['sequence'],now)
+            feedback = replace(feedback,heading_error_rad=relative_heading_error(query['task'],None,feedback.yaw_rad,profile=self.profile))
+        validate_heading_target(target,feedback,query,query['sequence'],now,profile=self.profile)
         goal = heading_goal(target) if target is not None else None
         require(query['request_id'] not in self.heading_targets or self.heading_targets[query['request_id']] == goal,
                 'Heading target moved within request')
         self.heading_targets[query['request_id']] = goal
+        if self.continuous:
+            self.request_sequences[query['request_id']] = query['request_sequence']
+            self.last_request_sequence = query['request_sequence']
         packet = dict(schema=SCHEMA, kind='observation', run_id=self.run_id, session_id=self.session_id,
             nonce=query['nonce'], sequence=query['sequence'], remote_sequence=query['sequence'],
             request_id=query['request_id'], task=query['task'], remote_issued_monotonic=now,
@@ -197,12 +271,49 @@ class RemoteExchange:
             response_record=dict(file='bridge_events.jsonl',kind='observation_response',response_id=query['nonce']))
         if runtime_context is not None:
             packet['runtime_context'] = deepcopy(runtime_context)
+        if self.continuous:
+            packet.update(request_sequence=query['request_sequence'], closed_request_ack=deepcopy(query['closed_request_ack']))
         self.issued[query['nonce']] = deepcopy(packet)
         self.last_query, self.last_request = query['sequence'], query['request_id']
         # Bounded cache; an evicted nonce can never be resurrected from a file.
         while len(self.issued) > 32:
-            del self.issued[next(iter(self.issued))]
+            expired = next(iter(self.issued))
+            del self.issued[expired]
+            if self.continuous:
+                self.used.discard(expired)
         return packet
+
+    def acknowledge_closed_history(self, query, gate, core, events, event_sequence):
+        """Receipt cursor is not an ACK: only an explicit consumed closure retires."""
+        require(self.continuous, 'History retirement requires continuous mode')
+        ack = query['closed_request_ack']
+        if ack is None:
+            return
+        require(isinstance(ack, dict) and set(ack) == {'event_seq', 'decision_seq', 'request_sequence', 'request_id'}
+                and all(type(ack[k]) is int for k in ('event_seq', 'decision_seq', 'request_sequence'))
+                and -1 <= ack['event_seq'] <= query['after_event_seq']
+                and 0 < ack['request_sequence'] <= query['request_sequence']
+                and isinstance(ack['request_id'], str), 'Invalid consumed closure ACK')
+        if ack != self.closed_request_ack:
+            require(self.closed_request_ack is None or
+                    (ack['event_seq'] > self.closed_request_ack['event_seq']
+                     and ack['request_sequence'] > self.closed_request_ack['request_sequence']), 'Reordered closure ACK')
+            require(ack['event_seq'] == event_sequence-1
+                    and self.request_sequences.get(ack['request_id']) == ack['request_sequence']
+                    and (core.command is None or core.terminal), 'Closure ACK has unconsumed or active execution')
+            gate.retire_history(ack['event_seq'], ack['decision_seq'])
+            core.retire_events()
+            events.clear()
+            self.closed_request_ack = deepcopy(ack)
+        retired = {request for request, sequence in self.request_sequences.items()
+                   if sequence <= ack['request_sequence'] and request != query['request_id']}
+        for request in retired:
+            self.request_sequences.pop(request)
+            self.heading_targets.pop(request, None)
+        for nonce, packet in list(self.issued.items()):
+            if packet['request_id'] in retired:
+                del self.issued[nonce]
+                self.used.discard(nonce)
 
     def consume(self, message):
         from ..control.x2_behavior import Decision, Observation, Feedback
@@ -324,6 +435,55 @@ def publish_observation(directory, packet, record):
         heading_target=packet['heading_target'], response_record=packet['response_record'])
 
 
+def _diagnostic_reference(value, *, kind, run_id, session_id):
+    encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
+    return dict(file='bridge_events.jsonl', kind=kind, run_id=run_id, session_id=session_id,
+        request_id=value.get('request_id'), execution_id=value.get('execution_id'),
+        event_seq=value.get('event_seq'), sha256=hashlib.sha256(encoded).hexdigest(),
+        encoding='json ensure_ascii=False separators=comma:colon; hash covers event or summary value',
+        scope='recorded bounded diagnostics; original dropped-record counters still apply')
+
+
+def _compact_diagnostics(value, archive):
+    """Transport projection only; retain all scalar facts and controller budgets."""
+    result = deepcopy({key:item for key,item in value.items()
+                       if key != 'events' or not isinstance(item, list)})
+    if isinstance(value.get('events'), list):
+        result['event_history_transport_omitted_count'] = len(value['events'])
+    precision = result.get('precision_turn')
+    if isinstance(precision, dict):
+        if isinstance(precision.get('trace'), list):
+            precision['trace_transport_omitted_count'] = len(precision.pop('trace'))
+        integral = precision.get('integral')
+        if isinstance(integral, dict) and isinstance(integral.get('samples'), list):
+            integral['samples_transport_omitted_count'] = len(integral.pop('samples'))
+        precision['diagnostics_archive'] = deepcopy(archive)
+    return result
+
+
+def _archive_execution(event, record):
+    # The reference becomes usable only after the full event was written/flushed.
+    record('execution', event=event)
+    reference = _diagnostic_reference(event, kind='execution', run_id=event['run_id'], session_id=event['session_id'])
+    compact = deepcopy(event)
+    compact['raw_feedback'] = _compact_diagnostics(event['raw_feedback'], reference)
+    if isinstance(event['raw_feedback'].get('summary'), dict):
+        compact['raw_feedback']['summary'] = _compact_diagnostics(event['raw_feedback']['summary'], reference)
+    compact['raw_feedback']['diagnostics_archive'] = reference
+    return compact
+
+
+def _execution_mailbox(reg, event, core_summary):
+    return dict(schema=SCHEMA, run_id=reg['run_id'], session_id=reg['session_id'], event=event,
+        core=_compact_diagnostics(core_summary, event['raw_feedback']['diagnostics_archive']))
+
+
+def _archive_summary(summary, reg, record):
+    record('bridge_summary', run_id=reg['run_id'], session_id=reg['session_id'], summary=summary)
+    reference = _diagnostic_reference(summary, kind='bridge_summary', run_id=reg['run_id'], session_id=reg['session_id'])
+    return _compact_diagnostics(summary, reference)
+
+
 def wrap_execution(reg, raw, event_seq, recent_requests, sensors, trigger=None, wave_owner=None):
     """Serialize original executor ownership and facts without renaming ACKs."""
     from ..control.x2_behavior import ExecutionEvent
@@ -384,7 +544,7 @@ class WaveSession:
         from .x2_preset_compat import FIXED, CANCEL
         require(not self.failed, 'Wave transport is latched closed')
         if command == FIXED:
-            require(self.boundary is None and self.actions < 50
+            require(self.boundary is None and (self.reg.get('session_profile') == 'continuous' or self.actions < 50)
                     and (self.stand_preparation is None or self.stand_preparation.request is None),
                     'Previous wave helper/preparation not reaped')
             self.actions += 1
@@ -500,6 +660,11 @@ def execute(directory):
             'Isolated simulation ROS environment required')
     directory = Path(directory)
     reg, ready = read_json(directory/'bridge_registration.json'), read_json(directory/'brain_ready.json')
+    limits = validate_session_profile(reg)
+    require(validate_session_profile(read_json(directory/'behavior_registration.json')) == limits,
+            'Host and bridge session limits differ')
+    require(ready.get('session_contract_id') == limits['session_contract_id'], 'Brain session limits differ')
+    continuous = limits['session_profile'] == 'continuous'
     require(reg['qualification_only'] is True, 'Only bounded candidate qualification supported')
     require(all(reg[k] == ready[k] for k in ('run_id','session_id')), 'Bridge session differs')
     skill_profile = registered_skill_profile(directory,reg)
@@ -528,12 +693,16 @@ def execute(directory):
     from ..control.x2_skills import SOURCE, SKILL_PACK_ID, RIGHT_ARM
     from ..control.x2_behavior import DecisionGate
     started = time.monotonic()
-    deadline = started+reg['bridge_wall_seconds']
+    deadline = math.inf if reg['bridge_wall_seconds'] is None else started+reg['bridge_wall_seconds']
     interrupted, handlers = [], {}
     gate = DecisionGate(reg['run_id'],reg['session_id'],ready['policy_id'],ready['checkpoint_id'],ready['input_map_id'],
-        sim_wave_profile_id=skill_profile['profile_id'] if skill_profile['wave_enabled'] else None)
-    exchange = RemoteExchange(reg['run_id'],reg['session_id'],profile=reg['interaction_profile'])
+        sim_wave_profile_id=skill_profile['profile_id'] if skill_profile['wave_enabled'] else None,
+        monotonic_execution_ids=continuous, single_action_requests=continuous)
+    exchange = RemoteExchange(reg['run_id'],reg['session_id'],profile=reg['interaction_profile'], continuous=continuous)
+    lease = SupervisorLease(reg['run_id'], reg['session_id'], limits['supervisor_timeout_seconds'])
+    last_resource_check = -math.inf
     events, actual_requests = [], []
+    event_sequence = 0
     core = node = wave = None
     failure = None
     last_decision = -1
@@ -556,14 +725,15 @@ def execute(directory):
         del actual_requests[:-4]
         log('actual_mc_request', **record)
     def execution(raw):
+        nonlocal event_sequence
         require(len(events) < 512, 'Execution event budget exhausted')
-        event = wrap_execution(reg,raw,len(events),actual_requests,sensors.latest,sensors.trigger,
+        event = wrap_execution(reg,raw,event_sequence,actual_requests,sensors.latest,sensors.trigger,
             wave_owner=wave.owner if wave is not None and wave.owner and wave.owner['execution_id'] == raw['execution_id'] else None)
         gate.execution_event(event)
-        events.append(event.to_dict())
-        log('execution', event=event.to_dict())
-        atomic(directory/'execution_latest.json',dict(schema=SCHEMA,run_id=reg['run_id'],session_id=reg['session_id'],
-            event=event.to_dict(), core=clean(core.summary())))
+        event_sequence += 1
+        compact = _archive_execution(event.to_dict(), log)
+        events.append(compact)
+        atomic(directory/'execution_latest.json', _execution_mailbox(reg, compact, clean(core.summary())))
     def on_odom(msg):
         received = time.monotonic()
         p,q,v,w = msg.pose.pose.position,msg.pose.pose.orientation,msg.twist.twist.linear,msg.twist.twist.angular
@@ -590,11 +760,7 @@ def execute(directory):
         sensors.update('arm', message_to_ordereddict(msg),update,None,received=received,
             archive=wave is not None and core.command is not None and core.command.behavior == 'WAVE_RIGHT')
     def spin():
-        began = time.monotonic()
-        for _ in range(64):
-            if time.monotonic()-began >= .008:
-                break
-            rclpy.spin_once(node,timeout_sec=.0001)
+        _pump_callbacks(rclpy.spin_once, node, core)
         if wave is not None:
             wave.poll()
         core.standing_ready()
@@ -646,7 +812,7 @@ def execute(directory):
                     del actual_requests[:-4]
                 log(kind,**fields)
             wave = WaveSession(directory,reg,core,binding,wave_record,query_client,query_request,message_to_ordereddict)
-            if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID:
+            if skill_profile['profile_id'] in FULL_ACTION_PROFILE_IDS:
                 stand_client = node.create_client(SetMcAction, '/aimdk_5Fmsgs/srv/SetMcAction')
                 def stand_request():
                     require(wave.boundary is None, 'Active preset helper prevents SD preparation')
@@ -669,9 +835,14 @@ def execute(directory):
             time.sleep(.02)
         require(core.standing_ready(),'Fresh stable standing not confirmed')
         atomic(directory/'bridge_ready.json',dict(run_id=reg['run_id'],session_id=reg['session_id'],
-            capabilities=capabilities, qualification_only=True,wave_enabled=skill_profile['wave_enabled'],skill_profile=skill_profile))
+            capabilities=capabilities, qualification_only=True,wave_enabled=skill_profile['wave_enabled'],skill_profile=skill_profile,
+            session_contract_id=limits['session_contract_id']))
         while time.monotonic()<deadline-14. and not interrupted:
             began = time.monotonic()
+            if continuous and began-last_resource_check >= 1.:
+                lease.check(read_json(directory/'supervisor_heartbeat.json'))
+                require(shutil.disk_usage(directory).free >= limits['disk_reserve_bytes'], 'Bridge log disk reserve exhausted')
+                last_resource_check = began
             if (directory/'emergency.json').exists():
                 raise InterruptedError('independent_emergency_stop')
             spin()
@@ -683,7 +854,9 @@ def execute(directory):
                     if current.valid:
                         packet = exchange.observe(query,current,[e for e in events if e['event_seq']>query['after_event_seq']],
                             odom=originals['odom'],sampled_remote_monotonic=sampled_at,feedback_sources=originals,
-                            runtime_context=runtime_context_snapshot(core,current,len(events)-1))
+                            runtime_context=runtime_context_snapshot(core,current,event_sequence-1))
+                        if continuous:
+                            exchange.acknowledge_closed_history(query, gate, core, events, event_sequence)
                         publish_observation(directory,packet,log)
                         last_query = query['sequence']
             if decision_path.exists():
@@ -692,25 +865,30 @@ def execute(directory):
                 if sequence > last_decision:
                     decision,observation,remote_age = exchange.consume(message)
                     actual_active = gate.active['execution_id'] if gate.active else None
-                    require(actual_active == message.get('expected_active_execution_id'),
+                    require(actual_active == message.get('expected_active_execution_id')
+                            or gate.completed_action(decision.request_id) is not None,
                             'Execution ownership changed in transit; decision not executed')
                     gate.observe(observation)
                     admission = gate.admit(decision,time.monotonic())
                     log('remote_admission',decision=decision.to_dict(),accepted=admission.accepted,
                         reason=admission.reason,remote_nonce_age_s=remote_age,
                         host_inference_age_s=message['host_inference_age_s'])
+                    if admission.reason == 'completed_action_request':
+                        last_decision = sequence
+                        continue  # Retain the raw output, but create no second skill or artificial event.
                     require(admission.accepted,'Remote decision gate: '+admission.reason)
-                    wave_seconds = 32. if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID else 26.
+                    wave_seconds = 32. if skill_profile['profile_id'] in FULL_ACTION_PROFILE_IDS else 26.
                     enough_wave_budget = str(decision.behavior) != 'WAVE_RIGHT' or str(decision.phase) != 'START' or deadline-time.monotonic() >= wave_seconds
                     accepted = enough_wave_budget and core.submit_decision(decision,observation.received_monotonic)
                     if not accepted:
                         # A locally admitted decision can still fail current MC preconditions.
                         # Preserve the actual rejection; never replace it with HOLD.
                         if gate.active and gate.active['execution_id'] is None:
-                            event = rejected_execution(reg,decision,len(events),core)
+                            require(len(events) < 512, 'Execution event budget exhausted')
+                            event = rejected_execution(reg,decision,event_sequence,core)
                             gate.execution_event(event)
-                            events.append(event.to_dict())
-                            log('execution',event=event.to_dict())
+                            event_sequence += 1
+                            events.append(_archive_execution(event.to_dict(), log))
                         else:
                             raise RuntimeError('In-flight decision rejected by executor')
                     last_decision = sequence
@@ -733,12 +911,12 @@ def execute(directory):
                 if core.command and not core.terminal:
                     core.cancel(failure or 'bridge_exit')
                 else:
-                    core.motion.request_stop(failure or 'bridge_exit',failure=skill_profile['profile_id'] != SIM_FROZEN_FULL_PROFILE_ID)
+                    core.motion.request_stop(failure or 'bridge_exit',failure=skill_profile['profile_id'] not in FULL_ACTION_PROFILE_IDS)
             except BaseException:
                 pass
             end = min(deadline,time.monotonic()+12.)
             def stopped_basis():
-                return (observed_base_stop_basis(core) if skill_profile['profile_id'] == SIM_FROZEN_FULL_PROFILE_ID
+                return (cleanup_base_stop_basis(core) if skill_profile['profile_id'] in FULL_ACTION_PROFILE_IDS
                         else 'owned_executor_stop_window' if core.motion.state == 'STOPPED' else None)
             while time.monotonic()<end and (stopped_basis() is None
                     or wave is not None and core.command is not None and core.command.behavior == 'WAVE_RIGHT' and not core.terminal):
@@ -766,9 +944,10 @@ def execute(directory):
                 summary['wave_stop_confirmed'] = False
                 failure = (failure or '')+';helper_cleanup:'+str(error)
         summary.update(reason=failure,wall_seconds=time.monotonic()-started,qualification_only=True,
-                       events=len(events),clock_domain='linux_bridge_monotonic',skill_profile=skill_profile)
+                       events=event_sequence, retained_events=len(events), session_profile=limits['session_profile'],
+                       clock_domain='linux_bridge_monotonic',skill_profile=skill_profile)
         try:
-            atomic(directory/'bridge_summary.json',summary)
+            atomic(directory/'bridge_summary.json',_archive_summary(summary, reg, log))
         finally:
             try:
                 stream.close()

@@ -1,6 +1,6 @@
 import type { Atlas } from '../../atlas/src/types';
 import { BrainView } from './brain';
-import { LiveStatus, activeStates, canEmergencyStop } from './live-status';
+import { LiveStatus, activeStates, canEmergencyStop, canSubmitTask } from './live-status';
 import { loadAtlas, validBatch, validManifest, validCapture, replayAt, validReplayBatch } from './data';
 import type { ExperimentStatus, OpenRecord, Snapshot, TelemetryBatch, TelemetryManifest, TelemetrySummary, Task } from './types';
 import './style.css';
@@ -19,17 +19,16 @@ app.innerHTML = `
   <header class="titlebar"><div class="brand">${icon('brain')}<span>MaleCNS <b>Lab</b></span></div><span class="titlebar-divider"></span><span class="workspace-label">脑控验证</span><div class="titlebar-right"><span class="experiment-state" id="experiment-state">未运行</span><button class="tool-button primary" id="prepare" disabled>准备验证</button><button class="tool-button" id="start" disabled>开始</button><button class="tool-button stop" id="stop" disabled>紧急停止</button><label class="select-shell record-shell"><span class="sr-only">实验记录</span><select id="record-select" aria-label="实验记录"><option value="">实时</option></select>${icon('arrow')}</label><button class="icon-button" id="refresh-records" aria-label="刷新实验记录" title="刷新记录">${icon('reset')}</button></div></header>
   <main>
     <div class="notice" id="notice" role="alert" hidden></div>
-    <div class="taskbar" id="taskbar" aria-label="互动任务"><div class="task-buttons"><button class="tool-button" data-task="GREET" disabled>打招呼</button><button class="tool-button" data-task="FACE_LEFT" disabled>面向左侧</button><button class="tool-button" data-task="FACE_RIGHT" disabled>面向右侧</button><button class="tool-button" data-task="SHOW_FORWARD" disabled>向前展示</button><button class="tool-button" data-task="END_INTERACTION" disabled>结束互动</button></div><span id="behavior-state" role="status">未运行</span></div>
+    <div class="taskbar" id="taskbar" aria-label="互动任务"><div class="task-buttons"><button class="tool-button" data-task="GREET" disabled>打招呼</button><button class="tool-button" data-task="FACE_LEFT" disabled>左转 90°</button><button class="tool-button" data-task="FACE_RIGHT" disabled>右转 90°</button><button class="tool-button" data-task="SHOW_FORWARD" disabled>前进 1 米</button><button class="tool-button" data-task="END_INTERACTION" disabled>结束互动</button></div><span id="behavior-state" role="status">未运行</span></div>
     <div class="workspace" id="workspace">
       <section class="panel simulation-panel" aria-labelledby="simulation-title">
         <div class="panel-heading"><div class="panel-title">${icon('robot')}<h2 id="simulation-title">X2 仿真</h2></div><div class="panel-actions"><label class="select-shell" id="media-selector" hidden><select id="media-kind" aria-label="回放画面类型"><option value="sample">采样</option><option value="video">视频</option></select></label><button class="tool-button" id="video-play" hidden>播放</button><span class="badge" id="simulation-state">未运行</span></div></div>
         <div class="simulation-notice" id="simulation-notice" hidden>先 Pause、Reset，确认直立暂停后 Run，再点击“开始”。</div>
         <div class="simulation-stage" id="simulation-stage"><video id="recorded-video" class="recorded-frame" preload="metadata" muted playsinline disablepictureinpicture hidden></video><img id="recorded-frame" class="recorded-frame" alt="本次仿真采样画面" hidden/><div class="empty-simulation" id="empty-simulation">${icon('robot')}<strong id="simulation-message">未运行</strong><span id="simulation-detail">点击“准备验证”连接</span></div></div>
       </section>
-      <div class="splitter" id="splitter" role="separator" aria-label="调整仿真与脑图宽度" aria-orientation="vertical" aria-valuemin="35" aria-valuemax="65" aria-valuenow="48" tabindex="0"><span></span></div>
       <section class="panel brain-panel" aria-labelledby="brain-title">
         <div class="panel-heading"><div class="panel-title">${icon('brain')}<h2 id="brain-title">MaleCNS 脑模型</h2></div><div class="panel-actions"><span class="badge" id="brain-state">未运行</span><button class="icon-button" id="previous-batch" aria-label="上一批" title="上一批" hidden>‹</button><span class="batch-number" id="batch-number" hidden></span><button class="icon-button" id="next-batch" aria-label="下一批" title="下一批" hidden>›</button><button id="reset-view" class="icon-button" aria-label="复位脑图视角" title="复位视角">${icon('reset')}</button></div></div>
-        <div class="brain-stage"><div id="brain"></div><div class="brain-overlay"><span>真实胞体位置</span><strong id="soma-count">—</strong><span id="data-quality"></span></div><div class="brain-hint">拖动旋转 · 滚轮缩放</div><div class="activity-legend"><span>群组平均发放率</span><div class="legend-gradient"></div><div class="legend-range"><span>0</span><span id="max-rate">— Hz</span></div></div></div>
+        <div class="brain-stage"><div id="brain"></div><div class="region-legend" id="region-legend" aria-label="神经群组颜色"></div><div class="brain-hint">拖动旋转 · 滚轮缩放</div><div class="activity-legend"><span>群组平均发放率</span><div class="legend-gradient"></div><div class="legend-range"><span>0</span><span id="max-rate">— Hz</span></div></div></div>
         <div class="activity-panel"><div class="activity-heading"><div class="activity-title"><span class="small-dot"></span>群组均值<label class="select-shell group-shell"><span class="sr-only">选择神经群组</span><select id="group-select" aria-label="选择神经群组" disabled></select>${icon('arrow')}</label></div><div class="rate-value"><strong id="current-rate">—</strong><span>Hz</span></div></div><svg id="rate-chart" class="rate-chart" viewBox="0 0 560 100" preserveAspectRatio="none" role="img" aria-label="所选群组已记录的平均发放率曲线"></svg><div class="spike-heading"><span id="spike-label">神经元脉冲 · 未记录</span><span id="neural-time">—</span></div><svg id="spike-chart" class="spike-chart" viewBox="0 0 560 75" preserveAspectRatio="none" role="img" aria-label="选定神经元真实脉冲栅格"></svg></div>
       </section>
     </div>
@@ -38,14 +37,13 @@ app.innerHTML = `
 const api = window.workbench;
 const groupSelect = element<HTMLSelectElement>('group-select');
 const recordSelect = element<HTMLSelectElement>('record-select');
-const workspace = element('workspace'), splitter = element('splitter');
 let atlas: Atlas, brain: BrainView;
 let manifest: TelemetryManifest | null = null, current: TelemetryBatch | null = null;
 let summary: TelemetrySummary | null = null, lastStatusNotice = '';
 let history: TelemetryBatch[] = [], replay: OpenRecord | null = null, replayIndex = 0;
 let replayFrameSequence: number | null = null, replayPreviousBatch = false, replayCursor: string | null = null;
 let snapshot: Snapshot | null = null, displaySkipped = 0, lastSequence = 0;
-let ratio = 48, disposed = false, pending = false, modeVersion = 0;
+let disposed = false, pending = false, modeVersion = 0;
 const liveStatus = new LiveStatus();
 let lifecyclePending = false, stopPending = false;
 let pollTimer: ReturnType<typeof setTimeout> | null = null, polling = false, pollRequested = false;
@@ -55,25 +53,25 @@ const recordedVideo = element<HTMLVideoElement>('recorded-video');
 function clearVideo(): void { recordedVideo.pause(); recordedVideo.removeAttribute('src'); recordedVideo.load(); videoMode = false; element<HTMLSelectElement>('media-kind').value = 'sample'; }
 const stateLabels: Record<ExperimentStatus['state'], string> = { idle: '未运行', preparing: '正在准备', awaiting_simulation: '等待仿真启动', running: '实验进行中', stopping: '正在停止', completed: '已完成', cancelled: '已停止', failed: '实验失败' };
 
+let noticeTimer: ReturnType<typeof setTimeout> | null = null, shownMessage = '';
 function showError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (!message || message === shownMessage) return;
+  shownMessage = message;
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
   element('notice').textContent = message; element('notice').hidden = false;
+  noticeTimer = setTimeout(() => { element('notice').hidden = true; noticeTimer = null; }, 5000);
 }
-function clearError(): void { element('notice').hidden = true; element('notice').textContent = ''; }
+function clearError(): void {
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = null; shownMessage = '';
+  element('notice').hidden = true; element('notice').textContent = '';
+}
 function setBounds(): void {
   if (!api || document.hidden) return;
   const { x, y, width, height } = element('simulation-stage').getBoundingClientRect();
   void api.setSimulationBounds({ x, y, width, height }).catch(showError);
 }
-function setRatio(value: number): void {
-  ratio = Math.min(65, Math.max(35, value));
-  workspace.style.setProperty('--split', `${ratio}%`); splitter.setAttribute('aria-valuenow', String(Math.round(ratio)));
-}
-splitter.addEventListener('pointerdown', event => { splitter.setPointerCapture(event.pointerId); splitter.classList.add('dragging'); });
-splitter.addEventListener('pointermove', event => { if (splitter.hasPointerCapture(event.pointerId)) { const bounds = workspace.getBoundingClientRect(); setRatio((event.clientX - bounds.left) / bounds.width * 100); } });
-splitter.addEventListener('pointerup', event => { splitter.releasePointerCapture(event.pointerId); splitter.classList.remove('dragging'); });
-splitter.addEventListener('lostpointercapture', () => splitter.classList.remove('dragging'));
-splitter.addEventListener('keydown', event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setRatio(ratio + (event.key === 'ArrowLeft' ? -2 : 2)); } });
 new ResizeObserver(setBounds).observe(element('simulation-stage'));
 window.addEventListener('resize', setBounds);
 
@@ -102,14 +100,9 @@ function telemetryIssue(status: ExperimentStatus): string {
   if (manifest && ended && !summary?.complete) return `遥测档案不完整${summary?.dropped_batches ? `：丢失 ${summary.dropped_batches} 批` : ''}。仅显示已保存数据。`;
   return '';
 }
-function updateDataQuality(): void {
-  const points = new Set(atlas.body_ids);
-  const selectedGroup = manifest?.groups.find(group => group.id === groupSelect.value);
-  const missing = selectedGroup?.body_ids.filter(id => !points.has(id)).length ?? 0;
-  const skipped = replay ? '回放' : `跳显 ${displaySkipped}`;
-  const dropped = summary?.status !== 'running' && summary ? summary.dropped_batches : Math.max(summary?.dropped_batches ?? 0, current?.dropped_batches ?? 0);
-  element('data-quality').textContent = manifest ? `${skipped} · 丢批 ${dropped} · 无坐标 ${missing}` : '';
-  element('data-quality').title = '跳显：显示端未逐批展示；丢批：采集端未归档；无坐标：当前群组中没有胞体坐标的成员，仍计入均值。';
+function dataQualitySummary(): string {
+  const dropped = summary?.dropped_batches ?? current?.dropped_batches ?? 0;
+  return manifest ? `已归档但未逐批显示 ${displaySkipped} 批；采集丢批 ${dropped}；图谱缺坐标 ${atlas.missing_count} 个。` : '';
 }
 function useBatch(value: TelemetryBatch, isReplay = false): void {
   if (!manifest || !validBatch(value, manifest)) throw new Error('遥测批次与当前控制脑记录不匹配');
@@ -126,10 +119,9 @@ function drawActivity(): void {
   const groupIndex = manifest?.groups.findIndex(group => group.id === groupSelect.value) ?? -1;
   const rates = current?.group_rates_hz ?? null;
   const maximum = Math.max(1, ...history.flatMap(batch => batch.group_rates_hz));
-  brain.update(rates, groupSelect.value, maximum);
+  brain.update(rates, groupSelect.value, maximum, current);
   element('max-rate').textContent = current ? `${maximum.toFixed(0)} Hz` : '— Hz';
   const rate = rates?.[groupIndex]; element('current-rate').textContent = rate === undefined ? '—' : rate.toFixed(1);
-  updateDataQuality();
   const chart = document.getElementById('rate-chart')!;
   const first = history[0]?.step_start ?? 0, last = history.at(-1)?.step_end ?? 1;
   const x = (step: number) => 32 + (step - first) / (last - first || 1) * 514;
@@ -169,8 +161,9 @@ function updateStatus(value: ExperimentStatus): void {
   element('taskbar').hidden = Boolean(replay);
   const brainActive = value.mode === 'brain_control' && value.brain_controlled === true;
   app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => {
-    button.disabled = controlsPending || Boolean(replay) || value.state !== 'running' || !brainActive || value.phase === 'initializing';
-    button.title = '向脑模型提交互动任务';
+    button.disabled = controlsPending || Boolean(replay) || !canSubmitTask(value, button.dataset.task as Task);
+    button.classList.toggle('is-active', value.action_busy === true && value.task === button.dataset.task);
+    button.title = value.action_busy && button.dataset.task !== 'END_INTERACTION' ? '当前动作结束并停稳后可用' : '向脑模型提交互动任务';
   });
   element('behavior-state').textContent = value.state === 'running' ? [value.message, value.phase === 'executing' ? behaviorNames[value.behavior ?? ''] : ''].filter(Boolean).join(' · ') : stateLabels[value.state];
   element('behavior-state').title = value.reason ?? '动作由当前候选脑模型选择；此会话用于受保护验证';
@@ -194,6 +187,7 @@ function updateStatus(value: ExperimentStatus): void {
   element('brain-state').textContent = videoMode ? '视频未对齐' : issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : replay ? replayPreviousBatch ? '上一批' : current ? '回放' : '尚无批次' : current ? brainActive ? timeUnknown ? '时间未知' : stale ? '等待新批次' : '实时' : '最后一批' : brainActive ? '等待遥测' : busy ? '等待脑就绪' : '未运行';
   element('brain-state').classList.toggle('mint', !issue && !timeUnknown && !stale && !replay && brainActive && Boolean(current));
   element('brain-state').title = videoMode ? '视频未取得同步时间，脑活动不与视频配对。' : issue || (timeUnknown ? '主机时钟暂不可用，无法确认当前同步状态。' : !replay && snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `主机取时点的批次年龄 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : replay ? replay.capture.replay ? '截图记录于主机时间区间；没有仿真像素源时间。' : '已封存真实遥测；未归档画面' : '尚无本次控制脑遥测');
+  element('brain-state').title += ` ${dataQualitySummary()}`;
   for (const id of ['previous-batch', 'next-batch', 'batch-number']) element(id).hidden = !replay || videoMode;
   element<HTMLButtonElement>('previous-batch').disabled = controlsPending || !replay || replayIndex <= 0;
   element<HTMLButtonElement>('next-batch').disabled = controlsPending || !replay || replayIndex >= (replay.capture.replay?.entries.length ?? replay.sequences.length) - 1;
@@ -208,8 +202,8 @@ function updateStatus(value: ExperimentStatus): void {
   const captureIssue = replay && !['absent', 'sealed'].includes(replay.capture.state) ? `画面档案不完整：${replay.capture.reason ?? replay.capture.summary?.reason ?? '未完成封存'}` : !replay && snapshot?.capture && ['failed', 'incomplete'].includes(snapshot.capture.state) ? `画面采集失败：${snapshot.capture.reason}` : '';
   const videoIssue = replay && !['absent', 'sealed'].includes(replay.video.state) ? `视频档案不完整：${replay.video.reason ?? '未完成封存'}` : !replay && snapshot?.video && snapshot.video.state === 'incomplete' ? `视频采集失败：${snapshot.video.reason}` : '';
   const statusNotice = [value.state === 'failed' ? value.message : '', issue, captureIssue, videoIssue].filter(Boolean).join('；');
-  if (statusNotice) showError(statusNotice);
-  else if (element('notice').textContent === lastStatusNotice) clearError();
+  if (statusNotice && statusNotice !== lastStatusNotice) showError(statusNotice);
+  else if (!statusNotice && element('notice').textContent === lastStatusNotice) clearError();
   lastStatusNotice = statusNotice;
 }
 function renderStatus(): void { if (liveStatus.current) updateStatus(liveStatus.current); }
@@ -288,10 +282,8 @@ async function poll(): Promise<void> {
       renderStatus();
       if (!replay && !document.hidden) {
         if (next.manifest) useManifest(next.manifest);
-        const previousSummary = summary;
         useSummary(next.summary, next.status.run_id);
         if (next.batch) useBatch(next.batch);
-        if (previousSummary?.dropped_batches !== summary?.dropped_batches || previousSummary?.status !== summary?.status) updateDataQuality();
       }
       renderStatus();
       if (next.read_error || next.simulation_error) showError([next.read_error, next.simulation_error, next.status.state === 'failed' ? next.status.message : '', telemetryIssue(next.status)].filter(Boolean).join('；'));
@@ -308,7 +300,7 @@ function schedulePoll(): void {
   pollRequested = false;
 }
 app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => button.addEventListener('click', async () => {
-  if (!api || pending || stopPending || replay) return;
+  if (!api || pending || stopPending || replay || !liveStatus.current || !canSubmitTask(liveStatus.current, button.dataset.task as Task)) return;
   const revision = liveStatus.beginChange();
   clearError(); pending = true; renderStatus();
   try { const status = await api.task(button.dataset.task as Task); if (liveStatus.accept(status, revision)) renderStatus(); }
@@ -334,7 +326,7 @@ recordSelect.addEventListener('change', async () => {
       useSummary(opened.summary, opened.session.run_id);
       if (!(opened.capture.replay?.entries.length ?? opened.sequences.length)) throw new Error('记录没有可回放的数据');
       await showReplay(0);
-    } else if (snapshot?.manifest) { useManifest(snapshot.manifest); useSummary(snapshot.summary, snapshot.status.run_id); if (snapshot.batch) useBatch(snapshot.batch); updateDataQuality(); }
+    } else if (snapshot?.manifest) { useManifest(snapshot.manifest); useSummary(snapshot.summary, snapshot.status.run_id); if (snapshot.batch) useBatch(snapshot.batch); }
     else { brain.setGroups([]); groupSelect.replaceChildren(); groupSelect.disabled = true; drawActivity(); }
   } catch (error) { showError(error); }
   finally { pending = false; renderStatus(); setBounds(); }
@@ -359,9 +351,14 @@ recordedVideo.addEventListener('error', () => { if (videoMode) { recordedVideo.p
 document.addEventListener('visibilitychange', () => { if (document.hidden) recordedVideo.pause(); renderStatus(); if (!document.hidden) { setBounds(); requestPoll(); } });
 async function start(): Promise<void> {
   atlas = await loadAtlas(); brain = new BrainView(element('brain'), atlas);
-  element('soma-count').textContent = `${atlas.positioned_count.toLocaleString('en-US')} 个`;
+  element('region-legend').replaceChildren(...brain.getLegend().map(item => {
+    const label = document.createElement('span'), dot = document.createElement('i');
+    dot.style.backgroundColor = item.color;
+    label.append(dot, item.label); label.title = `${item.count.toLocaleString('zh-CN')} 个有坐标神经元`;
+    return label;
+  }));
   element('reset-view').addEventListener('click', () => brain.reset()); groupSelect.addEventListener('change', drawActivity);
-  window.addEventListener('beforeunload', () => { recordedVideo.pause(); disposed = true; if (pollTimer !== null) clearTimeout(pollTimer); brain.dispose(); });
+  window.addEventListener('beforeunload', () => { recordedVideo.pause(); disposed = true; if (noticeTimer !== null) clearTimeout(noticeTimer); if (pollTimer !== null) clearTimeout(pollTimer); brain.dispose(); });
   drawActivity();
   if (!api) { element<HTMLButtonElement>('prepare').disabled = true; showError('请在 Electron 桌面应用中使用实验操作。'); return; }
   await refreshRecords(); setBounds(); requestPoll();

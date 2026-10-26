@@ -103,10 +103,65 @@ test('snapshot retries stop at three failures or two seconds; unknown errors and
 test('capture errors send independent stop before freezing; time/frame boundaries never expand', async t => {
   let f, observed;
   f = await fixture(t, { onFailure: () => { observed = f.capture.accepting; f.context.status.state = 'stopping'; } });
-  f.setTime(250000000000n); await f.capture.tick();
+  f.setTime(490000000000n); await f.capture.tick();
   assert.equal(observed, true); assert.equal(f.capture.accepting, false); assert.equal(f.capture.frames.length, 0); assert.match(f.capture.error, /上限/);
   await f.capture.seal();
   const archive = await readCaptureArchive(f.root, id, f.session, f.manifest); assert.equal(archive.state, 'failed'); assert.equal(archive.complete, false);
+});
+
+test('continuous capture seals only its initial window without failing the running session', async t => {
+  const limits = []; const f = await fixture(t, { initialWindow: true, onLimit: reason => limits.push(reason) });
+  await f.capture.tick();
+  const events = path.join(f.root, 'behavior_events.jsonl');
+  await writeFile(events, (await readFile(events, 'utf8')) + '{"partial":');
+  f.setTime(488000000000n); await f.capture.tick();
+  assert.equal(limits.length, 1); assert.equal(f.capture.accepting, false);
+  assert.deepEqual(f.errors, []); assert.equal(f.context.status.state, 'running');
+  await writeFile(path.join(f.root, 'telemetry/batches/000002.json.tmp'), '{"inflight":');
+  await f.capture.seal();
+  const archive = await readCaptureArchive(f.root, id, f.session, f.manifest);
+  assert.equal(archive.complete, true); assert.equal(archive.manifest.archive_scope, 'initial_window');
+  assert.equal(archive.summary.truncation_reason, limits[0]);
+  assert.equal(archive.summary.complete_means, 'window_sealed_not_full_session');
+  assert.equal(archive.replay.cutoff_host_monotonic_ns, '10000000000');
+  assert.equal(archive.replay.entries.some(e => e.kind === 'execution'), false);
+  assert.ok(archive.summary.event_index_omitted.includes('behavior_events.jsonl'));
+  assert.equal(archive.replay.entries.filter(e => e.kind === 'batch').length, 1);
+  assert.ok((await readFile(events, 'utf8')).endsWith('{"partial":'));
+});
+
+test('continuous capture capacity is normal but malformed frames still fail', async t => {
+  const limits = []; const f = await fixture(t, { initialWindow: true, onLimit: reason => limits.push(reason) });
+  f.capture.bytes = CAPTURE_LIMITS.image_bytes;
+  await f.capture.tick(); assert.equal(limits.length, 1); assert.deepEqual(f.errors, []);
+  const broken = await fixture(t, { initialWindow: true, onLimit: () => assert.fail('not a capacity event'), capture: async () => fakeImage(640, 400, Buffer.alloc(CAPTURE_LIMITS.frame_bytes + 1)) });
+  await broken.capture.tick(); assert.match(broken.errors[0], /单帧/);
+});
+
+test('current capture survives the old 240 second cutoff and keeps strict legacy archive limits', async t => {
+  const f = await fixture(t);
+  assert.equal(CAPTURE_LIMITS.duration_ms, 480000); assert.equal(CAPTURE_LIMITS.frames, 960);
+  f.setTime(250000000000n); await f.capture.tick();
+  f.setTime(489000000000n); await f.capture.tick();
+  assert.equal(f.capture.frames.length, 2); assert.deepEqual(f.errors, []);
+  await f.capture.seal();
+  const current = await readCaptureArchive(f.root, id, f.session, f.manifest);
+  assert.equal(current.complete, true); assert.equal(current.manifest.limits_profile, 'vm480_v2');
+  const file = path.join(f.root, 'simulation_capture/manifest.json');
+  const manifest = JSON.parse(await readFile(file));
+  delete manifest.limits_profile;
+  await writeFile(file, JSON.stringify(manifest));
+  await assert.rejects(readCaptureArchive(f.root, id, f.session, f.manifest), /上限版本/);
+  const old = await fixture(t); await old.capture.tick(); await old.capture.seal();
+  const oldFile = path.join(old.root, 'simulation_capture/manifest.json');
+  const oldManifest = JSON.parse(await readFile(oldFile)); delete oldManifest.limits_profile;
+  oldManifest.limits = { ...oldManifest.limits, duration_ms: 240000, frames: 480, index_bytes: 4 * 1024 * 1024 };
+  await writeFile(oldFile, JSON.stringify(oldManifest));
+  const legacy = await readCaptureArchive(old.root, id, old.session, old.manifest);
+  assert.equal(legacy.complete, true); assert.equal(legacy.manifest.limits.duration_ms, 240000);
+  await assert.rejects(readCapturedFrame(old.root, legacy, 481), /帧序号/);
+  manifest.limits_profile = 'unbounded'; await writeFile(file, JSON.stringify(manifest));
+  await assert.rejects(readCaptureArchive(f.root, id, f.session, f.manifest), /上限版本/);
 });
 
 test('identity, oversized image and disk reserve fail; repeated empty images reach the bounded failure limit', async t => {
@@ -211,6 +266,8 @@ test('legacy capture remains untouched and degrades to brain-only replay without
   const f = await fixture(t); await f.capture.tick(); await f.capture.seal();
   const manifestPath = path.join(f.root, 'simulation_capture/manifest.json');
   const old = JSON.parse(await readFile(manifestPath));
+  delete old.limits_profile;
+  old.limits = { ...old.limits, duration_ms: 240000, frames: 480, index_bytes: 4 * 1024 * 1024 };
   old.schema = 'malecns_lab.x2_simulation_capture.manifest.v1';
   old.clock = { domain: 'macos_same_host_monotonic', comparability: 'actual_run_comparison_pending' };
   await writeFile(manifestPath, JSON.stringify(old));

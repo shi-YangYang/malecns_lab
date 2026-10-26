@@ -3,11 +3,12 @@ import { randomBytes } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { readVideoArchive } from './video.mjs';
-import { readCaptureArchive, readCapturedFrame, readCapturedBatch, validateClockSample, CLOCK_SCHEMA, CLOCK_TIMEOUT_MS } from './recording.mjs';
+import { readCaptureArchive, readCapturedFrame, readCapturedBatch, validateClockSample, CLOCK_SCHEMA, CLOCK_TIMEOUT_MS, CAPTURE_LIMITS } from './recording.mjs';
 import { JsonLineReader, MAX_ARCHIVE_BYTES, MAX_MANIFEST_BYTES, STATES, TERMINAL_STATES, readBoundedJson, recordIdAllowed } from './boundaries.mjs';
 
 const EVENT_SCHEMA = 'malecns_lab.desktop_event.v1';
 const TASKS = new Set(['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']);
+export const TASK_ACK_TIMEOUT_MS = 2000;
 export class ExperimentController {
   constructor(repo, onChange = () => {}, launch = spawn, clock = () => process.hrtime.bigint()) {
     this.repo = repo;
@@ -15,7 +16,7 @@ export class ExperimentController {
     this.onChange = onChange;
     this.launch = launch;
     this.clock = clock; this.clockRequests = new Map(); this.hostClockId = null;
-    this.child = null;
+    this.child = null; this.taskAwaitingAck = null; this.runtimeState = null; this.taskAckFailure = null;
     this.output = null;
     this.state = { state: 'idle', mode: 'brain_control', brain_controlled: false, message: '未运行', simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: true };
     this.cached = null; this.lastRead = 0; this.reading = null; this.stderr = '';
@@ -27,8 +28,8 @@ export class ExperimentController {
     this.output = path.join(this.recordsRoot, `desktop-${stamp}-${randomBytes(4).toString('hex')}`);
     this.cancelClockRequests('实验会话已改变'); this.hostClockId = null;
     this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', mode: 'brain_control', brain_controlled: false, message: '正在准备脑控验证', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
-    this.stderr = ''; this.protocolError = null; this.notify();
-    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--output', this.output], {
+    this.stderr = ''; this.protocolError = null; this.clearTaskAck(); this.runtimeState = null; this.taskAckFailure = null; this.notify();
+    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--session-profile', 'continuous', '--output', this.output], {
       cwd: this.repo, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONPATH: path.join(this.repo, 'src'), PYTHONUNBUFFERED: '1' },
     });
@@ -37,17 +38,39 @@ export class ExperimentController {
       if (event.type === 'clock' || event.schema === CLOCK_SCHEMA) { this.receiveClock(event); return; }
       if (event.schema !== EVENT_SCHEMA || event.type !== 'status' || !STATES.has(event.state) || event.output !== this.output || typeof event.message !== 'string') throw new Error('实验状态协议无效');
       if (typeof event.simulator_ready !== 'boolean' || typeof event.motion_started !== 'boolean' || typeof event.resources_stopped !== 'boolean' || ![true, false, null].includes(event.stop_confirmed)) throw new Error('实验安全状态无效');
-      this.state = { ...event, brain_controlled: event.brain_controlled === true, clock_source: /^[a-f0-9]{32}$/.test(event.host_clock_id) && Number.isFinite(event.host_monotonic_ns) && event.host_monotonic_ns >= 0 ? 'python_runtime' : 'desktop_local', message: event.message.slice(0, 2000) }; this.notify();
+      const rejected = event.notice === 'request_rejected' || event.phase === 'request_rejected';
+      // Older runtimes encoded a notification in phase. Restore only their
+      // authoritative request state, never the optimistic local queued state.
+      if (event.phase === 'request_rejected') {
+        const previous = this.runtimeState;
+        const idle = event.action_busy === false && event.request_pending !== true && !event.active_request_id;
+        event = { ...event, phase: idle ? 'waiting_task' : previous?.active_request_id === event.active_request_id ? previous?.phase ?? 'queued' : 'queued',
+          task: event.active_task ?? previous?.task, notice: 'request_rejected' };
+      }
+      // Keep the local lock until the runtime acknowledges this particular task.
+      // An earlier waiting_task event may already be in the stdout pipe.
+      const awaiting = this.taskAwaitingAck;
+      if (awaiting && (event.state !== 'running' ||
+          (event.phase === 'queued' && event.task === awaiting.task && event.active_request_id && event.active_request_id !== awaiting.previousId) ||
+          (rejected && event.rejected_task === awaiting.task))) this.clearTaskAck();
+      this.runtimeState = event;
+      this.state = { ...event, brain_controlled: event.brain_controlled === true, clock_source: /^[a-f0-9]{32}$/.test(event.host_clock_id) && Number.isFinite(event.host_monotonic_ns) && event.host_monotonic_ns >= 0 ? 'python_runtime' : 'desktop_local', message: event.message.slice(0, 2000) };
+      if (this.taskAwaitingAck) this.state = { ...this.state, action_busy: true, request_pending: true, task: this.taskAwaitingAck.task, phase: 'queued', message: '任务已提交，等待脑计算' };
+      if (this.taskAckFailure) this.state = { ...this.state, state: TERMINAL_STATES.has(event.state) ? 'failed' : 'stopping',
+        brain_controlled: false, reason: 'task_ack_timeout', message: this.taskAckFailure };
+      this.notify();
     }, error => { this.protocolError = error.message; this.stop(); });
     child.stdout.setEncoding('utf8'); child.stdout.on('data', chunk => lines.push(chunk));
     child.stderr.setEncoding('utf8'); child.stderr.on('data', chunk => { this.stderr = `${this.stderr}${chunk}`.slice(-4096); });
     child.stdin.on('error', () => { /* Exit handler records an unexpected broken control pipe. */ });
     child.once('error', error => {
+      this.clearTaskAck();
       this.cancelClockRequests('实验进程无法启动');
       this.state = { ...this.state, brain_controlled: false, state: 'failed', message: `无法启动实验：${error.message}`, resources_stopped: true, simulator_ready: false };
       this.child = null; this.notify();
     });
     child.once('exit', (code, signal) => {
+      this.clearTaskAck();
       this.cancelClockRequests('实验进程已退出');
       this.child = null;
       this.state = { ...this.state, brain_controlled: false };
@@ -64,12 +87,17 @@ export class ExperimentController {
     return this.state;
   }
   stop() {
+    this.clearTaskAck();
     if (this.child && !TERMINAL_STATES.has(this.state.state) && this.state.state !== 'stopping') {
       this.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);
       this.cancelClockRequests('实验正在停止');
       this.state = { ...this.state, clock_source: 'desktop_local', state: 'stopping', message: '正在停车并关闭实验资源' }; this.notify();
     }
     return this.state;
+  }
+  clearTaskAck() {
+    clearTimeout(this.taskAwaitingAck?.timer);
+    this.taskAwaitingAck = null;
   }
   sampleHostClock() {
     if (!this.child || this.state.state !== 'running' || this.clockRequests.size >= 4) return Promise.reject(new Error('主机时钟暂不可用'));
@@ -98,8 +126,28 @@ export class ExperimentController {
   task(task) {
     if (typeof task !== 'string' || !TASKS.has(task)) throw new Error('互动任务无效');
     if (!this.child || this.state.state !== 'running' || this.state.mode !== 'brain_control' || this.state.brain_controlled !== true || this.state.phase === 'initializing') throw new Error('脑模型尚未准备完成');
+    const busy = this.state.action_busy || this.state.request_pending || this.state.phase !== 'waiting_task';
+    if (task !== 'END_INTERACTION' && busy) throw new Error('当前动作尚未结束，请等待机器人停稳');
+    if (task === 'END_INTERACTION' && this.state.task === task && busy) throw new Error('正在结束互动，请等待机器人停稳');
     // Every ordinary task, including END, enters the model. Emergency stop is separate.
-    this.child.stdin.write(`${JSON.stringify({ command: 'task', task })}\n`);
+    const previous = this.state, previousAwaiting = this.taskAwaitingAck;
+    const awaiting = { task, previousId: this.state.active_request_id ?? null, timer: null };
+    this.taskAwaitingAck = awaiting;
+    this.state = { ...this.state, action_busy: true, request_pending: true, task, phase: 'queued', message: '任务已提交，等待脑计算', clock_source: 'desktop_local' };
+    awaiting.timer = setTimeout(() => {
+      if (this.taskAwaitingAck !== awaiting || !this.child) return;
+      this.taskAckFailure = '任务接收确认超时，正在独立停车；请等待停车与资源清理确认';
+      this.protocolError = this.taskAckFailure;
+      this.stop();
+      this.state = { ...this.state, state: 'stopping', brain_controlled: false,
+        reason: 'task_ack_timeout', message: this.taskAckFailure };
+      this.notify();
+    }, TASK_ACK_TIMEOUT_MS);
+    awaiting.timer.unref?.();
+    try { this.child.stdin.write(`${JSON.stringify({ command: 'task', task })}\n`); }
+    catch (error) { this.clearTaskAck(); this.taskAwaitingAck = previousAwaiting; this.state = previous; throw error; }
+    clearTimeout(previousAwaiting?.timer);
+    this.notify();
     return this.state;
   }
   get safeToClose() { return !this.child && this.state.resources_stopped === true; }
@@ -152,7 +200,7 @@ export class ExperimentController {
     return { id, session, manifest, summary, sequences, capture, video };
   }
   async readRecordedFrame(id, sequence) {
-    if (!Number.isInteger(sequence) || sequence < 1 || sequence > 480) throw new Error('画面帧序号无效');
+    if (!Number.isInteger(sequence) || sequence < 1 || sequence > CAPTURE_LIMITS.frames) throw new Error('画面帧序号无效');
     const record = await this.openRecord(id);
     return readCapturedFrame(await this.recordRoot(id), record.capture, sequence);
   }

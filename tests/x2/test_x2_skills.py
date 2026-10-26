@@ -82,6 +82,22 @@ def test_stale_command_and_feedback_never_move():
     assert "odom_unavailable" in r.core.motion.failures
 
 
+@pytest.mark.parametrize("behavior,sign", [("TURN_LEFT", 1), ("TURN_RIGHT", -1)])
+def test_reverse_turn_sway_is_not_reported_as_started(behavior, sign):
+    r = Rig()
+    assert r.submit(behavior)
+    r.a = -sign * .03
+    r.feed(wz=-sign * .2)
+    r.core.tick()
+    assert not r.core.moved and r.core.status == "ACCEPTED"
+    assert not any(event["status"] == "STARTED" for event in r.core.events)
+    r.a = sign * .03
+    r.feed(wz=sign * .2)
+    r.core.tick()
+    assert r.core.moved and r.core.status == "STARTED"
+    assert r.core.events[-1]["angle_rad"] * sign > .02
+
+
 def test_empty_source_claim_is_bounded_and_not_repeated():
     r=Rig(source="")
     assert r.submit("TURN_LEFT")

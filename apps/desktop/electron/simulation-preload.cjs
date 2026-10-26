@@ -1,5 +1,7 @@
 // Isolated, sandboxed simulation world only. No contextBridge, page API, or page message listener.
 const { ipcRenderer } = require('electron');
+const LIMITS_PROFILE = 'vm480_v2';
+const LIMITS = Object.freeze({ fps: 15, bitrate: 2500000, mime: 'video/webm;codecs=vp8', slice_ms: 1000, duration_ms: 480000, chunk_bytes: 8 * 1024 * 1024, pending_bytes: 16 * 1024 * 1024, file_bytes: 256 * 1024 * 1024, index_bytes: 4 * 1024 * 1024, free_bytes: 512 * 1024 * 1024, ack_ms: 1500 });
 const clockId = crypto.randomUUID();
 let active = null;
 const stamp = event => ({ performance_ms: performance.now(), event_timestamp_ms: Number.isFinite(event?.timeStamp) ? event.timeStamp : performance.now(), clock_id: clockId });
@@ -65,6 +67,8 @@ function start(message) {
   const a = active = { generation: message.generation, token: message.token, queue: [], sequence: 0, busy: false, pendingBytes: 0, blobs: 0, failed: false, stopping: false };
   try {
     if (!Number.isInteger(a.generation) || !/^[a-f0-9]{64}$/.test(a.token)) throw new Error('视频授权无效');
+    if (message.limits_profile !== LIMITS_PROFILE || JSON.stringify(message.limits) !== JSON.stringify(LIMITS)) throw new Error('视频上限版本不匹配');
+    if (message.archive_scope !== undefined && message.archive_scope !== 'initial_window') throw new Error('视频保存范围无效');
     a.canvas = canvas(); a.width = a.canvas.width; a.height = a.canvas.height;
     const mime = 'video/webm;codecs=vp8';
     if (!MediaRecorder.isTypeSupported(mime)) throw new Error('当前环境不支持 VP8 视频录制');
@@ -95,7 +99,11 @@ function start(message) {
     a.recorder.addEventListener('error', event => fault(a, event.error?.message ?? '视频编码失败'));
     a.startCall = performance.now(); a.recorder.start(1000);
     a.watch = setInterval(() => { if (a.stopping) return; try { if (canvas() !== a.canvas || a.canvas.width !== a.width || a.canvas.height !== a.height) throw new Error('视频画布被替换或尺寸改变'); } catch (e) { fault(a, e); } }, 100);
-    a.duration = setTimeout(() => fault(a, '视频达到 240 秒上限'), 240000);
+    const initialWindow = message.archive_scope === 'initial_window';
+    a.duration = setTimeout(() => {
+      if (initialWindow) void invoke(a, 'video:limit', { reason: 'duration_limit' }).catch(error => fault(a, error));
+      else fault(a, '视频达到 480 秒上限');
+    }, LIMITS.duration_ms - (initialWindow ? 2000 : 0));
   } catch (error) { fault(a, error); }
 }
 ipcRenderer.on('simulation:source-check', (_event, message) => {

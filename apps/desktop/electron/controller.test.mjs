@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ExperimentController } from './controller.mjs';
+import { ExperimentController, TASK_ACK_TIMEOUT_MS } from './controller.mjs';
 import { CLOCK_SCHEMA } from './recording.mjs';
 
 function fakeChild() { const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); return child; }
@@ -16,7 +16,7 @@ test('launch uses only fixed executable and arguments; repeated prepare and star
   const controller = new ExperimentController('/test/repo', () => {}, (...args) => { calls.push(args); return child; });
   controller.prepare();
   assert.equal(calls[0][0], '/test/repo/.venv-train/bin/python');
-  assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--output', controller.output]);
+  assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--session-profile', 'continuous', '--output', controller.output]);
   assert.equal(controller.state.mode, 'brain_control'); assert.equal(controller.state.brain_controlled, false);
   assert.equal(calls[0][2].shell, false); assert.throws(() => controller.prepare()); assert.throws(() => controller.continue());
   send(child, status(controller, 'awaiting_simulation', { simulator_ready: true }));
@@ -64,6 +64,8 @@ test('task IPC admits only five enums during a ready running session; END remain
   for (const task of ['GREET', 'FACE_LEFT', 'FACE_RIGHT', 'SHOW_FORWARD', 'END_INTERACTION']) {
     controller.task(task);
     assert.equal(child.stdin.read().toString(), JSON.stringify({ command: 'task', task }) + '\n');
+    send(child, status(controller, 'running', { mode: 'brain_control', brain_controlled: true, phase: 'queued', task, action_busy: true, active_request_id: task }));
+    send(child, status(controller, 'running', { mode: 'brain_control', brain_controlled: true, phase: 'waiting_task', task, action_busy: false, active_request_id: task, stop_confirmed: true }));
   }
   for (const bad of ['WAVE_RIGHT', 'rm -rf', '../checkpoint', { task: 'GREET' }, null]) assert.throws(() => controller.task(bad));
   controller.stop();
@@ -87,7 +89,7 @@ test('brain input waits for backend readiness; END enters the model and emergenc
   send(child, status(controller, 'running', { mode: 'brain_control', brain_controlled: true, phase: 'executing' }));
   controller.task('END_INTERACTION');
   assert.equal(child.stdin.read().toString(), '{"command":"task","task":"END_INTERACTION"}\n');
-  assert.equal(controller.state.phase, 'executing');
+  assert.equal(controller.state.phase, 'queued');
   controller.stop();
   assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
   child.emit('exit', 0, null);
@@ -140,4 +142,89 @@ test('batch age uses only the Python sample and never subtracts the Node epoch',
   while (!controller.clockRequests.size) await new Promise(resolve => setImmediate(resolve));
   send(child, clockReply(readRequest()));
   assert.equal((await pending).transport_delay_ms, 1000);
+});
+
+test('busy task lock survives stale waiting events and END remains available until its own acknowledgement', () => {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  const running = { mode: 'brain_control', brain_controlled: true };
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false, active_request_id: 'previous' }));
+  controller.task('SHOW_FORWARD');
+  assert.equal(controller.state.request_pending, true);
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false, active_request_id: 'previous' }));
+  assert.throws(() => controller.task('FACE_LEFT'), /尚未结束/);
+  controller.task('END_INTERACTION');
+  assert.throws(() => controller.task('END_INTERACTION'), /正在结束/);
+  send(child, status(controller, 'running', { ...running, phase: 'queued', task: 'SHOW_FORWARD', action_busy: true, active_request_id: 'forward' }));
+  assert.equal(controller.state.task, 'END_INTERACTION');
+  assert.equal(controller.state.request_pending, true);
+  send(child, status(controller, 'running', { ...running, phase: 'queued', task: 'END_INTERACTION', action_busy: true, active_request_id: 'end' }));
+  send(child, status(controller, 'running', { ...running, phase: 'executing', task: 'END_INTERACTION', action_busy: true, active_request_id: 'end' }));
+  assert.throws(() => controller.task('GREET'), /尚未结束/);
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', task: 'END_INTERACTION', action_busy: false, active_request_id: 'end', stop_confirmed: true }));
+  controller.task('GREET');
+  assert.equal(controller.state.request_pending, true);
+  assert.deepEqual(child.stdin.read().toString().trim().split('\n').map(JSON.parse).map(item => item.task), ['SHOW_FORWARD', 'END_INTERACTION', 'GREET']);
+});
+
+for (const legacy of [false, true]) test(`request rejection preserves idle/active authority and clears matching ACK (${legacy ? 'legacy' : 'notice'})`, () => {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  const running = { mode: 'brain_control', brain_controlled: true };
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false, active_request_id: null }));
+  controller.task('SHOW_FORWARD'); child.stdin.read();
+  send(child, status(controller, 'running', { ...running, phase: legacy ? 'request_rejected' : 'waiting_task',
+    notice: legacy ? undefined : 'request_rejected', rejected_task: 'GREET', action_busy: false, active_request_id: null }));
+  assert.equal(controller.state.request_pending, true); // Unrelated rejection is not this request's ACK.
+  send(child, status(controller, 'running', { ...running, phase: legacy ? 'request_rejected' : 'waiting_task',
+    notice: legacy ? undefined : 'request_rejected', rejected_task: 'SHOW_FORWARD', action_busy: false,
+    request_pending: false, active_request_id: null, message: '本次任务次数已达上限' }));
+  assert.equal(controller.taskAwaitingAck, null); assert.equal(controller.state.phase, 'waiting_task');
+  assert.equal(controller.state.message, '本次任务次数已达上限');
+  controller.task('GREET'); child.stdin.read();
+  send(child, status(controller, 'running', { ...running, phase: 'queued', task: 'GREET', action_busy: true, active_request_id: 'greet' }));
+  send(child, status(controller, 'running', { ...running, phase: 'executing', task: 'GREET', action_busy: true, active_request_id: 'greet' }));
+  send(child, status(controller, 'running', { ...running, phase: legacy ? 'request_rejected' : 'executing',
+    notice: legacy ? undefined : 'request_rejected', rejected_task: 'FACE_LEFT', active_task: 'GREET',
+    task: 'GREET', action_busy: true, active_request_id: 'greet', message: '当前动作尚未结束' }));
+  assert.equal(controller.state.phase, 'executing'); assert.equal(controller.state.task, 'GREET');
+  assert.throws(() => controller.task('FACE_RIGHT'), /尚未结束/);
+  controller.stop();
+});
+
+test('missing task ACK independently stops; stale and late statuses never unlock or erase the error', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  const running = { mode: 'brain_control', brain_controlled: true };
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false, active_request_id: null }));
+  controller.task('SHOW_FORWARD'); child.stdin.read();
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false, active_request_id: null }));
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS);
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
+  assert.equal(controller.state.state, 'stopping'); assert.equal(controller.state.reason, 'task_ack_timeout');
+  assert.equal(controller.safeToClose, false); assert.match(controller.state.message, /接收确认超时/);
+  send(child, status(controller, 'running', { ...running, phase: 'queued', task: 'SHOW_FORWARD', action_busy: true, active_request_id: 'late' }));
+  assert.equal(controller.state.state, 'stopping'); assert.throws(() => controller.task('END_INTERACTION'));
+  send(child, status(controller, 'cancelled', { stop_confirmed: true, resources_stopped: true }));
+  child.emit('exit', 0, null);
+  assert.equal(controller.state.state, 'failed'); assert.equal(controller.state.stop_confirmed, true);
+  assert.equal(controller.safeToClose, true); assert.match(controller.state.message, /接收确认超时/);
+});
+
+test('a matching task ACK cancels its deadline and END owns a fresh bounded ACK', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  const running = { mode: 'brain_control', brain_controlled: true };
+  send(child, status(controller, 'running', { ...running, phase: 'waiting_task', action_busy: false }));
+  controller.task('SHOW_FORWARD'); child.stdin.read();
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS - 1);
+  send(child, status(controller, 'running', { ...running, phase: 'queued', task: 'SHOW_FORWARD', action_busy: true, active_request_id: 'forward' }));
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS);
+  assert.equal(controller.state.state, 'running'); assert.equal(child.stdin.read(), null);
+  controller.task('END_INTERACTION'); child.stdin.read();
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS);
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
+  assert.equal(controller.state.state, 'stopping');
 });

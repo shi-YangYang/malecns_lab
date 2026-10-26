@@ -206,6 +206,13 @@ class SpikeTelemetry:
         record["dropped_batches"] = self.dropped_batches
         return record
 
+    def _archive_batch(self, record, content):
+        # Reserve room for the live snapshot and summary in the same budget.
+        _require(self.archive_bytes + len(content) + MAX_BATCH_BYTES + 8192 <= MAX_ARCHIVE_BYTES,
+                 "Telemetry archive exceeds byte budget")
+        _atomic(self.directory / "batches" / f"{record['batch_sequence']:06d}.json", content)
+        return True
+
     def _writer(self):
         while not self._stop.is_set() or not self._queue.empty():
             try:
@@ -219,14 +226,12 @@ class SpikeTelemetry:
                 record, values = item
                 content = _encoded(self._batch(record, values))
                 _require(len(content) <= MAX_BATCH_BYTES, "Telemetry batch exceeds byte budget")
-                # Reserve space for latest.json plus a bounded summary as well as archive batches.
-                _require(self.archive_bytes + len(content) + MAX_BATCH_BYTES + 8192 <= MAX_ARCHIVE_BYTES,
-                         "Telemetry archive exceeds byte budget")
-                _atomic(self.directory / "batches" / f"{record['batch_sequence']:06d}.json", content)
+                archived = self._archive_batch(record, content)
                 _atomic(self.directory / "latest.json", content)
-                self.archive_bytes += len(content)
+                if archived:
+                    self.archive_bytes += len(content)
+                    self.written_batches += 1
                 self._latest_bytes = len(content)
-                self.written_batches += 1
                 self._write_summary("running")
             except Exception as error:
                 self.dropped_batches += 1

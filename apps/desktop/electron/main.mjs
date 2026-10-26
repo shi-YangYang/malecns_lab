@@ -17,6 +17,7 @@ let closePromise = null;
 let captureRoot = null, captureInitializing = null, captureClosing = null, simulationVisible = false, simulationLoading = false;
 let requestedVisible = true;
 let sourceCheck = null;
+let windowLimitReason = null, liveSourceRoot = null, liveSourceTimer = null;
 let rectangle = { x: 0, y: 62, width: 0, height: 0 };
 let closing = false, quitApproved = false, simulationLoaded = false, simulationError = null;
 protocol.registerSchemesAsPrivileged([{ scheme: 'workbench', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
@@ -54,10 +55,11 @@ function updateSimulation() {
   simulationVisible = visible; simulation.setVisible(visible);
   if (visible && !simulationLoaded) {
     simulationLoaded = true; simulationLoading = true; simulationError = null;
-    simulation.webContents.loadURL(SIMULATION_URL).catch(error => { simulationError = `仿真画面连接失败：${error.message}`; simulationLoaded = false; simulationLoading = false; simulationVisible = false; simulation.setVisible(false); capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); });
+    simulation.webContents.loadURL(SIMULATION_URL).catch(error => { simulationError = `仿真画面连接失败：${error.message}`; simulationLoaded = false; simulationLoading = false; simulationVisible = false; simulation.setVisible(false); capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); enforceLiveSource(); });
   }
   if (!ready && simulationLoaded) { simulationLoaded = false; simulation.webContents.stop(); }
   capture?.viewChanged(captureContext()); video?.viewChanged(captureContext());
+  enforceLiveSource();
 }
 function trusted(event) {
   if (!trustedFrame(event, window?.webContents)) throw new Error('不允许的桌面请求来源');
@@ -89,18 +91,47 @@ function stopExperiment() {
   capture?.freeze('independent_stop'); video?.requestStop('independent_stop');
   return state;
 }
+function liveSourceRequired() { return liveSourceRoot !== null && liveSourceRoot === controller.output && controller.state.state === 'running' && !controller.state.resources_stopped; }
+function enforceLiveSource() {
+  if (!liveSourceRequired()) return false;
+  const current = captureContext();
+  if (!current.visible || !current.loaded || current.loading || current.error) {
+    simulationError = current.error ?? '实时仿真画面已隐藏、断开或重载'; stopExperiment(); return false;
+  }
+  return true;
+}
+function watchLiveSource() {
+  if (!liveSourceRequired()) { clearInterval(liveSourceTimer); liveSourceTimer = null; return; }
+  if (!enforceLiveSource() || sourceCheck) return; // Share the start preflight; never overlap probes.
+  const activeRoot = liveSourceRoot;
+  void confirmCaptureSource().catch(error => {
+    if (liveSourceRoot === activeRoot && liveSourceRequired()) { simulationError = error.message; stopExperiment(); }
+  });
+}
+function limitMediaWindow(reason) {
+  if (windowLimitReason || controller.state.session_profile !== 'continuous') return;
+  windowLimitReason = reason;
+  // Synchronous quiescence first. Defer seal so sample/write can finish and ACK.
+  capture.limitReason ??= reason; video.limitReason ??= reason;
+  capture.freeze(reason); video.requestStop(reason);
+  liveSourceRoot = controller.output;
+  liveSourceTimer = setInterval(watchLiveSource, 5000);
+  enforceLiveSource();
+  captureClosing = new Promise(resolve => setImmediate(resolve)).then(() => sealArchives(reason, true)).finally(() => { if (closing) closeWhenSafe(); });
+}
 function maintainCapture() {
   // Action demos have no neural telemetry identity; do not fabricate a paired archive.
   if (controller.state.mode === 'manual_demo') return;
-  if (controller.state.state !== 'running') { capture?.freeze('control_ended'); video?.requestStop('control_ended'); }
+  if (controller.state.state !== 'running') { capture?.freeze('control_ended'); video?.requestStop('control_ended'); clearInterval(liveSourceTimer); liveSourceTimer = null; }
   if ((capture || video) && controller.safeToClose && !captureClosing) captureClosing = sealArchives().finally(() => { if (closing) closeWhenSafe(); });
   if (!simulation || captureInitializing || controller.state.state !== 'running' || controller.state.resources_stopped || !simulationVisible || !simulationLoaded || simulationLoading || simulationError || captureRoot === controller.output) return;
   captureRoot = controller.output;
+  const initialWindow = controller.state.session_profile === 'continuous';
   capture = new SimulationCapture({ root: captureRoot, recordId: path.basename(captureRoot), sourceRoot: fileURLToPath(new URL('./', import.meta.url)).replace(/\/$/, ''),
-    capture: () => simulation.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true }), hostClock: () => controller.sampleHostClock(), context: captureContext, onFailure: () => stopExperiment() });
+    capture: () => simulation.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true }), hostClock: () => controller.sampleHostClock(), context: captureContext, onFailure: () => stopExperiment(), initialWindow, onLimit: limitMediaWindow });
   const active = capture;
   captureClosing = null; archiveDeadline = null;
-  video = new SimulationVideo({ root: captureRoot, recordId: path.basename(captureRoot), sourceRoot: fileURLToPath(new URL('./', import.meta.url)).replace(/\/$/, ''), generation: documentGeneration, context: captureContext, send: message => { if (!simulation.webContents.isDestroyed()) simulation.webContents.send('video:command', message); }, onFailure: () => stopExperiment() });
+  video = new SimulationVideo({ root: captureRoot, recordId: path.basename(captureRoot), sourceRoot: fileURLToPath(new URL('./', import.meta.url)).replace(/\/$/, ''), generation: documentGeneration, context: captureContext, send: message => { if (!simulation.webContents.isDestroyed()) simulation.webContents.send('video:command', message); }, onFailure: () => stopExperiment(), initialWindow, onLimit: limitMediaWindow });
   const activeVideo = video;
   videoInitializing = activeVideo.initialize().catch(error => activeVideo.fail(error)).finally(() => { videoInitializing = null; });
   captureInitializing = active.initialize().then(() => {
@@ -108,15 +139,19 @@ function maintainCapture() {
     else active.start();
   }).catch(error => active.fail(error)).finally(() => { captureInitializing = null; if (controller.safeToClose) closeWhenSafe(); });
 }
-function sealArchives() {
+function sealArchives(reason = 'control_ended', initialWindow = false) {
   archiveDeadline ??= Date.now() + 2000;
   const deadline = archiveDeadline;
   let timer;
   const work = Promise.allSettled([
-    Promise.resolve(captureInitializing).then(() => capture?.seal('control_ended', deadline)),
+    Promise.resolve(captureInitializing).then(() => capture?.seal(reason, deadline)),
     Promise.resolve(videoInitializing).then(() => video?.seal(deadline)),
   ]);
-  return Promise.race([work, new Promise(resolve => { timer = setTimeout(() => { video?.requestStop('archive_deadline'); resolve(); }, Math.max(0, deadline - Date.now())); })]).finally(() => clearTimeout(timer));
+  return Promise.race([work, new Promise(resolve => { timer = setTimeout(() => { video?.requestStop('archive_deadline'); resolve(); }, Math.max(0, deadline - Date.now())); })]).then(() => {
+    if (initialWindow && (capture?.status().complete !== true || video?.status().complete !== true)) {
+      simulationError = '首段媒体封存失败：' + (capture?.error ?? video?.reason ?? '封存未在期限内完成'); stopExperiment();
+    }
+  }).finally(() => clearTimeout(timer));
 }
 function closeWhenSafe() {
   if (controller.state.state !== 'running') video?.requestStop('control_ended');
@@ -151,8 +186,8 @@ function createWindow() {
   simulation = new WebContentsView({ webPreferences: { preload: fileURLToPath(new URL('./simulation-preload.cjs', import.meta.url)), session: isolated, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } });
   lockContents(simulation.webContents);
   simulation.webContents.on('render-process-gone', () => { simulationLoaded = false; simulationError = '仿真画面进程已退出'; simulationLoading = false; stopExperiment(); });
-  simulation.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => { if (isMainFrame && code !== -3) { simulationError = `仿真画面无法读取：${description}`; simulationLoading = false; simulationVisible = false; simulation.setVisible(false); capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); } });
-  simulation.webContents.on('did-start-loading', () => { documentGeneration++; video?.revoke('视频页面已重载'); simulationLoading = true; capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); });
+  simulation.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => { if (isMainFrame && code !== -3) { simulationError = `仿真画面无法读取：${description}`; simulationLoading = false; simulationVisible = false; simulation.setVisible(false); capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); enforceLiveSource(); } });
+  simulation.webContents.on('did-start-loading', () => { documentGeneration++; video?.revoke('视频页面已重载'); simulationLoading = true; capture?.viewChanged(captureContext()); video?.viewChanged(captureContext()); enforceLiveSource(); });
   simulation.webContents.on('did-finish-load', () => { simulationLoading = false; simulationError = null; maintainCapture(); });
   window.contentView.addChildView(simulation); simulation.setVisible(false);
   window.on('close', requestClose);
@@ -183,7 +218,7 @@ app.whenReady().then(async () => {
     } catch { return new Response('Missing atlas asset', { status: 404 }); }
   });
   controller = new ExperimentController(repo, closeWhenSafe);
-  bind('experiment:prepare', () => { if (closing || captureInitializing || videoInitializing || !controller.safeToClose || (capture && !capture.finalized) || (video && !video.finalized)) throw new Error('正在关闭或封存实验'); capture = null; video = null; captureRoot = null; captureClosing = null; archiveDeadline = null; simulationLoaded = false; simulationLoading = false; return controller.prepare(); });
+  bind('experiment:prepare', () => { if (closing || captureInitializing || videoInitializing || !controller.safeToClose || (capture && !capture.finalized) || (video && !video.finalized)) throw new Error('正在关闭或封存实验'); clearInterval(liveSourceTimer); liveSourceTimer = null; liveSourceRoot = null; windowLimitReason = null; capture = null; video = null; captureRoot = null; captureClosing = null; archiveDeadline = null; simulationLoaded = false; simulationLoading = false; return controller.prepare(); });
   bind('experiment:start', async () => { if (controller.state.mode !== 'manual_demo') await confirmCaptureSource(); return controller.continue(); });
   bind('experiment:stop', () => stopExperiment());
   bind('experiment:task', task => controller.task(task));
@@ -200,11 +235,12 @@ app.whenReady().then(async () => {
     if (typeof message.ready !== 'boolean' || (message.ready === false && (typeof message.reason !== 'string' || message.reason.length > 1000))) return;
     pending.resolve(message);
   });
-  for (const channel of ['video:event', 'video:clock', 'video:fault']) ipcMain.handle(channel, async (event, message) => {
+  for (const channel of ['video:event', 'video:clock', 'video:fault', 'video:limit']) ipcMain.handle(channel, async (event, message) => {
     if (!trustedVideo(event, simulation?.webContents, message, video?.authorization) || message.generation !== documentGeneration) throw new Error('不允许的视频请求来源');
     const active = video;
     try {
       if (channel === 'video:clock') return active.receiveClock(message);
+      if (channel === 'video:limit') { if (!active.initialWindow || message.reason !== 'duration_limit') throw new Error('视频首段容量通知无效'); active.limit('视频达到 480 秒上限'); return { accepted: true }; }
       if (channel === 'video:fault') { if (typeof message.reason !== 'string' || message.reason.length > 1000) throw new Error('视频错误信息无效'); active.fail(message.reason); return { accepted: true }; }
       return await active.receive(message);
     } catch (error) { active.fail(error); throw error; }

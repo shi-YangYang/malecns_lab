@@ -137,6 +137,47 @@ def test_byte_budget_rejects_without_unbounded_output(tmp_path, monkeypatch):
     assert not list((tmp_path / "telemetry/batches").iterdir())
 
 
+def behavior_recorder(tmp_path):
+    from malecns_lab.learning.x2_behavior_telemetry import BehaviorTelemetry
+    policy, identity = fixture_policy()
+    policy.encoder = SimpleNamespace(input_map_id='fixture-input')
+    return BehaviorTelemetry(tmp_path, policy, identity, 'fixture-run', 'fixture-session', continuous=True)
+
+
+def test_continuous_limit_preserves_archive_and_updates_real_latest(tmp_path, monkeypatch):
+    sink = behavior_recorder(tmp_path)
+    sink.capture(torch.tensor([1., 0., 0.]), 0); sink.flush(1)
+    sink._queue.join()
+    original = (tmp_path / 'telemetry/batches/000001.json').read_bytes()
+    monkeypatch.setattr(telemetry, 'MAX_ARCHIVE_BYTES', sink.archive_bytes + telemetry.MAX_BATCH_BYTES + 8192)
+    for step in (1, 2):
+        sink.capture(torch.tensor([0., 0., 1.]), step); sink.flush(step + 1)
+        sink._queue.join()
+    summary = sink.close()
+    assert summary['error'] is None and not summary['complete']
+    assert summary['archive_truncated'] and summary['archive_limit_reason'] == 'archive_byte_limit'
+    assert summary['written_batches'] == 1 and summary['live_only_batches'] == 2
+    assert summary['dropped_batches'] == 0 and summary['archive_last_batch_sequence'] == 1
+    assert (tmp_path / 'telemetry/batches/000001.json').read_bytes() == original
+    assert len(list((tmp_path / 'telemetry/batches').iterdir())) == 1
+    latest = read(tmp_path / 'telemetry/latest.json')
+    assert latest['batch_sequence'] == 3 and latest['spike_events'] == [{'body_id': '12', 'step': 2}]
+
+
+def test_continuous_live_storage_failure_is_not_normal_capacity(tmp_path, monkeypatch):
+    sink = behavior_recorder(tmp_path)
+    sink.archive_limit_reason = 'archive_byte_limit'
+    original = telemetry._atomic
+    def fail_live(path, content):
+        if path.name == 'latest.json':
+            raise OSError('injected live write failure')
+        original(path, content)
+    monkeypatch.setattr(telemetry, '_atomic', fail_live)
+    sink.capture(torch.tensor([1., 0., 0.]), 0); sink.flush(1)
+    summary = sink.close()
+    assert not summary['complete'] and 'injected live write failure' in summary['error']
+
+
 def test_abnormal_close_and_unflushed_tail_are_partial(tmp_path):
     sink = recorder(tmp_path)
     sink.capture(torch.tensor([1., 0., 0.]), 0)

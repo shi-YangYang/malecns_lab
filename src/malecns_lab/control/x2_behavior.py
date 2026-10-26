@@ -311,14 +311,15 @@ class DecisionGate:
     An admitted START reserves the slot until its attributed execution event.
     No method emits an MC command. Safety protection belongs to the executor.
     """
-    def __init__(self, run_id, session_id, policy_id, checkpoint_id, input_map_id, *, max_age_s=30., sim_wave_profile_id=None):
+    def __init__(self, run_id, session_id, policy_id, checkpoint_id, input_map_id, *, max_age_s=30., sim_wave_profile_id=None,
+                 monotonic_execution_ids=False, single_action_requests=False):
         require(all(identifier(x) for x in (run_id, session_id, policy_id, checkpoint_id, input_map_id)), "Invalid gate identity")
         require(finite(max_age_s) and max_age_s > 0, "Invalid decision age budget")
         self.run_id, self.session_id = run_id, session_id
         self.identities = (policy_id, checkpoint_id, input_map_id)
         if sim_wave_profile_id is not None:
-            from .x2_skill_profile import SIM_WAVE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID
-            require(sim_wave_profile_id in (SIM_WAVE_PROFILE_ID, SIM_FROZEN_FULL_PROFILE_ID), "Unknown simulation wave contract")
+            from .x2_skill_profile import SIM_WAVE_PROFILE_ID, FULL_ACTION_PROFILE_IDS
+            require(sim_wave_profile_id in (SIM_WAVE_PROFILE_ID, *FULL_ACTION_PROFILE_IDS), "Unknown simulation wave contract")
         self.sim_wave_profile_id = sim_wave_profile_id
         self.max_age_s = max_age_s
         self.observation = None
@@ -327,8 +328,22 @@ class DecisionGate:
         self.active = None
         self._admitted = {}
         self._used_executions = set()
+        self.monotonic_execution_ids = monotonic_execution_ids
+        self.single_action_requests = single_action_requests
+        self.completed_request = None
+        self.retired_event_seq = -1
         self._event_time = -1.
         self.blocked_reason = None
+
+    def retire_history(self, event_seq, decision_seq):
+        """Only a fully consumed, closed execution may release attribution data."""
+        require(self.monotonic_execution_ids and self.active is None and self.blocked_reason is None,
+                'Execution history is not safe to retire')
+        require(event_seq == self.last_event_seq and decision_seq == self.last_decision_seq
+                and event_seq >= self.retired_event_seq, 'Closure ACK differs from gate watermark')
+        self._admitted.clear()
+        self._used_executions.clear()
+        self.retired_event_seq = event_seq
 
     def observe(self, observation):
         require(isinstance(observation, Observation) and (observation.run_id, observation.session_id) == (self.run_id, self.session_id), "Cross-run observation")
@@ -347,8 +362,15 @@ class DecisionGate:
             self._admitted[decision.decision_seq] = (decision, origin)
             if self.active is None:
                 self.active = {"decision": decision, "execution_id": None, "status": None,
-                               "preset_ack": False, "finish_requests": set()}
+                               "preset_ack": False, "finish_requests": set(), "task": self.observation.task}
+        elif reason == 'completed_action_request':
+            # A late in-transit decision is consumed but reserves no execution.
+            self.last_decision_seq = decision.decision_seq
         return Admission(reason == "accepted", reason, decision, self.active["execution_id"] if self.active else None)
+
+    def completed_action(self, request_id):
+        value = self.completed_request
+        return value['decision'] if value is not None and value['decision'].request_id == request_id else None
 
     def _reason(self, d, now):
         if (d.run_id, d.session_id) != (self.run_id, self.session_id): return "cross_run"
@@ -359,6 +381,7 @@ class DecisionGate:
         if d.request_id != o.request_id: return "superseded_request"
         if not 0 <= now-o.received_monotonic <= self.max_age_s: return "expired_observation"
         if self.blocked_reason is not None: return "execution_protection_latched"
+        if self.completed_action(d.request_id) is not None: return 'completed_action_request'
         if d.behavior not in o.capabilities: return "unavailable_skill"
         if d.behavior == Behavior.HOLD:
             if d.phase != Phase.FINISH: return "invalid_hold_phase"
@@ -378,6 +401,9 @@ class DecisionGate:
         admitted = self._admitted.get(event.decision_seq)
         require(admitted is not None, "Unattributed execution event")
         d, origin = admitted
+        if self.monotonic_execution_ids:
+            expected = 'rejected-'+str(event.decision_seq) if event.status == ExecutionStatus.REJECTED else 'skill-'+str(origin)
+            require(event.execution_id == expected, 'Execution ID differs from monotonic decision identity')
         require(d.request_id == event.request_id, "Unattributed execution request")
         require(event.behavior == d.behavior or (d.behavior == Behavior.HOLD and self.active is not None
                 and event.behavior == self.active["decision"].behavior), "Execution behavior differs")
@@ -428,6 +454,16 @@ class DecisionGate:
             if event.status in (ExecutionStatus.UNKNOWN, ExecutionStatus.FAILED) or event.protection_reason:
                 self.blocked_reason = event.protection_reason or str(event.status)
             if event.status in TERMINAL and self.blocked_reason is None:
+                start = self.active['decision']
+                expected = {Task.SHOW_FORWARD: Behavior.ADVANCE, Task.FACE_LEFT: Behavior.TURN_LEFT,
+                            Task.FACE_RIGHT: Behavior.TURN_RIGHT, Task.GREET: Behavior.WAVE_RIGHT}
+                if (self.single_action_requests and start.phase == Phase.START
+                        and start.behavior == expected.get(self.active['task'])
+                        and event.request_id == start.request_id and event.behavior == start.behavior
+                        and event.status == ExecutionStatus.COMPLETED and event.fact == 'status'
+                        and event.stop_evidence.get('stop_confirmed') is True):
+                    self.completed_request = dict(decision=start, event=event,
+                        completion_basis='measured_single_action')
                 self.active = None
             else:
                 self.active["status"] = event.status

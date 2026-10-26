@@ -5,6 +5,8 @@ import hashlib
 from pathlib import Path
 from queue import Queue
 import threading
+import shutil
+import time
 
 from . import x2_telemetry as base
 
@@ -28,19 +30,28 @@ def selection_manifest(policy, identity, run_id, session_id):
 
 class BehaviorTelemetry(base.SpikeTelemetry):
     """Reuse read-only device reduction/writer, never legacy policy provenance."""
-    def __init__(self, directory, policy, identity, run_id, session_id):
+    def __init__(self, directory, policy, identity, run_id, session_id, *, continuous=False):
         self.directory = Path(directory) / 'telemetry'
         self.run_id, self.execution_id, self.session_id = run_id, identity['execution_id'], session_id
         self.manifest = self.error = None
         self.dropped_batches = self.written_batches = self.produced_batches = 0
         self.archive_bytes = self._latest_bytes = self._summary_bytes = self._count = 0
         self._closed = False
+        self.continuous = continuous
+        self.live_only_batches = 0
+        self.archive_limit_reason = None
+        self.archive_last_batch_sequence = None
+        self._space_checked_at = -float('inf')
         self._context = {'phase': 'precondition', 'observation_sequence': None,
                          'decision_sequence': None, 'request_id': None, 'skill_execution_id': None}
         self._queue, self._stop = Queue(maxsize=base.QUEUE_BATCHES), threading.Event()
         self._thread = self._device_counts = None
         try:
             self.manifest, self._lookup = selection_manifest(policy, identity, run_id, session_id)
+            if continuous:
+                self.manifest.update(archive_scope='initial_window', archive_batch_limit=4096,
+                    archive_limit_behavior='preserve initial batches; continue replacing latest.json',
+                    session_profile='continuous')
             self._n = policy.brain.graph.n
             self._members = [self._lookup[int(body)] for group in self.manifest['groups'] for body in group['body_ids']]
             self._member_groups = [i for i, group in enumerate(self.manifest['groups']) for _ in group['body_ids']]
@@ -69,4 +80,32 @@ class BehaviorTelemetry(base.SpikeTelemetry):
         return record
 
     def _summary(self, status):
-        return {**super()._summary(status), 'schema': SUMMARY_SCHEMA, 'session_id': self.session_id}
+        result = {**super()._summary(status), 'schema': SUMMARY_SCHEMA, 'session_id': self.session_id}
+        if self.continuous:
+            result.update(archive_scope='initial_window', archive_truncated=self.archive_limit_reason is not None,
+                archive_limit_reason=self.archive_limit_reason,
+                archive_last_batch_sequence=self.archive_last_batch_sequence,
+                live_only_batches=self.live_only_batches)
+        return result
+
+    def _archive_batch(self, record, content):
+        if not self.continuous:
+            return super()._archive_batch(record, content)
+        now = time.monotonic()
+        if now - self._space_checked_at >= 1.:
+            base._require(shutil.disk_usage(self.directory).free >= 512 * 1024 * 1024,
+                          'Telemetry disk reserve below 512 MiB')
+            self._space_checked_at = now
+        if self.archive_limit_reason is None:
+            if self.archive_bytes + len(content) + base.MAX_BATCH_BYTES + 8192 > base.MAX_ARCHIVE_BYTES:
+                self.archive_limit_reason = 'archive_byte_limit'
+            elif self.written_batches >= 4096 or record['batch_sequence'] > 999999:
+                self.archive_limit_reason = 'archive_batch_limit'
+        if self.archive_limit_reason:
+            # This is an explicit partial archive, never a complete-session record.
+            # The same real spike batch still updates latest.json in the writer.
+            self.live_only_batches += 1
+            return False
+        archived = super()._archive_batch(record, content)
+        self.archive_last_batch_sequence = record['batch_sequence']
+        return archived

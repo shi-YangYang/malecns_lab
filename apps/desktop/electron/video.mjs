@@ -2,10 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants, unlinkSync } from 'node:fs';
 import { mkdir, open, lstat, realpath, statfs, link, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { captureIdentity, safeFile } from './recording.mjs';
+import { captureIdentity, safeFile, MEDIA_LIMITS_PROFILE } from './recording.mjs';
 import { SIMULATION_URL, recordIdAllowed, MAX_MANIFEST_BYTES } from './boundaries.mjs';
 
-export const VIDEO_LIMITS = Object.freeze({ fps: 15, bitrate: 2500000, mime: 'video/webm;codecs=vp8', slice_ms: 1000, duration_ms: 240000, chunk_bytes: 8 * 1024 * 1024, pending_bytes: 16 * 1024 * 1024, file_bytes: 256 * 1024 * 1024, index_bytes: 4 * 1024 * 1024, free_bytes: 512 * 1024 * 1024, ack_ms: 1500 });
+const LEGACY_VIDEO_LIMITS = Object.freeze({ fps: 15, bitrate: 2500000, mime: 'video/webm;codecs=vp8', slice_ms: 1000, duration_ms: 240000, chunk_bytes: 8 * 1024 * 1024, pending_bytes: 16 * 1024 * 1024, file_bytes: 256 * 1024 * 1024, index_bytes: 4 * 1024 * 1024, free_bytes: 512 * 1024 * 1024, ack_ms: 1500 });
+export const VIDEO_LIMITS = Object.freeze({ ...LEGACY_VIDEO_LIMITS, duration_ms: 480000 });
 export const NOVNC_HASHES = Object.freeze({ 'vnc.html': '720ee6e3090aa60863e8133d5ccc8f3aa3ca2a26513855a0fc3ff42f5da754ae', 'app/ui.js': '49dd68cd630ba75cca74602b8950ed84d14da39458819387c0ef76880d4c9172', 'core/rfb.js': '708f8abd828b5b45c0cfdf101c51c39506a4210e2c5af5dd605493e67ac7c9cd', 'core/display.js': '768bb889ffbfb8c3db327be0c7b9b6039f80b59bd192f4424aeaa358905678de' });
 const PREFIX = 'malecns_lab.x2_simulation_video.';
 const SOURCES = ['video.mjs', 'simulation-preload.cjs', 'main.mjs', 'controller.mjs', 'recording.mjs', 'boundaries.mjs'];
@@ -44,13 +45,15 @@ export function trustedVideo(event, contents, envelope, authorization) {
 }
 
 export class SimulationVideo {
-  constructor({ root, recordId, sourceRoot, send, context, onFailure, generation, clock = () => process.hrtime.bigint(), freeSpace = statfs, verifySource = verifyNoVNC, versions = process.versions }) {
-    Object.assign(this, { root, recordId, sourceRoot, send, context, onFailure, generation, clock, freeSpace, verifySource, versions });
+  constructor({ root, recordId, sourceRoot, send, context, onFailure, generation, initialWindow = false, onLimit = null, clock = () => process.hrtime.bigint(), freeSpace = statfs, verifySource = verifyNoVNC, versions = process.versions }) {
+    requireValue(!initialWindow || typeof onLimit === 'function', '首段视频需要统一封存回调');
+    Object.assign(this, { root, recordId, sourceRoot, send, context, onFailure, generation, initialWindow, onLimit, clock, freeSpace, verifySource, versions });
+    this.limitReason = null;
     this.folder = path.join(root, 'simulation_video'); this.token = randomBytes(32).toString('hex');
     this.state = 'initializing'; this.reason = null; this.finalized = false; this.closed = false; this.stopping = false; this.started = false; this.stopped = false; this.finalChunk = false; this.sequence = 0; this.bytes = 0; this.chunks = []; this.events = []; this.clocks = []; this.probes = new Map(); this.inFlight = null; this.hash = createHash('sha256');
   }
   get authorization() { return this.closed ? null : { generation: this.generation, token: this.token }; }
-  status() { return { state: this.state, complete: this.state === 'sealed', reason: this.reason, bytes: this.bytes }; }
+  status() { return { state: this.state, complete: this.state === 'sealed', reason: this.reason, bytes: this.bytes, ...(this.initialWindow ? { archive_scope: 'initial_window', truncation_reason: this.limitReason } : {}) }; }
   command(kind, values = {}) { this.send({ ...this.authorization, kind, ...values }); }
   checkContext() { const c = this.context(); requireValue(c.root === this.root && c.status.run_id === this.recordId && c.status.state === 'running' && !c.status.resources_stopped && c.visible && c.loaded && !c.loading && !c.error && !this.closed && !this.stopping, '视频采集条件已改变'); }
   async initialize() {
@@ -62,15 +65,16 @@ export class SimulationVideo {
     await publish(this.folder, 'seal_pending.json', encode({ identity: binding.identity, generation: this.generation }));
     const novnc = await this.verifySource(); this.checkContext();
     requireValue(same(binding, await captureIdentity(this.root, this.recordId)), '视频身份在准备期间改变');
-    this.manifest = { schema: PREFIX + 'manifest.v1', ...binding, generation: this.generation, limits: VIDEO_LIMITS, source: 'novnc_visible_canvas', source_freshness: 'unknown', source_sha256: sources, novnc_sha256: novnc, versions: { electron: this.versions.electron, chrome: this.versions.chrome }, clock_domain: 'preload_performance_with_host_roundtrip', media_anchor: null, media_anchor_reason: 'first_encoded_frame_to_host_anchor_not_verified' };
+    this.manifest = { schema: PREFIX + 'manifest.v1', ...binding, generation: this.generation, limits_profile: MEDIA_LIMITS_PROFILE, limits: VIDEO_LIMITS, source: 'novnc_visible_canvas', source_freshness: 'unknown', source_sha256: sources, novnc_sha256: novnc, versions: { electron: this.versions.electron, chrome: this.versions.chrome }, clock_domain: 'preload_performance_with_host_roundtrip', media_anchor: null, media_anchor_reason: 'first_encoded_frame_to_host_anchor_not_verified' };
+    if (this.initialWindow) Object.assign(this.manifest, { archive_scope: 'initial_window', truncation_reason: 'bounded_initial_window_policy', complete_means: 'window_sealed_not_full_session' });
     await publish(this.folder, 'manifest.json', encode(this.manifest));
     this.file = await open(path.join(this.folder, 'recording.webm.partial'), 'wx');
     this.journal = await open(path.join(this.folder, 'events.jsonl.partial'), 'wx');
     this.checkContext(); this.state = 'recording';
-    this.command('start', { limits: VIDEO_LIMITS });
+    this.command('start', { limits_profile: MEDIA_LIMITS_PROFILE, limits: VIDEO_LIMITS, ...(this.initialWindow ? { archive_scope: 'initial_window' } : {}) });
     this.probe(); this.clockTimer = setInterval(() => this.probe(), 5000);
     this.startTimer = setTimeout(() => { if (!this.started) this.fail('视频编码器未确认启动'); }, 2000);
-    this.durationTimer = setTimeout(() => this.fail('视频达到 240 秒上限'), VIDEO_LIMITS.duration_ms);
+    this.durationTimer = setTimeout(() => this.limit('视频达到 480 秒上限'), VIDEO_LIMITS.duration_ms - (this.initialWindow ? 2000 : 0));
   }
   probe() { if (this.closed || this.probes.size >= 3 || this.clocks.length >= 100) return; const nonce = randomBytes(16).toString('hex'); this.probes.set(nonce, this.clock().toString()); this.command('clock', { nonce }); }
   receiveClock(value) {
@@ -112,7 +116,19 @@ export class SimulationVideo {
     this.events.push(metadata); requireValue(encode({ events: this.events, clocks: this.clocks }).length <= VIDEO_LIMITS.index_bytes, '视频索引超过 4 MiB');
     requireValue(!this.closed, '视频事件超过封存期限');
     await this.journal.writeFile(JSON.stringify(metadata) + '\n');
-    requireValue(!this.closed, '视频事件超过封存期限'); this.sequence = value.sequence; return { accepted: true, sequence: value.sequence };
+    requireValue(!this.closed, '视频事件超过封存期限'); this.sequence = value.sequence;
+    // Stop early enough for the in-flight/queued/final chunks and stop metadata.
+    // The callback only requests a stop; sealing must run outside this inFlight.
+    if (this.initialWindow && !this.stopping) {
+      if (this.bytes >= VIDEO_LIMITS.file_bytes - 3 * VIDEO_LIMITS.chunk_bytes) this.limit('视频首段达到文件容量预留边界');
+      else if (this.events.length >= 996 || encode({ events: this.events, clocks: this.clocks }).length >= VIDEO_LIMITS.index_bytes - 64 * 1024) this.limit('视频首段达到索引容量预留边界');
+    }
+    return { accepted: true, sequence: value.sequence };
+  }
+  limit(reason) {
+    if (!this.initialWindow) { this.fail(reason); return; }
+    if (this.limitReason || this.stopping || this.closed) return;
+    this.limitReason = reason; this.onLimit(reason);
   }
   fail(error) { if (this.reason || this.closed) return; this.reason = String(error?.message ?? error).slice(0, 1000); this.state = 'incomplete'; try { this.onFailure(this.reason); } finally { this.requestStop('video_failed'); } }
   requestStop(reason = 'control_ended') { if (this.stopping || this.closed) return; this.stopping = true; this.stopReason = reason; clearTimeout(this.durationTimer); clearTimeout(this.startTimer); clearInterval(this.clockTimer); this.probe(); this.command('stop', { reason }); }
@@ -136,7 +152,7 @@ export class SimulationVideo {
       requireValue(index.length <= VIDEO_LIMITS.index_bytes, '视频索引超界');
       await publish(this.folder, 'index.json', index);
       await link(path.join(this.folder, 'recording.webm.partial'), path.join(this.folder, 'recording.webm'));
-      await publish(this.folder, 'summary.json', encode({ schema: PREFIX + 'summary.v1', identity: this.binding.identity, generation: this.generation, complete: true, state: 'sealed', bytes: this.bytes, sha256: this.hash.digest('hex'), index_sha256: sha(index), reason: this.stopReason, ended_host_ns: this.clock().toString() }));
+      await publish(this.folder, 'summary.json', encode({ schema: PREFIX + 'summary.v1', identity: this.binding.identity, generation: this.generation, complete: true, state: 'sealed', bytes: this.bytes, sha256: this.hash.digest('hex'), index_sha256: sha(index), reason: this.stopReason, ended_host_ns: this.clock().toString(), ...(this.initialWindow ? { archive_scope: 'initial_window', truncation_reason: this.limitReason ?? this.stopReason, complete_means: 'window_sealed_not_full_session' } : {}) }));
       requireValue(!this.closed && Date.now() < deadline, '视频封存超过共享 2 秒期限');
       // Pending marker is authoritative, including when a late link publishes a summary.
       unlinkSync(path.join(this.folder, 'seal_pending.json')); this.state = 'sealed'; this.closed = true;
@@ -157,16 +173,19 @@ export async function readVideoArchive(root, id, session, telemetry) {
   requireValue(recordIdAllowed(id) && session.run_id === id && session.resources_stopped && ['completed', 'failed', 'cancelled'].includes(session.state), '视频运行尚未结束');
   const binding = await captureIdentity(root, id);
   requireValue(manifest.schema === PREFIX + 'manifest.v1' && same(binding.identity, manifest.identity) && same(binding.inputs_sha256, manifest.inputs_sha256) && same(binding.official_assets_sha256, manifest.official_assets_sha256) && ['run_id','session_id','execution_id','checkpoint_id','policy_id','input_map_id'].every(k => telemetry[k] === manifest.identity[k]), '视频身份不匹配');
-  requireValue(same(manifest.limits, VIDEO_LIMITS) && same(manifest.novnc_sha256, NOVNC_HASHES) && manifest.source === 'novnc_visible_canvas' && SOURCES.every(n => /^[a-f0-9]{64}$/.test(manifest.source_sha256?.[n])) && typeof manifest.versions?.electron === 'string' && typeof manifest.versions.chrome === 'string' && manifest.media_anchor === null, '视频来源或时间锚点无效');
-  requireValue(summary.schema === PREFIX + 'summary.v1' && summary.complete === true && summary.state === 'sealed' && same(summary.identity, binding.identity) && summary.generation === manifest.generation && Number.isInteger(summary.bytes) && summary.bytes > 0 && summary.bytes <= VIDEO_LIMITS.file_bytes && /^[a-f0-9]{64}$/.test(summary.sha256), '视频摘要无效');
-  const raw = await safeFile(folder, 'index.json', VIDEO_LIMITS.index_bytes); requireValue(sha(raw) === summary.index_sha256, '视频索引完整性失败');
+  const limits = manifest.limits_profile === MEDIA_LIMITS_PROFILE ? VIDEO_LIMITS
+    : manifest.limits_profile === undefined ? LEGACY_VIDEO_LIMITS : null;
+  requireValue(limits && same(manifest.limits, limits) && same(manifest.novnc_sha256, NOVNC_HASHES) && manifest.source === 'novnc_visible_canvas' && SOURCES.every(n => /^[a-f0-9]{64}$/.test(manifest.source_sha256?.[n])) && typeof manifest.versions?.electron === 'string' && typeof manifest.versions.chrome === 'string' && manifest.media_anchor === null, '视频来源或时间锚点无效');
+  requireValue(summary.schema === PREFIX + 'summary.v1' && summary.complete === true && summary.state === 'sealed' && same(summary.identity, binding.identity) && summary.generation === manifest.generation && Number.isInteger(summary.bytes) && summary.bytes > 0 && summary.bytes <= limits.file_bytes && /^[a-f0-9]{64}$/.test(summary.sha256), '视频摘要无效');
+  requireValue(manifest.archive_scope === undefined || (manifest.archive_scope === 'initial_window' && summary.archive_scope === 'initial_window' && manifest.complete_means === 'window_sealed_not_full_session' && summary.complete_means === manifest.complete_means && typeof summary.truncation_reason === 'string' && summary.truncation_reason.length > 0), '视频首段保存范围无效');
+  const raw = await safeFile(folder, 'index.json', limits.index_bytes); requireValue(sha(raw) === summary.index_sha256, '视频索引完整性失败');
   const index = JSON.parse(raw.toString()); requireValue(index.schema === PREFIX + 'index.v1' && same(index.identity, binding.identity) && Array.isArray(index.events) && index.events.length >= 3 && index.events.length <= 1000 && Array.isArray(index.clocks) && index.clocks.length <= 100, '视频事件索引无效');
   let offset = 0, final = false, previous = -1, clockId = null;
   for (const [i, e] of index.events.entries()) {
     requireValue(e.sequence === i + 1 && time(e.performance_ms) && e.performance_ms >= previous && time(e.event_timestamp_ms) && ns(e.host_receive_ns) && typeof e.clock_id === 'string' && (!clockId || e.clock_id === clockId), '视频事件时钟或序号无效'); previous = e.performance_ms; clockId = e.clock_id;
     if (i === 0) requireValue(e.kind === 'started' && time(e.start_call_ms) && e.start_call_ms <= e.performance_ms, '视频开始事件缺失');
     else if (i === index.events.length - 1) requireValue(e.kind === 'stopped' && final && time(e.stop_call_ms), '视频停止事件缺失');
-    else { requireValue(e.kind === 'chunk' && !final && e.offset === offset && Number.isInteger(e.bytes) && e.bytes >= 0 && e.bytes <= VIDEO_LIMITS.chunk_bytes && /^[a-f0-9]{64}$/.test(e.sha256) && typeof e.final === 'boolean' && (e.timecode_ms === null || time(e.timecode_ms)) && ns(e.host_written_ns), '视频块索引无效'); offset += e.bytes; final = e.final; }
+    else { requireValue(e.kind === 'chunk' && !final && e.offset === offset && Number.isInteger(e.bytes) && e.bytes >= 0 && e.bytes <= limits.chunk_bytes && /^[a-f0-9]{64}$/.test(e.sha256) && typeof e.final === 'boolean' && (e.timecode_ms === null || time(e.timecode_ms)) && ns(e.host_written_ns), '视频块索引无效'); offset += e.bytes; final = e.final; }
   }
   requireValue(offset === summary.bytes, '视频字节总量不匹配');
   for (const c of index.clocks) requireValue(ns(c.host_send_ns) && ns(c.host_receive_ns) && BigInt(c.host_receive_ns) >= BigInt(c.host_send_ns) && time(c.performance_ms) && time(c.time_origin_ms) && c.clock_id === clockId && /^[a-f0-9]{32}$/.test(c.nonce), '视频时钟往返证据无效');
