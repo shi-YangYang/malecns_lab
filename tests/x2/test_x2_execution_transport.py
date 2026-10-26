@@ -151,3 +151,51 @@ def test_failed_archive_never_returns_a_reference_or_writes_a_mailbox(tmp_path):
         event = _archive_execution(full_event('FAILED'), failed)
         atomic(tmp_path/'execution_latest.json', _execution_mailbox(REG,event,{}))
     assert not (tmp_path/'execution_latest.json').exists()
+
+
+@pytest.mark.parametrize('partial', [b'{"closed_request_ack":', b'{"label":"\xe4'])
+def test_incomplete_mailbox_reopens_new_version_without_caching_old_packet(tmp_path, monkeypatch, partial):
+    from malecns_lab.learning import x2_behavior_session as transport
+    path = tmp_path/'observation_request.json'
+    path.write_bytes(partial)
+    delays = []
+    def complete(delay):
+        delays.append(delay)
+        atomic(path, {'closed_request_ack': None, 'sequence': 2})
+    monkeypatch.setattr(transport.time, 'sleep', complete)
+    assert read_json(path) == {'closed_request_ack': None, 'sequence': 2}
+    assert delays == [.002]
+
+
+def test_persistent_mailbox_corruption_is_bounded_and_names_the_file(tmp_path, monkeypatch):
+    from malecns_lab.learning import x2_behavior_session as transport
+    path = tmp_path/'decision.json'; path.write_bytes(b'{"decision":')
+    delays = []
+    monkeypatch.setattr(transport.time, 'sleep', delays.append)
+    with pytest.raises(ValueError, match=r'Invalid transport JSON: decision.json; bytes=12'):
+        read_json(path)
+    assert delays == [.002, .002]
+
+
+@pytest.mark.parametrize('kind', ['symlink', 'oversized', 'not_object'])
+def test_invalid_mailbox_boundaries_fail_without_retry(tmp_path, monkeypatch, kind):
+    from malecns_lab.learning import x2_behavior_session as transport
+    path = tmp_path/'decision.json'
+    if kind == 'symlink':
+        target = tmp_path/'other.json'; target.write_text('{}'); path.symlink_to(target)
+    else:
+        path.write_bytes(b' '*(MAX_PACKET_BYTES+1) if kind == 'oversized' else b'[]')
+    delays = []; monkeypatch.setattr(transport.time, 'sleep', delays.append)
+    with pytest.raises(ValueError):
+        read_json(path)
+    assert not delays
+
+
+def test_failed_sync_preserves_previous_packet_and_removes_unpublished_temp(tmp_path, monkeypatch):
+    from malecns_lab.learning import x2_behavior_session as transport
+    path = tmp_path/'task.json'; atomic(path, {'sequence': 1})
+    monkeypatch.setattr(transport.os, 'fsync', lambda fd: (_ for _ in ()).throw(OSError('sync failed')))
+    with pytest.raises(OSError, match='sync failed'):
+        atomic(path, {'sequence': 2})
+    assert read_json(path) == {'sequence': 1}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['task.json']

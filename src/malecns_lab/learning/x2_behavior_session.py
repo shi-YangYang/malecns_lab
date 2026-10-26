@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import stat
 import time
 import uuid
 
@@ -109,17 +110,40 @@ def atomic(path, value):
     content = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
     require(len(content.encode()) <= MAX_PACKET_BYTES, 'Transport packet exceeds budget')
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
-    temporary.write_text(content)
-    temporary.replace(path)
+    try:
+        with temporary.open('x', encoding='utf-8') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def read_json(path):
     path = Path(path)
-    require(path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_PACKET_BYTES,
-            'Missing, linked or oversized transport packet')
-    value = json.loads(path.read_text())
-    require(isinstance(value, dict), 'Transport object required')
-    return value
+    # Open one version of the mailbox and bound the actual read, not a separate
+    # stat of a pathname which another process can replace. A shared VM mount
+    # can return transient incomplete content; never reuse an older packet.
+    for attempt in range(3):
+        require(path.is_file() and not path.is_symlink(),
+                'Missing, linked or oversized transport packet: '+path.name)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            require(stat.S_ISREG(info.st_mode) and info.st_size <= MAX_PACKET_BYTES,
+                    'Missing, linked or oversized transport packet: '+path.name)
+            content = stream.read(MAX_PACKET_BYTES + 1)
+        require(len(content) <= MAX_PACKET_BYTES, 'Oversized transport packet: '+path.name)
+        try:
+            value = json.loads(content.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            if attempt == 2:
+                raise ValueError(f'Invalid transport JSON: {path.name}; bytes={len(content)}; {error}') from error
+            time.sleep(.002)  # At most 4 ms deliberate delay; TTL checks still apply.
+            continue
+        require(isinstance(value, dict), 'Transport object required: '+path.name)
+        return value
 
 
 def append(stream, kind, **fields):
@@ -706,7 +730,8 @@ def run_worker(directory):
     from .mps_memory import MPSMemorySampler
     sampler = MPSMemorySampler(directory/'behavior_mps_memory.csv', reg['rss_limit_bytes'])
     telemetry = session = None
-    outcome = dict(status='failed', reason='initializing', decisions=0)
+    outcome = dict(status='failed', reason='initializing', decisions=0,
+                   run_id=reg['run_id'], session_id=reg['session_id'])
     started = time.monotonic()
     last_disk_check = -math.inf
     with (directory/'behavior_events.jsonl').open('x') as evidence:

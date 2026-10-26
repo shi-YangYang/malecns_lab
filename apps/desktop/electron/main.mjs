@@ -1,12 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, session, WebContentsView } from 'electron';
-import { readFile, readdir, realpath } from 'node:fs/promises';
+import { readFile, readdir, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { SimulationVideo, trustedVideo, videoResponse } from './video.mjs';
 import { SimulationCapture } from './recording.mjs';
 import { ExperimentController } from './controller.mjs';
-import { finishStartup } from './startup.mjs';
+import { DISPLAY_SURFACE_UNAVAILABLE, finishStartup } from './startup.mjs';
 import { SIMULATION_URL, boundedRectangle, simulationRequestAllowed, trustedFrame } from './boundaries.mjs';
 
 const root = fileURLToPath(new URL('../dist/', import.meta.url));
@@ -21,6 +21,7 @@ let sourceCheck = null;
 let windowLimitReason = null, liveSourceRoot = null, liveSourceTimer = null;
 let rectangle = { x: 0, y: 62, width: 0, height: 0 };
 let closing = false, quitApproved = false, simulationLoaded = false, simulationError = null;
+let startupFailure = null;
 protocol.registerSchemesAsPrivileged([{ scheme: 'workbench', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 app.setName('MaleCNS Lab');
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -101,7 +102,12 @@ async function confirmCaptureSource() {
     // Keep the same source-check lock through a bounded real capture probe.
     let timer;
     surfacePending = true;
-    const probe = Promise.resolve().then(() => simulation.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true })).finally(() => {
+    const probe = Promise.resolve().then(() => simulation.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true })).catch(error => {
+      if (error?.message === 'Current display surface not available for capture') {
+        throw Object.assign(new Error(`仿真显示画面无法采集：${error.message}`), { code: DISPLAY_SURFACE_UNAVAILABLE });
+      }
+      throw error;
+    }).finally(() => {
       surfacePending = false;
       if (sourceCheck === pending) sourceCheck = null;
     });
@@ -118,6 +124,37 @@ async function confirmCaptureSource() {
     // A timed-out native request may still be pending. Do not start another
     // capture until it settles; the outer startup deadline remains bounded.
     if (!surfacePending && sourceCheck === pending) sourceCheck = null;
+  }
+}
+function recoverStartupSurface(output) {
+  const active = () => controller.output === output && !closing && !controller.stopRequested &&
+    controller.state.state === 'awaiting_simulation' && !controller.state.resources_stopped &&
+    window && !window.isDestroyed();
+  if (!active()) return false;
+  // Only the startup coordinator can request this once. Raising the existing
+  // window is not proof of a surface: the next real capture must still pass.
+  window.show();
+  if (!active()) return false;
+  window.focus();
+  updateSimulation();
+  return true;
+}
+function startupSnapshot(value) {
+  if (!startupFailure || startupFailure.output !== controller.output || value.status.output !== startupFailure.output) return value;
+  const terminal = ['completed', 'cancelled', 'failed'].includes(value.status.state);
+  return { ...value, simulation_error: startupFailure.message,
+    status: terminal ? { ...value.status, state: 'failed', message: `启动失败：${startupFailure.message}`, reason: 'desktop_startup_failed' } : value.status };
+}
+async function saveStartupTrace(output, trace) {
+  const temporary = path.join(output, `desktop_startup.${randomBytes(8).toString('hex')}.tmp`);
+  try {
+    // The Python runtime owns directory creation (exist_ok=False). Never create
+    // it early here. This diagnostic write cannot gate control or alter success.
+    await writeFile(temporary, JSON.stringify(trace) + '\n', { encoding: 'utf8', flag: 'wx' });
+    await rename(temporary, path.join(output, 'desktop_startup.json'));
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    console.error('桌面启动记录未能保存：', error.code ?? 'write_failed');
   }
 }
 function stopExperiment() {
@@ -256,18 +293,38 @@ app.whenReady().then(async () => {
     if (closing || captureInitializing || videoInitializing || !controller.safeToClose || (capture && !capture.finalized) || (video && !video.finalized)) throw new Error('正在关闭或封存实验');
     clearInterval(liveSourceTimer); liveSourceTimer = null; liveSourceRoot = null; windowLimitReason = null;
     capture = null; video = null; captureRoot = null; captureClosing = null; archiveDeadline = null;
-    simulationLoaded = false; simulationLoading = false; simulationError = null;
+    simulationLoaded = false; simulationLoading = false; simulationError = null; startupFailure = null;
     controller.prepare();
-    try { return await finishStartup({ controller, confirmSource: confirmCaptureSource, stop: stopExperiment, closing: () => closing }); }
+    const output = controller.output;
+    const trace = { schema: 'malecns_lab.desktop_startup.v1', run_id: path.basename(output), started_at: new Date().toISOString(), result: 'pending', events: [], omitted_events: 0 };
+    const onEvent = event => {
+      const last = trace.events.at(-1);
+      if (last?.type === event.type && last.code === event.code) { last.repetitions = (last.repetitions ?? 1) + 1; last.last_elapsed_ms = event.elapsed_ms; }
+      else {
+        if (trace.events.length === 32) { trace.events.splice(1, 1); trace.omitted_events++; }
+        trace.events.push(event);
+      }
+      if (['continue_requested', 'interrupted', 'failed'].includes(event.type)) trace.result = event.type;
+    };
+    try {
+      return await finishStartup({ controller, confirmSource: confirmCaptureSource, recoverSource: () => recoverStartupSurface(output),
+        stop: stopExperiment, closing: () => closing, onEvent });
+    }
     catch (error) {
-      simulationError = error.message;
+      if (controller.output === output) {
+        startupFailure = { output, message: error.message };
+        simulationError = error.message;
+      }
       throw error;
+    } finally {
+      trace.finished_at = new Date().toISOString();
+      void saveStartupTrace(output, trace);
     }
   });
   bind('experiment:start', async () => { if (controller.state.mode !== 'manual_demo') await confirmCaptureSource(); return controller.continue(); });
   bind('experiment:stop', () => stopExperiment());
   bind('experiment:task', task => controller.task(task));
-  bind('experiment:snapshot', async () => { maintainCapture(); return { ...await controller.snapshot(), simulation_error: simulationError, capture: capture?.status() ?? null, video: video?.status() ?? null }; });
+  bind('experiment:snapshot', async () => { maintainCapture(); return startupSnapshot({ ...await controller.snapshot(), simulation_error: simulationError, capture: capture?.status() ?? null, video: video?.status() ?? null }); });
   bind('records:list', () => controller.listRecords());
   bind('records:open', id => { if (!controller.safeToClose) throw new Error('请先结束当前实验'); return controller.openRecord(id); });
   bind('records:frame', (id, sequence) => controller.readRecordedFrame(id, sequence));

@@ -943,7 +943,11 @@ def execute(directory):
             except BaseException as error:
                 summary['wave_stop_confirmed'] = False
                 failure = (failure or '')+';helper_cleanup:'+str(error)
-        summary.update(reason=failure,wall_seconds=time.monotonic()-started,qualification_only=True,
+        # core.status describes the last action, not whether this process failed.
+        process_status = ('cancelled' if failure in
+            ('InterruptedError:independent_emergency_stop', 'InterruptedError:bridge_signal') else 'failed')
+        summary.update(reason=failure, process_status=process_status, run_id=reg['run_id'], session_id=reg['session_id'],
+                       wall_seconds=time.monotonic()-started,qualification_only=True,
                        events=event_sequence, retained_events=len(events), session_profile=limits['session_profile'],
                        clock_domain='linux_bridge_monotonic',skill_profile=skill_profile)
         try:
@@ -958,7 +962,8 @@ def execute(directory):
                     rclpy.shutdown()
                 for sig,handler in handlers.items():
                     signal.signal(sig,handler)
-    return 0 if summary.get('base_stop_confirmed') and summary.get('wave_stop_confirmed',True) else 1
+    return 0 if (summary.get('process_status') == 'cancelled' and summary.get('base_stop_confirmed')
+                 and summary.get('wave_stop_confirmed',True)) else 1
 
 
 def main(argv=None):

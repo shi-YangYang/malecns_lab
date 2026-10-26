@@ -119,18 +119,37 @@ class SkillRuntime(desktop.Runtime):
             except BaseException as error:
                 self.errors.append("container_cleanup:" + repr(error))
         if self.owns_vm:
+            stop_error = None
             try:
-                self.command([str(self.runtime / "bin/lighter"), "stop"], timeout=6., cleanup=True)
+                self.command([str(self.runtime / "bin/lighter"), "stop"], timeout=6., cleanup=True,
+                             record="vm-stop-command.json")
             except BaseException as error:
-                self.errors.append("vm_stop:" + repr(error))
+                stop_error = repr(error)
+            # The stop request can take effect after its CLI client times out.
+            # Do not resend it; reserve eight seconds for owned child cleanup.
+            confirm_end = min(self.deadline(True)-8., time.monotonic()+12.)
+            last_error = 'GPU VM shutdown not confirmed'
+            while time.monotonic() < confirm_end:
+                try:
+                    result = self.command([str(self.runtime / "bin/lighter"), "status"],
+                        timeout=min(2., confirm_end-time.monotonic()), cleanup=True, check=False)
+                    if "lighter is not running." in result.stdout + result.stderr and not (self.runtime / "docker.sock").exists():
+                        self.owns_vm = False
+                        self.vm_stopped = time.monotonic()
+                        break
+                except BaseException as error:
+                    last_error = repr(error)
+                time.sleep(min(.25, max(0., confirm_end-time.monotonic())))
+            if self.owns_vm:
+                if stop_error:
+                    self.errors.append("vm_stop:" + stop_error)
+                self.errors.append("vm_cleanup:" + last_error)
             try:
-                result = self.command([str(self.runtime / "bin/lighter"), "status"], timeout=2., cleanup=True, check=False)
-                if "lighter is not running." not in result.stdout + result.stderr or (self.runtime / "docker.sock").exists():
-                    raise RuntimeError("GPU VM shutdown not confirmed")
-                self.owns_vm = False
-                self.vm_stopped = time.monotonic()
+                self.protocol.atomic(self.output/"vm-shutdown.json", dict(
+                    stop_command_error=stop_error, confirmed=not self.owns_vm,
+                    confirmed_host_monotonic=self.vm_stopped))
             except BaseException as error:
-                self.errors.append("vm_cleanup:" + repr(error))
+                self.errors.append("vm_shutdown_record:" + repr(error))
         children_stopped = True
         try:
             self.stop_host()
@@ -194,20 +213,24 @@ class SkillRuntime(desktop.Runtime):
 
     def wait_for_sd(self):
         end = min(self.deadline(), time.monotonic()+25.)
-        for attempt in range(1,6):
+        for attempt in range(1, 6):
             self.guard()
             remaining = end-time.monotonic()
             if remaining <= 2.:
                 raise TimeoutError("Official SD readiness budget exhausted")
-            duration = min(15., remaining-2.)
+            # The client waits for its service. Keep its entire remaining window;
+            # only an explicit failed response permits another completed request.
+            duration = remaining-2.
+            record = f"sd-{attempt:02d}.json"
             r = self.command(self.docker+["exec", desktop.CONTAINER, "bash", "-lc",
                 f"timeout --kill-after=1s {duration:.3f}s ros2 run py_examples set_mc_action SD"],
-                timeout=min(17.,remaining),check=False,record=f"sd-{attempt:02d}.json")
-            if r.returncode == 0 and "Robot mode set successfully" in r.stdout+r.stderr:
+                timeout=remaining,check=False,record=record)
+            output = r.stdout+r.stderr
+            if r.returncode == 0 and "Robot mode set successfully" in output:
                 return
-            if attempt < 5:
-                time.sleep(min(1.5,max(0.,end-time.monotonic())))
-        raise RuntimeError("Official SD not confirmed")
+            if r.returncode != 0 or "Failed (code=" not in output or attempt == 5:
+                raise RuntimeError(f"Official SD not confirmed; see {record}")
+            time.sleep(min(1.5, max(0., end-time.monotonic())))
 
     def verify_simulator_configuration(self):
         """Official startup has no derived simulation configuration."""

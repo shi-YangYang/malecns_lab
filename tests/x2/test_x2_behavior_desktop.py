@@ -187,17 +187,18 @@ def test_turn_profile_is_explicit_fixed_b_only_and_cli_defaults_to_measured(tmp_
     assert json.loads(capsys.readouterr().out)['turn_profile'] == selection
 
 
-@pytest.mark.parametrize('ready_at,global_deadline,exit_at,error,elapsed', [
-    (23.6, 100., None, None, 23.6),
-    (None, 100., None, 'Bridge readiness expired', 30.),
-    (23.6, 12., None, 'Bridge readiness expired', 12.),
-    (None, 100., 2., 'Behavior bridge startup failed', 2.),
+@pytest.mark.parametrize('ready_at,global_deadline,exit_at,error_type,error,elapsed', [
+    (23.6, 100., None, None, None, 23.6),
+    (None, 100., None, ValueError, '等待机器人稳定站立和控制连接就绪超时', 30.),
+    (23.6, 12., None, ValueError, '等待机器人稳定站立和控制连接就绪超时', 12.),
+    (None, 100., 2., RuntimeError, '机器人控制连接初始化失败：控制进程已退出', 2.),
 ])
 def test_bridge_initialization_wait_is_bounded_and_checks_process_exit(
-        tmp_path, monkeypatch, ready_at, global_deadline, exit_at, error, elapsed):
+        tmp_path, monkeypatch, ready_at, global_deadline, exit_at, error_type, error, elapsed):
     from malecns_lab.runtime.x2 import behavior as module
     runtime = object.__new__(BehaviorRuntime)
     runtime.output, runtime.remote, runtime.docker = tmp_path, '/private/run', ['docker']
+    runtime.automatic_start = False
     runtime.skill_profile = module.candidate_skill_profile()
     runtime.interaction = module.interaction_profile()
     runtime.session_limits = {'session_contract_id': 'fixture-session'}
@@ -219,7 +220,7 @@ def test_bridge_initialization_wait_is_bounded_and_checks_process_exit(
     runtime.guard = lambda: guarded.append(clock.value)
     runtime.status = lambda *args, **kwargs: statuses.append((args, kwargs))
     if error:
-        with pytest.raises(ValueError, match=error):
+        with pytest.raises(error_type, match=error):
             runtime.start_behavior_bridge()
         assert not runtime.session_running and not runtime.tasks_open and not statuses
     else:
@@ -266,6 +267,56 @@ def failure_cause_packet(runtime, *, sequence=10, status='UNKNOWN', reason='wave
         'sim', 'skills', status, 'WAVE_RIGHT', 385.067682182,
         raw_feedback={'reason': reason}, stop_evidence={'stop_confirmed': False}, protection_reason=reason)
     return dict(schema=SCHEMA, run_id=runtime.run_id, session_id=runtime.session_id, event=event.to_dict())
+
+
+def test_bridge_json_failure_is_reported_even_after_completed_action(tmp_path):
+    runtime, statuses = failure_cause_runtime(tmp_path)
+    runtime.bridge = SimpleNamespace(poll=lambda: 1)
+    reason = 'ValueError:Invalid transport JSON: observation_request.json; bytes=472; Expecting value'
+    path = tmp_path/'bridge_summary.json'
+    path.write_text(json.dumps(dict(status='COMPLETED', reason=reason,
+        run_id=runtime.run_id, session_id=runtime.session_id)))
+    shutdown = runtime.shutdown_behavior
+    def cleanup(message):
+        path.write_text(json.dumps(dict(status='CANCELLED', reason='InterruptedError:independent_emergency_stop')))
+        shutdown(message)
+    runtime.shutdown_behavior = cleanup
+    result = runtime.execute_behavior()
+    assert result['state'] == 'failed' and result['reason'] == reason
+    assert 'ValueError:Behavior bridge exited' in result['secondary_errors']
+    assert 'observation_request.json' in statuses[-1]['message']
+
+
+def test_completed_action_status_does_not_hide_bridge_exception_in_diagnostics(tmp_path):
+    runtime, _ = failure_cause_runtime(tmp_path)
+    (tmp_path/'bridge_summary.json').write_text(json.dumps(dict(status='COMPLETED', reason='JSONDecodeError:partial')))
+    runtime.collect_secondary_errors()
+    assert 'bridge_summary.json:JSONDecodeError:partial' in runtime.secondary_errors
+
+
+def test_child_failure_preserves_oom_and_rejects_foreign_summary(tmp_path):
+    from malecns_lab.runtime.x2.behavior import concise_failure
+    runtime, _ = failure_cause_runtime(tmp_path)
+    path = tmp_path/'behavior_worker_result.json'
+    reason = 'RuntimeError:MPS backend out of memory (max allowed: 1.42 GiB)'
+    path.write_text(json.dumps(dict(status='failed', reason=reason, run_id=runtime.run_id, session_id=runtime.session_id)))
+    assert runtime.child_exit_reason(path.name, 'fallback') == reason
+    assert '可用内存不足' in concise_failure(reason)
+    path.write_text(json.dumps(dict(status='failed', reason=reason, run_id='foreign')))
+    assert runtime.child_exit_reason(path.name, 'fallback') == 'fallback'
+    assert 'Foreign child summary' in runtime.secondary_errors[-1]
+
+
+@pytest.mark.parametrize('available, allowed', [(1519517696+2**30, False), (3*2**30-1, False), (3*2**30, True), (10*2**30, True)])
+def test_complete_brain_budget_rejects_known_insufficient_initialization(available, allowed):
+    from malecns_lab.runtime.x2.behavior import brain_resource_budget
+    if not allowed:
+        with pytest.raises(ValueError, match='可用内存不足'):
+            brain_resource_budget(available)
+    else:
+        budget = brain_resource_budget(available)
+        assert 2*2**30 <= budget['effective_rss_limit_bytes'] <= 6*2**30
+        assert budget['effective_rss_limit_bytes'] + budget['reserve_bytes'] <= available
 
 
 @pytest.mark.parametrize('exit_source', ['worker', 'worker_race', 'bridge'])

@@ -225,7 +225,7 @@ class Runtime:
                     self.guard()
                 remaining = end - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError("Command timed out: " + str(args[:3]))
+                    raise TimeoutError("Command timed out (" + (record or " ".join(map(str, args[:6]))) + ")")
                 try:
                     stdout, stderr = child.communicate(timeout=min(.1, remaining))
                     break

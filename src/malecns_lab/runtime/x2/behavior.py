@@ -36,6 +36,7 @@ WALL_SECONDS = 900.
 VM_SECONDS = 480.
 CLEANUP_SECONDS = 35.
 MAX_DECISIONS = 160
+MIN_BRAIN_BUDGET = 2 * legacy.GIB
 TRANSPORT = tuple(dict.fromkeys((*legacy.TRANSPORT,'control/x2_behavior.py','control/x2_skills.py',
     'control/x2_skill_profile.py','control/x2_interaction.py',
     'learning/__init__.py','learning/x2_behavior_session.py','experiments/x2_behavior_bridge.py',
@@ -46,6 +47,11 @@ TRANSPORT = tuple(dict.fromkeys((*legacy.TRANSPORT,'control/x2_behavior.py','con
 def concise_failure(reason):
     """Keep the actionable exception line in the UI; full detail stays in logs."""
     text = next((line.strip() for line in reversed(str(reason).splitlines()) if line.strip()), '原因未记录')
+    if 'MPS backend out of memory' in text:
+        return '脑模型加载或计算时可用内存不足，请释放内存后重试'
+    if 'Invalid transport JSON:' in text:
+        filename = text.split('Invalid transport JSON:', 1)[1].split(';', 1)[0].strip()
+        return '控制通信文件读取失败（'+filename+'），已停止本次运行'
     for prefix in ('ValueError:', 'RuntimeError:', 'TimeoutError:', 'InterruptedError:'):
         if text.startswith(prefix):
             text = text[len(prefix):].strip()
@@ -53,6 +59,17 @@ def concise_failure(reason):
             'Behavior bridge startup failed': '机器人控制连接初始化失败',
             'Bridge readiness expired': '等待机器人控制连接就绪超时'}.get(text, text)
     return text[:240]
+
+
+def brain_resource_budget(available):
+    from ...learning.resource_guard import resource_budget
+    resources = resource_budget(available, rss_bytes=6*legacy.GIB, reserve_bytes=legacy.GIB)
+    # Observed fixed-brain driver peak is ~1.42 GiB. Do not launch it with
+    # an arbitrarily small positive budget or disable the allocator guard.
+    require(resources['effective_rss_limit_bytes'] >= MIN_BRAIN_BUDGET,
+            f'可用内存不足：当前 {available/legacy.GIB:.2f} GiB；'
+            '启动至少需要 3 GiB（脑模型预算 2 GiB，系统预留 1 GiB），请释放内存后重试')
+    return resources
 
 
 class Commands(legacy.Commands):
@@ -245,13 +262,30 @@ class BehaviorRuntime(SkillRuntime):
                 continue
             try:
                 result = read_json(path)
-                if result.get('status') in failed and isinstance(result.get('reason'), str):
+                bridge_error = (filename == 'bridge_summary.json' and result.get('reason')
+                    and result['reason'] not in ('InterruptedError:independent_emergency_stop', 'InterruptedError:bridge_signal'))
+                if (result.get('status') in failed or bridge_error) and isinstance(result.get('reason'), str):
                     error = filename+':'+result['reason']
                     if error not in self.secondary_errors:
                         self.secondary_errors.append(error)
             except (OSError, ValueError) as error:
                 self.secondary_errors.append(filename+':'+type(error).__name__+':'+str(error))
         self.secondary_errors.extend(error for error in self.errors if error not in self.secondary_errors)
+
+    def child_exit_reason(self, filename, fallback):
+        """Read the owned child's cause before cleanup can add cancellations."""
+        path = self.output/filename
+        if not path.exists():
+            return fallback
+        try:
+            result = read_json(path)
+            require(all(result.get(k, expected) == expected for k, expected in
+                        (('run_id', self.run_id), ('session_id', self.session_id))), 'Foreign child summary')
+            reason = result.get('reason')
+            return reason if isinstance(reason, str) and reason.strip() else fallback
+        except (OSError, ValueError, TypeError) as error:
+            self.secondary_errors.append(filename+':'+type(error).__name__+':'+str(error))
+            return fallback
 
     def status(self, state, message, **fields):
         if 'phase' in fields:
@@ -384,14 +418,13 @@ class BehaviorRuntime(SkillRuntime):
 
     def prepare(self):
         from ...learning.x2_behavior_training import source_inventory
-        from ...learning.resource_guard import resource_budget
         import psutil
+        resources = brain_resource_budget(psutil.virtual_memory().available)
         self.simulation_configuration = sim_configuration.prepare_configuration(
             self.root, self.output, self.remote, self.sim_profile)
         if self.skill_profile['wave_enabled']:
             self.prepare_wave_qualification()
-        resources = resource_budget(psutil.virtual_memory().available,rss_bytes=6*legacy.GIB,reserve_bytes=legacy.GIB)
-        require(resources['can_launch'], 'Insufficient system reserve')
+        resources = brain_resource_budget(psutil.virtual_memory().available)
         self.rss_limit = resources['effective_rss_limit_bytes']
         self.resource_stream = (self.output/'behavior_resources.csv').open('x')
         self.resource_stream.write('wall_seconds,brain_rss_bytes,system_available_bytes\n')
@@ -434,7 +467,9 @@ class BehaviorRuntime(SkillRuntime):
             'malecns_lab.runtime.x2.behavior','--worker',str(self.output)],'brain-worker.log',environment)
         while not (self.output/'brain_ready.json').exists():
             self.guard()
-            require(self.host.poll() is None,'Candidate brain initialization failed; see brain-worker.log')
+            if self.host.poll() is not None:
+                raise RuntimeError(self.child_exit_reason('behavior_worker_result.json',
+                    'Candidate brain initialization failed; see brain-worker.log'))
             time.sleep(.1)
         ready = read_json(self.output/'brain_ready.json')
         require(ready['checkpoint_id'] == self.metadata['checkpoint_id'],'Worker selected another checkpoint')
@@ -497,8 +532,7 @@ class BehaviorRuntime(SkillRuntime):
         while not (self.output/'bridge_ready.json').exists() and time.monotonic()<end:
             self.guard()
             if self.bridge.poll() is not None:
-                summary = read_json(self.output/'bridge_summary.json') if (self.output/'bridge_summary.json').exists() else {}
-                raise RuntimeError('机器人控制连接初始化失败：'+concise_failure(summary.get('reason') or '控制进程已退出'))
+                raise RuntimeError(self.child_exit_reason('bridge_summary.json', '机器人控制连接初始化失败：控制进程已退出'))
             time.sleep(.1)
         require((self.output/'bridge_ready.json').exists(),'等待机器人稳定站立和控制连接就绪超时')
         ready = read_json(self.output/'bridge_ready.json')
@@ -608,6 +642,11 @@ class BehaviorRuntime(SkillRuntime):
                 self.capture_execution_failure()
             outcome.update(state='cancelled' if isinstance(error,legacy.StopRequested) else 'failed',
                            reason=type(error).__name__+':'+str(error))
+            if str(error) == 'Behavior bridge exited':
+                reason = self.child_exit_reason('bridge_summary.json', outcome['reason'])
+                if reason != outcome['reason']:
+                    self.secondary_errors.append(outcome['reason'])
+                    outcome['reason'] = reason
         finally:
             if self.execution_failure is not None:
                 if outcome['state'] != 'completed':
