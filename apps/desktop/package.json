@@ -8,6 +8,7 @@
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "build": "npm run prepare:assets && tsc --noEmit && vite build",
     "start": "electron .",
+    "brain": "electron electron/brain-display.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 8775 --strictPort"
   },
   "dependencies": { "three": "0.180.0" },

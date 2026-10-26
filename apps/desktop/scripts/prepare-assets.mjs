@@ -17,9 +17,18 @@ try {
   await copyFile(source, path.join(target, 'data/atlas.json'));
   // Preserve the source graph identity and provenance; diagnostic activity is never loaded.
   await writeFile(path.join(target, 'data/atlas-source.json'), `${JSON.stringify({ schema: catalog.schema, graph: catalog.graph, provenance: catalog.provenance })}\n`);
-  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify({ schema: 'malecns_lab.desktop.assets.v1', assets: ['data/atlas.json', 'data/atlas-source.json'] }, null, 2)}\n`);
-  process.stdout.write('已准备真实胞体坐标和图谱来源，未加载旧诊断活动。\n');
+  const structureSource = path.resolve(app, '../../data/brain_visualization_v1');
+  const structure = JSON.parse(await readFile(path.join(structureSource, 'manifest.json'), 'utf8'));
+  if (structure.schema !== 'malecns_lab.brain_display.v1' || structure.provenance.graph_sha256 !== catalog.graph.graph_sha256) throw new Error('三维展示资产与图谱连接组身份不一致');
+  const names = ['manifest.json', ...Object.keys(structure.files)];
+  await mkdir(path.join(target, 'brain'), { recursive: true });
+  for (const name of names) {
+    if (!/^[a-z0-9-]+\.(json|f32|u32|u16)$/.test(name)) throw new Error('展示资产文件名无效');
+    await copyFile(path.join(structureSource, name), path.join(target, 'brain', name));
+  }
+  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify({ schema: 'malecns_lab.desktop.assets.v1', assets: ['data/atlas.json', 'data/atlas-source.json', ...names.map(name => `brain/${name}`)] }, null, 2)}\n`);
+  process.stdout.write('已准备真实胞体、突触抽样、连接示意和历史电流片段。\n');
 } catch (error) {
-  process.stderr.write(`无法准备图谱：${error.message}\n请恢复现有 atlas 导出；不会生成替代数据。\n`);
+  process.stderr.write(`无法准备图谱：${error.message}\n请恢复现有 atlas 与 data/brain_visualization_v1 导出；不会生成替代数据。\n`);
   process.exitCode = 1;
 }
