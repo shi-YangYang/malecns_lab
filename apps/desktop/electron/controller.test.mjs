@@ -16,7 +16,7 @@ test('launch uses only fixed executable and arguments; repeated prepare and star
   const controller = new ExperimentController('/test/repo', () => {}, (...args) => { calls.push(args); return child; });
   controller.prepare();
   assert.equal(calls[0][0], '/test/repo/.venv-train/bin/python');
-  assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--session-profile', 'continuous', '--output', controller.output]);
+  assert.deepEqual(calls[0][1], ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--automatic-start', '--session-profile', 'continuous', '--output', controller.output]);
   assert.equal(controller.state.mode, 'brain_control'); assert.equal(controller.state.brain_controlled, false);
   assert.equal(calls[0][2].shell, false); assert.throws(() => controller.prepare()); assert.throws(() => controller.continue());
   send(child, status(controller, 'awaiting_simulation', { simulator_ready: true }));

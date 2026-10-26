@@ -215,6 +215,10 @@ class SkillRuntime(desktop.Runtime):
     def simulator_launch_shell(self):
         return "printf '0\\n' | /opt/VirtualGL/bin/vglrun -d egl0 -ms 0 /usr/local/bin/x2-component sim > "+shlex.quote(self.remote+"/sim.log")+" 2>&1"
 
+    def prepare_simulator_ui(self):
+        """CLI skill probes retain their explicit operator preparation step."""
+        return False
+
     def start_simulator(self):
         self.preflight()
         self.vm_started, self.owns_vm = time.monotonic(), True
@@ -241,9 +245,11 @@ class SkillRuntime(desktop.Runtime):
         self.command(self.docker+["exec","-d",desktop.CONTAINER,"bash","-lc","printf '0\\n' | /usr/local/bin/x2-component mc > "+shlex.quote(self.remote+"/mc.log")+" 2>&1"])
         self.wait_for_sd()
         self.simulator_ready=True
+        automatic = self.prepare_simulator_ui()
         end = self.ui_deadline(time.monotonic())
-        self.protocol.atomic(self.output / "ready.json",dict(state="awaiting_official_reset_run", url="http://127.0.0.1:6081/vnc.html?autoconnect=true&resize=scale", continue_file=str(self.output/"continue.json"), budget=self.budget_record(), ui_deadline_monotonic=end))
-        self.status("awaiting_simulation","请先 Pause → Reset，确认直立且暂停后 Run，再写入 continue.json",stage="await_ui_reset_run",ui_deadline_monotonic=end)
+        self.protocol.atomic(self.output / "ready.json",dict(state="awaiting_desktop_connection" if automatic else "awaiting_official_reset_run", url="http://127.0.0.1:6081/vnc.html?autoconnect=true&resize=scale", continue_file=str(self.output/"continue.json"), budget=self.budget_record(), ui_deadline_monotonic=end))
+        self.status("awaiting_simulation", "正在连接仿真画面" if automatic else "请先 Pause → Reset，确认直立且暂停后 Run，再写入 continue.json",
+                    stage="await_desktop_connection" if automatic else "await_ui_reset_run", ui_deadline_monotonic=end)
         while time.monotonic() < end:
             self.guard()
             path=self.output/"continue.json"

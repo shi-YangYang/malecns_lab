@@ -40,7 +40,19 @@ TRANSPORT = tuple(dict.fromkeys((*legacy.TRANSPORT,'control/x2_behavior.py','con
     'control/x2_skill_profile.py','control/x2_interaction.py',
     'learning/__init__.py','learning/x2_behavior_session.py','experiments/x2_behavior_bridge.py',
     'experiments/x2_skills.py','experiments/x2_preset_identity.py','experiments/x2_preset_compat.py',
-    'experiments/x2_preset_helper.py')))
+    'experiments/x2_preset_helper.py','experiments/x2_sim_startup.py')))
+
+
+def concise_failure(reason):
+    """Keep the actionable exception line in the UI; full detail stays in logs."""
+    text = next((line.strip() for line in reversed(str(reason).splitlines()) if line.strip()), '原因未记录')
+    for prefix in ('ValueError:', 'RuntimeError:', 'TimeoutError:', 'InterruptedError:'):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+    text = {'Fresh stable standing not confirmed': '未能确认机器人稳定站立',
+            'Behavior bridge startup failed': '机器人控制连接初始化失败',
+            'Bridge readiness expired': '等待机器人控制连接就绪超时'}.get(text, text)
+    return text[:240]
 
 
 class Commands(legacy.Commands):
@@ -158,8 +170,10 @@ def candidate(root, override=None, *, turn_profile='measured', wave_profile='bas
 
 
 class BehaviorRuntime(SkillRuntime):
-    def __init__(self, output, root, commands, emit, checkpoint_path, metadata, *, session_profile='qualification', sim_profile='official'):
+    def __init__(self, output, root, commands, emit, checkpoint_path, metadata, *, session_profile='qualification', sim_profile='official', automatic_start=False):
         require(sim_profile in sim_configuration.PROFILES, 'Unsupported simulation profile')
+        require(not automatic_start or sim_profile == 'official', 'Automatic startup requires the official simulation profile')
+        self.automatic_start = automatic_start
         self.sim_profile = sim_profile
         self.simulation_configuration = None
         self.simulation_files_verified = False
@@ -442,7 +456,38 @@ class BehaviorRuntime(SkillRuntime):
                 'Derived simulation files not verified')
         return sim_configuration.launch_shell(self.simulation_configuration, self.remote)
 
+    def prepare_simulator_ui(self):
+        if not self.automatic_start:
+            return False
+        self.status('preparing', '正在复位仿真', stage='automatic_simulation_reset')
+        command = ('source /opt/ros/humble/setup.bash && source /workspace/aimdk/install/local_setup.bash && '
+            'PYTHONPATH='+shlex.quote(self.remote+'/transport_src')+':$PYTHONPATH '
+            'ROS_DOMAIN_ID=47 ROS_LOCALHOST_ONLY=1 timeout --kill-after=1s 15s '
+            'python3 -m malecns_lab.experiments.x2_sim_startup --execute --sim-only --output '+shlex.quote(self.remote))
+        try:
+            result = self.command(self.docker+['exec',legacy.CONTAINER,'bash','-lc',command],
+                                  timeout=17.,check=False,record='sim-startup-command.json')
+            receipt = read_json(self.output/'sim_startup.json') if (self.output/'sim_startup.json').exists() else {}
+            require(result.returncode == 0 and receipt.get('status') == 'ready',
+                    '仿真自动准备失败：'+concise_failure(receipt.get('reason') or result.stderr))
+            require((receipt.get('schema'),receipt.get('run_id'),receipt.get('session_id')) ==
+                    ('malecns_lab.sim_startup.v1',self.run_id,self.session_id), 'Foreign simulation startup receipt')
+            self.guard()
+        except BaseException as error:
+            # Killing docker exec's local client does not kill its container
+            # process. Publish the owned cancellation before broader cleanup.
+            try:
+                atomic(self.output/'sim_startup_cancel.json', dict(run_id=self.run_id,
+                    session_id=self.session_id, reason=type(error).__name__+':'+str(error),
+                    host_monotonic=time.monotonic()))
+            except BaseException as write_error:
+                self.errors.append('startup_cancel_write:'+repr(write_error))
+            raise
+        return True
+
     def start_behavior_bridge(self):
+        if self.automatic_start:
+            self.status('preparing', '正在确认机器人站稳', stage='confirm_standing')
         command = ('source /opt/ros/humble/setup.bash && source /workspace/aimdk/install/local_setup.bash && '
             'PYTHONPATH='+shlex.quote(self.remote+'/transport_src')+':$PYTHONPATH '
             'ROS_DOMAIN_ID=47 ROS_LOCALHOST_ONLY=1 python3 -m malecns_lab.experiments.x2_behavior_bridge '
@@ -451,9 +496,11 @@ class BehaviorRuntime(SkillRuntime):
         end = min(self.deadline(),time.monotonic()+30.)
         while not (self.output/'bridge_ready.json').exists() and time.monotonic()<end:
             self.guard()
-            require(self.bridge.poll() is None,'Behavior bridge startup failed')
+            if self.bridge.poll() is not None:
+                summary = read_json(self.output/'bridge_summary.json') if (self.output/'bridge_summary.json').exists() else {}
+                raise RuntimeError('机器人控制连接初始化失败：'+concise_failure(summary.get('reason') or '控制进程已退出'))
             time.sleep(.1)
-        require((self.output/'bridge_ready.json').exists(),'Bridge readiness expired')
+        require((self.output/'bridge_ready.json').exists(),'等待机器人稳定站立和控制连接就绪超时')
         ready = read_json(self.output/'bridge_ready.json')
         require(validate_candidate_skill_profile(ready.get('skill_profile')) == self.skill_profile
                 and ready.get('capabilities') == self.interaction['capabilities']
@@ -597,7 +644,7 @@ class BehaviorRuntime(SkillRuntime):
                 self.errors.append('summary_write:'+repr(error))
                 self.secondary_errors.append(self.errors[-1])
                 outcome['state'] = 'failed'
-            message = '验证已结束' if outcome['state'] != 'failed' else '验证失败，请查看记录'
+            message = '验证已结束' if outcome['state'] != 'failed' else '验证失败：'+concise_failure(outcome['reason'])
             if self.execution_failure is not None:
                 message = '动作保护停止：'+self.execution_failure['protection_reason']
             self.status(outcome['state'],message, qualification_only=True,reason=outcome['reason'],
@@ -616,6 +663,7 @@ def main(argv=None):
     p.add_argument('--execute',action='store_true')
     p.add_argument('--sim-only',action='store_true')
     p.add_argument('--qualification',action='store_true')
+    p.add_argument('--automatic-start',action='store_true',help='Prepare the owned official simulator before desktop continuation')
     p.add_argument('--session-profile', choices=SESSION_PROFILES, default='qualification')
     p.add_argument('--turn-profile', choices=TURN_PROFILES, default='measured')
     p.add_argument('--wave-profile', choices=WAVE_PROFILES, default='baseline')
@@ -668,7 +716,7 @@ def main(argv=None):
                 commands.start_clock_replies(directory.name,emit)
                 commands.start()
                 runtime = BehaviorRuntime(directory,ROOT,commands,emit,checkpoint_path,metadata,
-                    session_profile=args.session_profile,sim_profile=args.sim_profile)
+                    session_profile=args.session_profile,sim_profile=args.sim_profile,automatic_start=args.automatic_start)
                 result = runtime.execute_behavior()
         return 0 if result['state'] in ('completed','cancelled') else 1
     except BaseException as error:

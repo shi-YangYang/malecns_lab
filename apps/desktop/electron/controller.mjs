@@ -24,12 +24,13 @@ export class ExperimentController {
   notify() { this.cached = null; this.onChange(this.state); }
   prepare() {
     if (this.child || !this.state.resources_stopped) throw new Error('上一实验尚未完成资源清理');
+    this.stopRequested = false;
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
     this.output = path.join(this.recordsRoot, `desktop-${stamp}-${randomBytes(4).toString('hex')}`);
     this.cancelClockRequests('实验会话已改变'); this.hostClockId = null;
     this.state = { schema: EVENT_SCHEMA, type: 'status', state: 'preparing', mode: 'brain_control', brain_controlled: false, message: '正在准备脑控验证', output: this.output, run_id: null, simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: false };
     this.stderr = ''; this.protocolError = null; this.clearTaskAck(); this.runtimeState = null; this.taskAckFailure = null; this.notify();
-    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--session-profile', 'continuous', '--output', this.output], {
+    const child = this.launch(path.join(this.repo, '.venv-train/bin/python'), ['-u', '-m', 'malecns_lab.runtime.x2.behavior', '--execute', '--sim-only', '--qualification', '--automatic-start', '--session-profile', 'continuous', '--output', this.output], {
       cwd: this.repo, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONPATH: path.join(this.repo, 'src'), PYTHONUNBUFFERED: '1' },
     });
@@ -80,13 +81,14 @@ export class ExperimentController {
     return this.state;
   }
   continue() {
-    if (!this.child || this.state.state !== 'awaiting_simulation' || this.state.request_pending) throw new Error('实验尚未准备完成');
+    if (this.stopRequested || !this.child || this.state.state !== 'awaiting_simulation' || this.state.request_pending) throw new Error('实验尚未准备完成');
     this.child.stdin.write(`${JSON.stringify({ command: 'continue' })}\n`);
     // Runtime owns the authoritative transition; reject repeated clicks meanwhile.
     this.state = { ...this.state, clock_source: 'desktop_local', request_pending: true, message: '等待实验启动确认' }; this.notify();
     return this.state;
   }
   stop() {
+    this.stopRequested = true;
     this.clearTaskAck();
     if (this.child && !TERMINAL_STATES.has(this.state.state) && this.state.state !== 'stopping') {
       this.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);

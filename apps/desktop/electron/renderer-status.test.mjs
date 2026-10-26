@@ -5,8 +5,21 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/live-status.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-const { LiveStatus, canEmergencyStop, canSubmitTask } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { LiveStatus, canEmergencyStop, canSubmitTask, startAction } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const status = state => ({ state, resources_stopped: state === 'idle' });
+
+test('one start prepares clean sessions without exposing an intermediate start button', () => {
+  for (const state of ['idle', 'completed', 'cancelled', 'failed']) {
+    assert.equal(startAction({ ...status(state), resources_stopped: true }, false), 'prepare');
+    assert.equal(startAction({ ...status(state), resources_stopped: false }, false), null);
+  }
+  assert.equal(startAction(status('awaiting_simulation'), false), null);
+  for (const state of ['preparing', 'running', 'stopping']) assert.equal(startAction(status(state), false), null);
+  for (const state of ['idle', 'awaiting_simulation']) {
+    assert.equal(startAction(status(state), true), null);
+    assert.equal(startAction({ ...status(state), request_pending: true }, false), null);
+  }
+});
 
 test('prepare acknowledgement persists and an older idle poll cannot roll it back', () => {
   const live = new LiveStatus();

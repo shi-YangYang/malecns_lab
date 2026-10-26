@@ -2,6 +2,12 @@ import type { ExperimentStatus, Task } from './types';
 
 export const activeStates = new Set(['preparing', 'awaiting_simulation', 'running', 'stopping']);
 
+/** Preparation and simulator readiness now belong to the same start request. */
+export function startAction(status: ExperimentStatus, pending: boolean): 'prepare' | null {
+  if (pending || status.request_pending) return null;
+  return !activeStates.has(status.state) && status.resources_stopped ? 'prepare' : null;
+}
+
 /** Own the current status independently of the last telemetry snapshot. */
 export class LiveStatus {
   current: ExperimentStatus | null = null;
