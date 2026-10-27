@@ -82,5 +82,7 @@ export function canEmergencyStop(status: ExperimentStatus, lifecyclePending: boo
 export function canSubmitTask(status: ExperimentStatus, task: Task): boolean {
   if (status.state !== 'running' || status.mode !== 'brain_control' || status.brain_controlled !== true || status.phase === 'initializing') return false;
   if (task === 'END_INTERACTION') return !(status.task === task && (status.action_busy || status.request_pending));
+  if (status.next_task) return false;
+  if (status.can_queue_task === true && !status.request_pending) return true;
   return status.phase === 'waiting_task' && status.action_busy !== true && !status.request_pending;
 }

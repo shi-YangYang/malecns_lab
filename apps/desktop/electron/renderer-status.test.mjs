@@ -186,3 +186,23 @@ test('ordinary task buttons wait through computation, execution and stopping; EN
   assert.equal(canSubmitTask({ ...ready, action_busy: true, task: 'END_INTERACTION' }, 'END_INTERACTION'), false);
   assert.equal(canSubmitTask({ ...ready, state: 'stopping' }, 'END_INTERACTION'), false);
 });
+
+test('completed action permits one next selection without reopening its activity', () => {
+  const closing = active('request-a', { action_busy: true, closing: true, can_queue_task: true, task: 'SHOW_FORWARD' });
+  const display = new ActivityDisplay();
+  display.update(active());
+  display.update(closing);
+  for (const task of ['SHOW_FORWARD', 'FACE_LEFT', 'FACE_RIGHT', 'GREET']) assert.equal(canSubmitTask(closing, task), true);
+  const selected = { ...closing, next_task: 'FACE_LEFT', can_queue_task: false };
+  display.update(selected);
+  assert.equal(display.mode, 'closing');
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(canSubmitTask(selected, 'GREET'), false);
+  assert.equal(canSubmitTask(selected, 'END_INTERACTION'), true);
+  assert.equal(canSubmitTask({ ...closing, state: 'stopping' }, 'FACE_LEFT'), false);
+  assert.equal(canSubmitTask({ ...closing, request_pending: true }, 'FACE_LEFT'), false);
+  // Automatic dispatch starts a fresh request; old completion telemetry stays hidden.
+  assert.equal(display.update(active('request-b', { phase: 'queued', task: 'FACE_LEFT' })), true);
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(display.accepts(batchFor('request-b')), true);
+});

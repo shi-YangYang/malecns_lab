@@ -238,3 +238,173 @@ test('a matching task ACK cancels its deadline and END owns a fresh bounded ACK'
   assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
   assert.equal(controller.state.state, 'stopping');
 });
+
+function closingFixture() {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  const closing = { mode: 'brain_control', brain_controlled: true, run_id: 'run-1', task: 'SHOW_FORWARD',
+    phase: 'computing', closing: true, action_busy: true, request_pending: false,
+    request_id: 'forward-1', active_request_id: 'forward-1' };
+  send(child, status(controller, 'running', closing));
+  const waiting = { ...closing, phase: 'waiting_task', closing: false, action_busy: false,
+    request_pending: false, active_request_id: null, stop_confirmed: true };
+  return { controller, child, closing, waiting };
+}
+
+test('closure admits one local next action without sending or starting an ACK timeout', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { controller, child } = closingFixture();
+  assert.equal(controller.state.can_queue_task, true);
+  controller.task('FACE_LEFT');
+  assert.equal(controller.state.next_task, 'FACE_LEFT');
+  assert.equal(controller.state.can_queue_task, false);
+  assert.equal(controller.state.task, 'SHOW_FORWARD');
+  assert.equal(controller.state.phase, 'computing');
+  assert.equal(controller.taskAwaitingAck, null);
+  assert.equal(child.stdin.read(), null);
+  assert.throws(() => controller.task('FACE_LEFT'), /下一动作/);
+  assert.throws(() => controller.task('GREET'), /下一动作/);
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS * 20);
+  assert.equal(controller.state.next_task, 'FACE_LEFT');
+  assert.equal(controller.state.state, 'running');
+  assert.equal(child.stdin.read(), null);
+});
+
+test('matching stopped request sends reservation once and keeps ACK protection against stale idle', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { controller, child, waiting } = closingFixture();
+  controller.task('FACE_LEFT');
+  send(child, status(controller, 'running', waiting));
+  assert.equal(child.stdin.read().toString(), '{"command":"task","task":"FACE_LEFT"}\n');
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+  assert.equal(controller.state.phase, 'queued');
+  assert.equal(controller.state.request_pending, true);
+  send(child, status(controller, 'running', waiting));
+  assert.equal(child.stdin.read(), null);
+  assert.equal(controller.state.task, 'FACE_LEFT');
+  assert.throws(() => controller.task('GREET'), /尚未结束/);
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS - 1);
+  send(child, status(controller, 'running', { ...waiting, phase: 'queued', task: 'FACE_LEFT',
+    action_busy: true, request_pending: true, active_request_id: 'left-2', request_id: 'left-2' }));
+  assert.equal(controller.taskAwaitingAck, null);
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS);
+  assert.equal(child.stdin.read(), null);
+  assert.equal(controller.state.state, 'running');
+});
+
+test('automatically dispatched reservation still stops on missing ACK', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { controller, child, waiting } = closingFixture();
+  controller.task('FACE_RIGHT');
+  send(child, status(controller, 'running', waiting)); child.stdin.read();
+  t.mock.timers.tick(TASK_ACK_TIMEOUT_MS);
+  assert.equal(child.stdin.read().toString(), '{"command":"stop"}\n');
+  assert.equal(controller.state.reason, 'task_ack_timeout');
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+});
+
+for (const [name, extra] of Object.entries({
+  'before closure': { closing: false },
+  'executing': { phase: 'executing' },
+  'mismatched request': { request_id: 'old' },
+  'missing request': { request_id: null, active_request_id: null },
+  'missing run': { run_id: null },
+  'not busy': { action_busy: false },
+  'pending request': { request_pending: true },
+  'unready brain': { brain_controlled: false },
+  'end interaction': { task: 'END_INTERACTION' },
+  'rejection': { notice: 'request_rejected' },
+})) test(`next action is not offered ${name}`, () => {
+  const { controller, child, closing } = closingFixture();
+  send(child, status(controller, 'running', { ...closing, ...extra }));
+  assert.equal(controller.state.can_queue_task, false);
+  assert.throws(() => controller.task('FACE_LEFT'));
+  assert.equal(child.stdin.read(), null);
+});
+
+for (const [name, extra] of Object.entries({
+  'foreign request': { request_id: 'old' },
+  'foreign run': { run_id: 'another-run' },
+  'unconfirmed stop': { stop_confirmed: false },
+  'still busy': { action_busy: true },
+  'pending request': { request_pending: true },
+  'active request not released': { active_request_id: 'forward-1' },
+  'unready brain': { brain_controlled: false },
+  'rejection notice': { notice: 'request_rejected' },
+  'legacy rejection': { phase: 'request_rejected' },
+})) test(`reservation is cancelled without dispatch on ${name}`, () => {
+  const { controller, child, waiting } = closingFixture();
+  controller.task('GREET');
+  send(child, status(controller, 'running', { ...waiting, ...extra }));
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+  assert.equal(controller.taskAwaitingAck, null);
+  assert.equal(child.stdin.read(), null);
+  send(child, status(controller, 'running', waiting));
+  assert.equal(child.stdin.read(), null);
+});
+
+test('END cancels reservation and is sent as its own model task', () => {
+  const { controller, child, waiting } = closingFixture();
+  controller.task('FACE_LEFT'); controller.task('END_INTERACTION');
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+  assert.equal(child.stdin.read().toString(), '{"command":"task","task":"END_INTERACTION"}\n');
+  send(child, status(controller, 'running', waiting));
+  assert.equal(child.stdin.read(), null);
+  assert.equal(controller.state.task, 'END_INTERACTION');
+  controller.stop();
+});
+
+for (const ending of ['stop', 'failed', 'cancelled', 'exit', 'error', 'protocol', 'request_change']) test(`reservation cannot survive ${ending} or a subsequent late waiting status`, () => {
+  const { controller, child, closing, waiting } = closingFixture();
+  controller.task('FACE_LEFT');
+  if (ending === 'stop') controller.stop();
+  else if (ending === 'exit') child.emit('exit', 1, null);
+  else if (ending === 'error') child.emit('error', new Error('fixture process error'));
+  else if (ending === 'protocol') send(child, { schema: 'wrong' });
+  else if (ending === 'request_change') send(child, status(controller, 'running', { ...closing,
+    request_id: 'different', active_request_id: 'different', task: 'GREET' }));
+  else send(child, status(controller, ending, { resources_stopped: true }));
+  assert.equal(controller.state.next_task, null);
+  child.stdin.read();
+  send(child, status(controller, 'running', waiting));
+  assert.equal(child.stdin.read(), null);
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+  if (ending !== 'request_change') assert.throws(() => controller.task('GREET'));
+});
+
+test('a new prepared run cannot inherit reservations or callbacks from its old child', () => {
+  const { controller, child, waiting } = closingFixture();
+  controller.task('FACE_RIGHT');
+  send(child, status(controller, 'completed', { resources_stopped: true })); child.emit('exit', 0, null);
+  const nextChild = fakeChild(); controller.launch = () => nextChild; controller.prepare();
+  assert.equal(controller.state.next_task, null);
+  assert.equal(controller.state.can_queue_task, false);
+  send(child, status(controller, 'running', waiting));
+  child.emit('error', new Error('late old error'));
+  assert.equal(controller.state.state, 'preparing');
+  assert.equal(controller.child, nextChild);
+  assert.equal(nextChild.stdin.read(), null);
+});
+
+test('automatic dispatch write failure and broken stdin cancel reservation without escaping event handling', () => {
+  for (const synchronous of [false, true]) {
+    const { controller, child, waiting } = closingFixture();
+    controller.task('FACE_LEFT');
+    if (synchronous) {
+      child.stdin.write = () => { throw new Error('broken pipe'); };
+      assert.doesNotThrow(() => send(child, status(controller, 'running', waiting)));
+    } else child.stdin.emit('error', new Error('broken pipe'));
+    assert.equal(controller.state.next_task, null);
+    assert.equal(controller.taskAwaitingAck, null);
+    assert.equal(controller.state.can_queue_task, false);
+    assert.equal(controller.state.state, 'stopping');
+    send(child, status(controller, 'running', waiting));
+    assert.throws(() => controller.task('GREET'));
+    assert.equal(child.stdin.read(), null);
+  }
+});

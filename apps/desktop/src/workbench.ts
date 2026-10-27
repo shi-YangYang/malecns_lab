@@ -278,9 +278,13 @@ function updateStatus(value: ExperimentStatus): void {
   const controlsPending = pending || stopPending;
   const brainActive = value.mode === 'brain_control' && value.brain_controlled === true;
   app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => {
-    button.disabled = controlsPending || !canSubmitTask(value, button.dataset.task as Task);
-    button.classList.toggle('is-active', value.action_busy === true && value.task === button.dataset.task);
-    button.title = value.action_busy && button.dataset.task !== 'END_INTERACTION' ? '当前动作结束并停稳后可用' : '向脑模型提交互动任务';
+    const task = button.dataset.task as Task;
+    const selectedNext = value.next_task === task;
+    const labels: Record<Task, string> = { SHOW_FORWARD: '前进', FACE_LEFT: '左转', FACE_RIGHT: '右转', GREET: '挥手', END_INTERACTION: '结束互动' };
+    button.disabled = controlsPending || !canSubmitTask(value, task);
+    button.classList.toggle('is-active', selectedNext || (!value.closing && value.action_busy === true && value.task === task));
+    button.querySelector('span')!.textContent = labels[task] + (selectedNext ? ' · 待执行' : '');
+    button.title = selectedNext ? '已选择，准备完成后自动执行；结束互动可取消' : value.can_queue_task && task !== 'END_INTERACTION' ? '选择下一动作，准备完成后自动执行' : value.action_busy && task !== 'END_INTERACTION' ? '当前动作结束后可选' : '向脑模型提交互动任务';
   });
   const busy = activeStates.has(value.state);
   const issue = telemetryIssue(value);
@@ -299,7 +303,7 @@ function updateStatus(value: ExperimentStatus): void {
   const activityStatus = activityReadError ? '采集异常' : issue ? summary?.errors.length || summary?.error ? '采集异常' : '记录不完整' : activityDisplay.mode === 'closing' ? '已结束' : activityDisplay.mode === 'waiting' ? value.phase === 'waiting_task' ? '待命' : '等待任务' : !live ? stateLabels[value.state] : current ? brainActive ? timeUnknown ? '时间未知' : stale ? '等待新批次' : '正在更新' : '最后一批' : brainActive ? '等待遥测' : busy ? '等待脑就绪' : '未运行';
   element('brain-state').textContent = activityStatus;
   element('brain-state').classList.toggle('mint', live && !activityReadError && !issue && !timeUnknown && !stale && brainActive && Boolean(current));
-  element('brain-state').title = activityReadError || issue || (!live ? activityDisplay.mode === 'closing' ? '动作已结束；系统确认停稳后可提交下一动作。' : '当前展示 0 Hz 基线，不代表全脑发放率。' : timeUnknown ? '主机时钟暂不可用，无法确认当前同步状态。' : snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `主机取时点的批次年龄 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : '尚无本次控制脑遥测');
+  element('brain-state').title = activityReadError || issue || (!live ? activityDisplay.mode === 'closing' ? '动作已结束，可选择下一动作；准备完成后自动执行。' : '当前展示 0 Hz 基线，不代表全脑发放率。' : timeUnknown ? '主机时钟暂不可用，无法确认当前同步状态。' : snapshot?.transport_delay_ms !== null && snapshot?.transport_delay_ms !== undefined ? `主机取时点的批次年龄 ${(snapshot.transport_delay_ms / 1000).toFixed(2)} 秒；收到时间 ${new Date(snapshot.received_at_ms).toLocaleTimeString('zh-CN')}。显示更新频率不等于脑计算频率。` : '尚无本次控制脑遥测');
   element('brain-state').title += ` ${dataQualitySummary()}`;
   const captureIssue = snapshot?.capture && ['failed', 'incomplete'].includes(snapshot.capture.state) ? `画面采集失败：${snapshot.capture.reason}` : '';
   const videoIssue = snapshot?.video?.state === 'incomplete' ? `视频采集失败：${snapshot.video.reason}` : '';
@@ -374,7 +378,12 @@ function schedulePoll(): void {
 app.querySelectorAll<HTMLButtonElement>('[data-task]').forEach(button => button.addEventListener('click', async () => {
   if (!api || pending || stopPending || !liveStatus.current || !canSubmitTask(liveStatus.current, button.dataset.task as Task)) return;
   const revision = liveStatus.beginChange();
-  clearError(); pending = true; activityDisplay.beginRequest(); clearActivity(); renderStatus();
+  clearError(); pending = true;
+  // Selecting a next action does not submit a new brain request yet.
+  if (!liveStatus.current.can_queue_task || button.dataset.task === 'END_INTERACTION') {
+    activityDisplay.beginRequest(); clearActivity();
+  }
+  renderStatus();
   try { const status = await api.task(button.dataset.task as Task); if (liveStatus.accept(status, revision)) renderStatus(); }
   catch (error) { activityDisplay.cancelRequest(); showError(error); }
   finally { pending = false; renderStatus(); requestPoll(); }

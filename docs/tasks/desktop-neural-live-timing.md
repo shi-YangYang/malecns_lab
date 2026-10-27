@@ -191,3 +191,15 @@ Electron 实测场次 `desktop-20261027-030903-5414144c` 在同一既有 GPU 占
 后续用户再次遇到占用拒绝，进一步核实旧场 `desktop-20261027-015508-021e3892`：其 running 状态文件已过期；脑工作进程记录 `ValueError:Parent lost` 且 PID 已不存在，控制桥记录 `Supervisor heartbeat expired`、terminal=true、motion_state=STOPPED、base_stop_confirmed=true，监督心跳停止超过一小时。本机无该场协调进程，私有容器仅残留该场 Sim/MC 和显示服务。因此此前保留的 GPU 是失去协调进程后的遗留资源，不能仅凭旧 running 文件判断为仍有活动会话。
 
 本轮仅恢复运行环境，不修改业务代码：取得桌面独占锁，复核私有 GPU 的 PID/命令、唯一运行容器和旧场身份后，停止 `malecns-x2-gpu-trial` 并确认 exited，再停止该私有 lighter 并确认无 socket。实际调用现有 `Runtime.preflight()` 已通过，未启动新 VM、脑计算或机器人动作；完整恢复证据为 `logs/gpu-orphan-recovery-20261027.json`。未修改旧场原始记录、默认 Docker context 或 Noria，未提交。此结果证明当前占用已解除，不代表已修复导致旧父进程消失的根因。
+
+### 动作结束后可提前选择下一项（2026-10-27）
+
+当前截图对应的最近场 `desktop-20261027-073822-fcdeeecd`：前进请求 `request-87dbf22132664a1187ceb17985e7680e` 在 676653.267325 开始 closing，676672.736162 完成，共 19.469 秒；三次真实反馈推理各约 5.792/6.696/5.496 秒，并有短暂停稳复核。图表已按用户决定回零，但动作按钮把后台反馈消费与用户选择绑在同一把锁上。
+
+本轮 S2 只调整桌面选择和提交：closing 时允许选择一个下一动作，显示“待执行”；直到同一请求的真实反馈、ACK、停稳完成后才提交给原有脑链路。不得跳过反馈、改神经状态/模型、提前发送运动或把零基线当物理停车证据。停止、结束互动、异常、会话变化取消待执行选择；重复点击不重复发送。验证限定 controller 与 renderer 状态检查及桌面实际交互，不训练、不提交。
+
+实现完成：`controller.mjs` 用绑定 run/request 的单个本地预选槽保存下一动作，对外提供 `can_queue_task/next_task`；只在同请求真实 waiting_task、stop_confirmed、action_busy=false、request_pending=false、active_request_id 清除后自动调用原 task 接口。预选不写入任务邮箱、不启用任务 ACK 计时；正式提交才启用原 ACK 保护。END、停止、拒绝、异常、请求或会话变化清空预选。前端结束时按钮可选，选中项标“待执行”，旧曲线继续保持显示零基线，不接纳旧反馈遥测。
+
+验证：controller 49/49、renderer-status 15/15、桌面 TypeScript 和一次 Vite 生成通过；独立只读审查 PASS，没有重复全量检查。真实 Electron 场 `desktop-20261027-081750-f57cd686` 首次前进完成后，AX 已确认四个普通动作按钮可选、帮助文字为“选择下一动作，准备完成后自动执行”，右侧“已结束、0.0 Hz”。首次截图/点击错过 closing 窗口，下一前进实际在 waiting_task 之后提交，未作为预选自动派发证据；第二请求随后触发 `Request 120 s budget expired`，最终 failed、stop_confirmed=true、resources_stopped=true，原始失败资产保留。未修改模型、时限或反馈消费，因此本次未取得真实机器人自动接续成功的证据。
+
+补充界面验收只回放该场首次请求的真实 closing/waiting 状态，并明确标注“真实结束状态 + 模拟新请求应答，不执行机器人”。直接使用当前 ExperimentController 与已打包页面，点击左转后持续显示“左转 · 待执行”，回放真实就绪事件后原 task 通道恰好发送一条 FACE_LEFT。来源 SHA、状态和唯一命令保存在 `logs/next-action-ui-evidence.json`，截图 `logs/desktop-next-action-reserved-preview.png`，脚本 `logs/next-action-ui-preview.mjs`。此结果证明 UI/控制器交互，不是新的脑计算或物理动作。临时页面与服务已关闭，正式 Electron 保留新版，未提交。

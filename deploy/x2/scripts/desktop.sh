@@ -37,8 +37,9 @@ fi
 
 fluxbox &
 critical_pids+=("$!")
+# Preserve held modifiers for MuJoCo shortcuts (Shift+Tab toggles the right UI).
 x11vnc -display "$DISPLAY" -listen 127.0.0.1 -rfbport 5900 \
-    -forever -shared -nopw &
+    -forever -shared -nopw -nomodtweak &
 critical_pids+=("$!")
 websockify --web=/usr/share/novnc 6080 127.0.0.1:5900 &
 critical_pids+=("$!")

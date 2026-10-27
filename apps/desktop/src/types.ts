@@ -42,6 +42,7 @@ export interface ExperimentStatus {
   message: string; run_id?: string | null; simulator_ready: boolean; motion_started: boolean;
   stop_confirmed: boolean | null; resources_stopped: boolean; request_pending?: boolean;
   action_busy?: boolean; active_request_id?: string | null; request_id?: string | null; closing?: boolean;
+  can_queue_task?: boolean; next_task?: Task | null;
   task?: Task; phase?: string; behavior?: string; reason?: string; notice?: string; qualification_only?: boolean;
   clock_source?: 'python_runtime' | 'desktop_local'; host_clock_id?: string; host_monotonic_ns?: number;
 }
