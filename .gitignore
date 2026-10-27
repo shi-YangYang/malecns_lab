@@ -25,6 +25,7 @@ logs/
 *.log
 demo_log.csv
 *.avi
+*.mov
 *.mp4
 
 # Local WebGL viewer dependencies and exported experiment data.
