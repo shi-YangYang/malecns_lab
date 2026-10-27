@@ -190,8 +190,8 @@ export class BrainView {
           if (r2 > 1.0) discard;
           float soft = exp(-4.5 * r2) - exp(-4.5);
           vec3 base = vec3(0.19, 0.39, 0.51);
-          vec3 active = vec3(0.55, 0.13, 1.0);
-          vec3 color = mix(base, active, smoothstep(0.02, 0.65, energy));
+          vec3 activeColor = vec3(0.55, 0.13, 1.0);
+          vec3 color = mix(base, activeColor, smoothstep(0.02, 0.65, energy));
           float alpha = soft * (0.052 + energy * 0.08) * (0.45 + 0.55 * depth);
           gl_FragColor = vec4(color, alpha);
         }`,
