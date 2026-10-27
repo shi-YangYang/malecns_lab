@@ -456,12 +456,16 @@ def test_host_output_failure_returns_failed_after_verified_cleanup(tmp_path, mon
     assert any("summary_write:" in e for e in result["errors"])
 
 
-def test_host_cleanup_does_not_stop_unowned_resources(tmp_path):
+@pytest.mark.parametrize("stale_preflight_refusal", [False, True])
+def test_host_cleanup_does_not_stop_unowned_resources(tmp_path, stale_preflight_refusal):
     import io
     from malecns_lab.runtime.x2.skills import SkillRuntime
     from malecns_lab.runtime.x2.desktop import Commands
     r = SkillRuntime(tmp_path, tmp_path, Commands(io.StringIO()), lambda event: None)
     r.foreign_resources = True
+    if stale_preflight_refusal:
+        r._preflight_refused_unowned_vm = True
+        r.vm_started = 1.  # A later start invalidates the pre-ownership exemption.
     r.command = lambda *args, **kwargs: pytest.fail("must not stop or inspect unowned resources")
     r.cleanup()
     assert not r.resources_stopped

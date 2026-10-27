@@ -1,10 +1,26 @@
 export interface TelemetryGroup { id: string; name: string; body_ids: string[]; neuron_count: number }
+export interface NeuralStateManifest {
+  schema: 'malecns_lab.neural_state_manifest.v1'; node_count: number; body_ids: string[];
+  body_ids_sha256: string; graph_sha256: string;
+  channels: ['voltage_mean_mv', 'voltage_delta_mean_mv', 'spike_rate_hz']; dtype: 'float32-le';
+  v_rest_mv: number; v_threshold_mv: number; window_steps: 50;
+  baseline: 'request_start_pre_step'; sample: 'post_step_window_mean';
+}
+export interface NeuralStateRef {
+  schema: 'malecns_lab.neural_state_ref.v1'; file: string; bytes: number; sha256: string;
+  body_ids_sha256: string; node_count: number; archived: boolean;
+}
+export interface NeuralStateFrame {
+  batch_sequence: number; run_id: string; execution_id: string; request_id: string | null;
+  body_ids_sha256: string; values: Float32Array;
+}
 export interface TelemetryManifest {
   schema: 'malecns_lab.x2_telemetry_manifest.v1' | 'malecns_lab.x2_behavior_telemetry_manifest.v1'; run_id: string; execution_id: string;
   session_id?: string; input_map_id?: string; policy_id?: string; spike_source?: string;
   checkpoint_id: string; dt_ms: number; groups: TelemetryGroup[];
   selected_neurons: { body_id: string; graph_index: number; group_id: string | null }[];
   reference_output_neuron_count?: number;
+  neural_state?: NeuralStateManifest;
 }
 export interface TelemetryBatch {
   schema: 'malecns_lab.x2_telemetry_batch.v1' | 'malecns_lab.x2_behavior_telemetry_batch.v1'; run_id: string; execution_id: string;
@@ -13,6 +29,7 @@ export interface TelemetryBatch {
   decision_sequence: number | null; step_start: number; step_end: number; dt_ms: number;
   host_monotonic_ns: number; group_rates_hz: number[]; spike_events: { body_id: string; step: number }[];
   dropped_batches: number;
+  neural_state?: NeuralStateRef;
 }
 export interface TelemetrySummary {
   schema: 'malecns_lab.x2_telemetry_summary.v1' | 'malecns_lab.x2_behavior_telemetry_summary.v1'; run_id: string; execution_id: string;
@@ -24,12 +41,12 @@ export interface ExperimentStatus {
   state: 'idle' | 'preparing' | 'awaiting_simulation' | 'running' | 'stopping' | 'completed' | 'cancelled' | 'failed';
   message: string; run_id?: string | null; simulator_ready: boolean; motion_started: boolean;
   stop_confirmed: boolean | null; resources_stopped: boolean; request_pending?: boolean;
-  action_busy?: boolean; active_request_id?: string | null;
-  task?: Task; phase?: string; behavior?: string; reason?: string; qualification_only?: boolean;
+  action_busy?: boolean; active_request_id?: string | null; request_id?: string | null; closing?: boolean;
+  task?: Task; phase?: string; behavior?: string; reason?: string; notice?: string; qualification_only?: boolean;
   clock_source?: 'python_runtime' | 'desktop_local'; host_clock_id?: string; host_monotonic_ns?: number;
 }
 export type Task = 'GREET' | 'FACE_LEFT' | 'FACE_RIGHT' | 'SHOW_FORWARD' | 'END_INTERACTION';
-export interface Snapshot { status: ExperimentStatus; manifest: TelemetryManifest | null; batch: TelemetryBatch | null; summary: TelemetrySummary | null; read_error: string | null; simulation_error: string | null; transport_delay_ms: number | null; transport_clock?: HostClockSample | null; received_at_ms: number; video?: { state: string; reason: string | null; bytes: number; complete: boolean } | null; capture?: { state: string; reason: string | null; frames: number; complete: boolean } | null }
+export interface Snapshot { status: ExperimentStatus; manifest: TelemetryManifest | null; batch: TelemetryBatch | null; summary: TelemetrySummary | null; read_error: string | null; simulation_error: string | null; neural_state?: NeuralStateFrame | null; neural_state_error?: string | null; transport_delay_ms: number | null; transport_clock?: HostClockSample | null; received_at_ms: number; video?: { state: string; reason: string | null; bytes: number; complete: boolean } | null; capture?: { state: string; reason: string | null; frames: number; complete: boolean } | null }
 export interface RecordEntry { id: string; state: string; run_id: string | null; message: string }
 export interface OpenRecord { id: string; session: ExperimentStatus; manifest: TelemetryManifest; summary: TelemetrySummary | null; sequences: number[]; capture: CaptureArchive; video: VideoArchive }
 export interface WorkbenchAPI {

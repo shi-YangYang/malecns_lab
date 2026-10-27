@@ -33,6 +33,7 @@ DEFERRED_NEURAL_REASONS = frozenset((
     'completed_action_request'))
 FINISH_DRAIN_MAX_DECISIONS = 8
 FINISH_DRAIN_SECONDS = 60.
+OBSERVATION_MAX_ATTEMPTS = 3
 SESSION_PROFILES = ('qualification', 'continuous')
 
 
@@ -170,6 +171,15 @@ def fail_request_budget(directory, task, decision_seq, record, phase):
     raise RuntimeError('Request decision budget exhausted without confirmed brain FINISH')
 
 
+class FeedbackTransitExpired(ValueError):
+    """A validated response that is too old to use, not a protocol failure."""
+    def __init__(self, query, packet, elapsed, goal):
+        super().__init__('Feedback age plus transit bound expired')
+        self.nonce, self.request_id = query['nonce'], query['request_id']
+        self.remote_sequence, self.goal = packet['remote_sequence'], goal
+        self.source_age_s, self.round_trip_s = packet['source_age_s'], elapsed
+
+
 class ClockExchange:
     """One-use nonce bounds transit by host RTT; source age remains remote."""
     def __init__(self, run_id, session_id, clock=time.monotonic, *, profile=None):
@@ -205,7 +215,7 @@ class ClockExchange:
             if k == keep_request_id or self.request_sequences.get(k, math.inf) > through_request_sequence}
         self.request_sequences = {k: v for k, v in self.request_sequences.items() if k in self.heading_targets}
 
-    def accept(self, packet):
+    def accept(self, packet, *, validate=None, deadline=None):
         p, now = self.pending, self.clock()
         require(p is not None, 'Observation replay without pending nonce')
         require(packet.get('schema') == SCHEMA and packet.get('kind') == 'observation'
@@ -221,7 +231,6 @@ class ClockExchange:
         age = packet.get('source_age_s')
         require(type(age) in (float, int) and math.isfinite(age) and 0 <= age <= SOURCE_AGE_SECONDS,
                 'Remote original feedback expired')
-        require(age+elapsed <= SOURCE_AGE_SECONDS, 'Feedback age plus transit bound expired')
         require(type(packet.get('request_changed')) is bool
                 and packet['request_changed'] == (p['request_id'] != p['last_consumed_request_id']),
                 'Request edge differs from last neural consumption')
@@ -234,15 +243,30 @@ class ClockExchange:
         goal = heading_goal(target) if target is not None else None
         require(p['request_id'] not in self.heading_targets or self.heading_targets[p['request_id']] == goal,
                 'Heading target moved within request')
-        self.heading_targets[p['request_id']] = goal
+        capabilities = tuple(packet['capabilities'])
+        require(set(str(x) for x in capabilities) <= set(self.capabilities), 'Unqualified capability')
+        require(not self.profile['wave_enabled'] or tuple(map(str, capabilities)) == self.capabilities,
+                'Qualified simulation capability inventory differs')
         feedback = replace(feedback, age_s=age+elapsed)
+        observation = Observation(self.run_id, self.session_id, p['sequence'], p['request_id'], p['task'],
+            now, feedback=feedback, capabilities=capabilities, request_changed=packet['request_changed'])
+        # Complete structural and session-specific checks before considering a
+        # freshness retry. Validation must not consume this nonce or any event.
+        if validate is not None:
+            validate(observation, packet)
+        # Protocol validation also takes time. It cannot renew the original
+        # sample's age, RTT, or the shared deadline across refresh attempts.
+        now = self.clock()
+        elapsed = now-p['host_sent_monotonic']
+        if deadline is not None and now >= deadline:
+            raise TimeoutError('Remote observation timed out')
+        require(0 <= elapsed <= ROUND_TRIP_SECONDS, 'Observation round trip expired')
+        if age+elapsed > SOURCE_AGE_SECONDS:
+            raise FeedbackTransitExpired(p, packet, elapsed, goal)
+        observation = replace(observation, received_monotonic=now, feedback=replace(feedback, age_s=age+elapsed))
+        self.heading_targets[p['request_id']] = goal
         self.pending = None
         self.last_remote_sequence = packet['remote_sequence']
-        observation = Observation(self.run_id, self.session_id, p['sequence'], p['request_id'], p['task'],
-            now, feedback=feedback, capabilities=tuple(packet['capabilities']), request_changed=packet['request_changed'])
-        require(set(str(x) for x in observation.capabilities) <= set(self.capabilities), 'Unqualified capability')
-        require(not self.profile['wave_enabled'] or tuple(map(str, observation.capabilities)) == self.capabilities,
-                'Qualified simulation capability inventory differs')
         evidence = dict(nonce=p['nonce'], host_sent_monotonic=p['host_sent_monotonic'],
             host_received_monotonic=now, round_trip_upper_s=elapsed, source_age_s=age,
             remote_issued_monotonic=packet['remote_issued_monotonic'], remote_sequence=packet['remote_sequence'],
@@ -251,6 +275,57 @@ class ClockExchange:
             runtime_context=deepcopy(packet.get('runtime_context')),
             sampled_remote_monotonic=packet.get('sampled_remote_monotonic'))
         return observation, evidence
+
+    def discard_expired(self, error):
+        """Retire one validated nonce without consuming neural inputs/events.
+
+        Keep its original heading goal and remote sequence watermark, so a retry
+        cannot rebase the turn or accept a replay of the discarded response.
+        """
+        require(isinstance(error, FeedbackTransitExpired) and self.pending is not None
+                and self.pending['nonce'] == error.nonce, 'Expired response is not pending')
+        self.heading_targets[error.request_id] = error.goal
+        self.last_remote_sequence = error.remote_sequence
+        self.pending = None
+
+
+def fresh_observation(exchange, directory, request, *, after_event_seq, last_consumed_request_id,
+                      request_sequence, closed_request_ack, guard, record, sleep=time.sleep, validate=None):
+    """Refresh only valid-but-transit-expired feedback within one original budget."""
+    deadline = exchange.clock() + ROUND_TRIP_SECONDS
+    for attempt in range(1, OBSERVATION_MAX_ATTEMPTS + 1):
+        guard()
+        if exchange.clock() >= deadline:
+            raise TimeoutError('Remote observation timed out')
+        query = exchange.request(request['task'], request['request_id'], after_event_seq,
+            last_consumed_request_id=last_consumed_request_id, request_sequence=request_sequence,
+            closed_request_ack=closed_request_ack)
+        atomic(directory/'observation_request.json', query)
+        while exchange.clock() < deadline:
+            guard()
+            path = directory/'observation_response.json'
+            if path.exists():
+                packet = read_json(path)
+                if packet.get('nonce') == query['nonce']:
+                    if exchange.clock() >= deadline:
+                        raise TimeoutError('Remote observation timed out')
+                    try:
+                        observation, clocks = exchange.accept(packet, validate=validate, deadline=deadline)
+                    except FeedbackTransitExpired as error:
+                        exchange.discard_expired(error)
+                        remaining = max(0., deadline-exchange.clock())
+                        record('observation_discarded', reason='feedback_transit_expired',
+                            request_id=request['request_id'], nonce=error.nonce,
+                            remote_sequence=error.remote_sequence, source_age_s=error.source_age_s,
+                            round_trip_upper_s=error.round_trip_s, attempt=attempt,
+                            remaining_budget_s=remaining, retry=attempt < OBSERVATION_MAX_ATTEMPTS and remaining > 0.)
+                        if attempt == OBSERVATION_MAX_ATTEMPTS or remaining <= 0.:
+                            raise TimeoutError('机器人反馈连续过期，未使用过期数据；已停止本次验证') from error
+                        break
+                    return observation, clocks, packet
+            sleep(min(.02, max(0., deadline-exchange.clock())))
+        else:
+            raise TimeoutError('Remote observation timed out')
 
 
 def host_event(value, run_id, session_id, received):
@@ -261,6 +336,24 @@ def host_event(value, run_id, session_id, received):
     raw = dict(event.raw_feedback, remote_received_monotonic=event.received_monotonic,
                remote_clock_domain='linux_bridge_monotonic', host_received_monotonic=received)
     return replace(event, received_monotonic=received, raw_feedback=raw)
+
+
+def validate_runtime_context(value):
+    """Check the factual protection projection without recording or consuming it."""
+    from ..control.x2_behavior import ExecutionStatus
+    require(isinstance(value, dict) and value.get('protection_state') in ('READY','RECOVERING','LATCHED')
+            and type(value.get('event_sequence')) is int and value['event_sequence'] >= -1
+            and isinstance(value.get('facts'), dict), 'Missing real runtime protection/event context')
+    facts = value['facts']
+    readiness = ('source_registered','armed','stable_preparation_completed','fresh_body','ownership_supported')
+    require(all(type(facts.get(key)) is bool for key in readiness)
+            and isinstance(facts.get('failures'), list)
+            and all(isinstance(failure, str) and failure for failure in facts['failures'])
+            and facts.get('core_status') in tuple(str(status) for status in ExecutionStatus),
+            'Invalid runtime protection facts')
+    expected = ('LATCHED' if facts['failures'] or facts['core_status'] in ('UNKNOWN','FAILED') else
+                'READY' if all(facts[key] for key in readiness) else 'RECOVERING')
+    require(value['protection_state'] == expected, 'Runtime protection differs from recorded facts')
 
 
 class NeuralSession:
@@ -351,17 +444,26 @@ class NeuralSession:
                 request_id=event.request_id, execution_id=event.execution_id,
                 decision_seq=event.decision_seq, behavior=event.behavior, event=event.to_dict()))
 
+    def validate_snapshot(self, observation, packet):
+        """Validate a mailbox response on a detached gate; never consume facts."""
+        if hasattr(self.policy, 'set_runtime_context'):
+            validate_runtime_context(packet.get('runtime_context'))
+        require(isinstance(packet.get('events'), list) and len(packet['events']) <= 512,
+                'Missing or oversized execution event list')
+        # DecisionGate contains protocol records only, never a policy or neural
+        # tensors. Continuous sessions retire these maps at each closure ACK.
+        gate = deepcopy(self.gate)
+        for raw in packet['events']:
+            event = host_event(raw, observation.run_id, observation.session_id, observation.received_monotonic)
+            gate.execution_event(event)
+        if hasattr(self.policy, 'set_runtime_context'):
+            require(packet['runtime_context']['event_sequence'] == gate.last_event_seq,
+                    'Runtime event watermark differs from observed events')
+
     def runtime_context(self, observation, value):
         if not hasattr(self.policy, 'set_runtime_context'):
             return
-        require(isinstance(value, dict) and value.get('protection_state') in ('READY','RECOVERING','LATCHED')
-                and type(value.get('event_sequence')) is int and value['event_sequence'] >= -1
-                and isinstance(value.get('facts'), dict), 'Missing real runtime protection/event context')
-        facts = value['facts']
-        expected = ('LATCHED' if facts['failures'] or facts['core_status'] in ('UNKNOWN','FAILED') else
-                    'READY' if all(facts[k] for k in ('source_registered','armed','stable_preparation_completed',
-                                                    'fresh_body','ownership_supported')) else 'RECOVERING')
-        require(value['protection_state'] == expected, 'Runtime protection differs from recorded facts')
+        validate_runtime_context(value)
         self.runtime_contexts[observation.observation_seq] = deepcopy(value)
         while len(self.runtime_contexts) > 32:
             del self.runtime_contexts[next(iter(self.runtime_contexts))]
@@ -796,34 +898,24 @@ def run_worker(directory):
 
             def snapshot(request, *, gate_purpose=None):
                 nonlocal last_event
-                query = exchange.request(request['task'], request['request_id'], last_event,
+                observation, clocks, packet = fresh_observation(exchange, directory, request, after_event_seq=last_event,
                     last_consumed_request_id=session.last_consumed_request_id,
                     request_sequence=request['sequence'] if continuous else None,
-                    closed_request_ack=closed_request_ack)
-                atomic(directory/'observation_request.json', query)
-                end = time.monotonic()+ROUND_TRIP_SECONDS
-                while time.monotonic() < end:
-                    guard()
-                    path = directory/'observation_response.json'
-                    if path.exists():
-                        packet = read_json(path)
-                        if packet.get('nonce') == query['nonce']:
-                            observation, clocks = exchange.accept(packet)
-                            session.runtime_context(observation, clocks['runtime_context'])
-                            session.heading_evidence(observation, clocks['heading_target'])
-                            for raw in packet['events']:
-                                event = host_event(raw, reg['run_id'], reg['session_id'], time.monotonic())
-                                session.execution_event(event)
-                                last_event = event.event_seq
-                                record('execution', event=event.to_dict())
-                            record('observation_clocks', observation_seq=observation.observation_seq, **clocks)
-                            if continuous and closed_request_ack is not None:
-                                exchange.retire_requests(closed_request_ack['request_sequence'], request['request_id'])
-                            if gate_purpose is not None:
-                                session.record_gate_refresh(observation, purpose=gate_purpose)
-                            return observation, clocks
-                    time.sleep(.02)
-                raise TimeoutError('Remote observation timed out')
+                    closed_request_ack=closed_request_ack, guard=guard, record=record,
+                    validate=session.validate_snapshot)
+                session.runtime_context(observation, clocks['runtime_context'])
+                session.heading_evidence(observation, clocks['heading_target'])
+                for raw in packet['events']:
+                    event = host_event(raw, reg['run_id'], reg['session_id'], time.monotonic())
+                    session.execution_event(event)
+                    last_event = event.event_seq
+                    record('execution', event=event.to_dict())
+                record('observation_clocks', observation_seq=observation.observation_seq, **clocks)
+                if continuous and closed_request_ack is not None:
+                    exchange.retire_requests(closed_request_ack['request_sequence'], request['request_id'])
+                if gate_purpose is not None:
+                    session.record_gate_refresh(observation, purpose=gate_purpose)
+                return observation, clocks
 
             def close_request(decision):
                 nonlocal closed_request_ack, finished_request

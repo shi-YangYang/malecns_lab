@@ -3,7 +3,8 @@ import { open, realpath } from 'node:fs/promises';
 
 export const SIMULATION_URL = 'http://127.0.0.1:6081/vnc.html?autoconnect=true&resize=scale';
 export const MAX_JSON_BYTES = 256 * 1024;
-export const MAX_MANIFEST_BYTES = 1024 * 1024;
+// Full-neuron telemetry adds a validated 166,700-ID ordering to the manifest.
+export const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 export const MAX_ARCHIVE_BYTES = 16 * 1024 * 1024;
 export const TERMINAL_STATES = new Set(['completed', 'cancelled', 'failed']);
 export const STATES = new Set(['preparing', 'awaiting_simulation', 'running', 'stopping', ...TERMINAL_STATES]);

@@ -35,6 +35,16 @@ test('shutdown waits for runtime resource confirmation and actual child exit', (
   controller.prepare(); controller.stop(); send(child, status(controller, 'cancelled', { resources_stopped: true }));
   assert.equal(controller.safeToClose, false); child.emit('exit', 0, null); assert.equal(controller.safeToClose, true);
 });
+for (const resources_stopped of [false, true]) test(`failed GPU ownership preflight only permits close after confirmed cleanup (${resources_stopped})`, () => {
+  const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
+  controller.prepare();
+  send(child, status(controller, 'failed', { resources_stopped, foreign_resources: true,
+    reason: 'GPU 仿真环境已被其他会话占用，本次未接管' }));
+  assert.equal(controller.safeToClose, false);
+  child.emit('exit', 1, null);
+  assert.equal(controller.state.state, 'failed');
+  assert.equal(controller.safeToClose, resources_stopped);
+});
 test('malformed status requests safe stop, rather than killing child or accepting unsafe success', () => {
   const child = fakeChild(), controller = new ExperimentController('/test/repo', () => {}, () => child);
   controller.prepare(); send(child, { schema: 'wrong', state: 'completed' });

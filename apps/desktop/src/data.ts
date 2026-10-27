@@ -1,6 +1,12 @@
 import type { Atlas } from '../../atlas/src/types';
 import type { TelemetryBatch, TelemetryManifest, CaptureArchive, CaptureReplay, CaptureFrame, ReplayEntry, OpenRecord } from './types';
 
+// Overview averages the recorded group rates, not unique cells or the full brain.
+export function groupActivityRate(rates: number[] | null, groupIndex: number | null): number | undefined {
+  if (!rates?.length) return undefined;
+  return groupIndex === null ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : rates[groupIndex];
+}
+
 export async function loadAtlas(): Promise<Atlas> {
   const response = await fetch('./prototype/data/atlas.json');
   if (!response.ok) throw new Error('本地胞体图谱缺失，请恢复 atlas 导出后重新构建。');

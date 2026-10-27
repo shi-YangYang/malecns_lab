@@ -160,6 +160,7 @@ class Runtime:
         self.vm_stopped = None
         self.owns_vm = self.owns_container = False
         self.foreign_resources = False
+        self._preflight_refused_unowned_vm = False
         self.host = self.bridge = None
         self.run_id = None
         self.simulator_ready = self.motion_started = self.resources_stopped = False
@@ -178,6 +179,7 @@ class Runtime:
                    "output": str(self.output), "run_id": self.run_id,
                    "simulator_ready": self.simulator_ready, "motion_started": self.motion_started,
                    "stop_confirmed": self.stop_confirmed, "resources_stopped": self.resources_stopped,
+                   "foreign_resources": self.foreign_resources,
                    "host_monotonic_ns": time.monotonic_ns(), **fields}
         if self.output.exists():
             temporary = self.output / ("desktop_session." + uuid.uuid4().hex + ".tmp")
@@ -264,8 +266,20 @@ class Runtime:
         status = self.command([str(self.runtime / "bin/lighter"), "status"], check=False)
         if "lighter is not running." not in status.stdout + status.stderr or (self.runtime / "docker.sock").exists():
             self.foreign_resources = True
-            raise RuntimeError("GPU VM must already be stopped; refusing to take ownership")
+            self._preflight_refused_unowned_vm = (
+                self.vm_started is None and not self.owns_vm and not self.owns_container
+                and not self.bridge_started and not self.motion_started and not self.simulator_ready)
+            raise RuntimeError("GPU 仿真环境已被其他会话占用，本次未接管，请等待该会话结束")
         self.default_context = self.command(["docker", "context", "show"]).stdout.strip()
+
+    def _gpu_resources_released(self):
+        # An untouched VM rejected before ownership belongs to another session.
+        # A conflict discovered after our VM start is deliberately not exempt.
+        untouched_refusal = (self._preflight_refused_unowned_vm and self.vm_started is None
+                             and not self.bridge_started and not self.motion_started
+                             and not self.simulator_ready)
+        return (not self.owns_vm and not self.owns_container
+                and (not self.foreign_resources or untouched_refusal))
 
     def spawn(self, args, name, environment=None):
         stream = (self.log_directory / name).open("x")
@@ -530,7 +544,7 @@ class Runtime:
             self.errors.append("host_cleanup:" + str(error))
         if self.bridge is not None and self.bridge.poll() is None:
             self._kill_command(self.bridge)
-        self.resources_stopped = clean and not self.owns_vm and not self.owns_container and not self.foreign_resources
+        self.resources_stopped = clean and self._gpu_resources_released()
         if self.resources_stopped:
             self.simulator_ready = False
         for stream in self.logs:

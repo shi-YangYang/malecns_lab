@@ -9,14 +9,15 @@ from types import SimpleNamespace
 import pytest
 
 from malecns_lab.runtime.x2 import desktop
+from malecns_lab.runtime.x2.skills import SkillRuntime
 
 
-def make_runtime(tmp_path):
+def make_runtime(tmp_path, runtime_type=desktop.Runtime):
     root = tmp_path
     (root / "data").mkdir(exist_ok=True)
     output = root / "data/x2_sim/agibot/data/var/desktop-20261023-120000-1234abcd"
     events = []
-    runtime = desktop.Runtime(output, root, desktop.Commands(io.StringIO()), events.append)
+    runtime = runtime_type(output, root, desktop.Commands(io.StringIO()), events.append)
     runtime.log_directory = root / "logs"
     runtime.log_directory.mkdir()
     return runtime, events
@@ -84,19 +85,30 @@ def test_low_reserve_and_parent_loss_abort_before_launch(tmp_path, monkeypatch):
         runtime.guard()
 
 
-def test_running_vm_is_never_adopted_or_stopped(tmp_path, monkeypatch):
-    runtime, _ = make_runtime(tmp_path)
+@pytest.mark.parametrize("runtime_type", [desktop.Runtime, SkillRuntime])
+@pytest.mark.parametrize("host_cleanup_failed", [False, True])
+def test_running_vm_is_never_adopted_or_stopped(tmp_path, monkeypatch, runtime_type, host_cleanup_failed):
+    runtime, events = make_runtime(tmp_path, runtime_type)
     calls = []
     monkeypatch.setattr(runtime, "guard", lambda: None)
     def command(args, **kwargs):
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "lighter is running", "")
     monkeypatch.setattr(runtime, "command", command)
-    with pytest.raises(RuntimeError, match="already be stopped"):
-        runtime.preflight()
-    runtime.cleanup()
+    # This can be the second preflight, after the owned brain host has started.
+    runtime.host = SimpleNamespace(poll=lambda: None if host_cleanup_failed else 0)
+    def stop_host():
+        if host_cleanup_failed:
+            raise RuntimeError("Owned host did not exit")
+    monkeypatch.setattr(runtime, "stop_host", stop_host)
+    result = runtime.execute(runtime.log_directory)
+    assert result["state"] == events[-1]["state"] == "failed"
+    assert "其他会话占用，本次未接管" in result["reason"]
     assert len(calls) == 1 and calls[0][-1] == "status"
-    assert not runtime.resources_stopped and not runtime.owns_vm
+    assert runtime.resources_stopped is (not host_cleanup_failed)
+    assert runtime.foreign_resources and not runtime.owns_vm and not runtime.owns_container
+    assert runtime.vm_started is None and runtime.stop_confirmed is None
+    assert events[-1]["foreign_resources"] is True
 
 
 def test_stopped_gpu_preflight_does_not_require_retired_cpu_container(tmp_path, monkeypatch):

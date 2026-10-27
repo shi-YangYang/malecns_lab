@@ -26,9 +26,18 @@ try {
     if (!/^[a-z0-9-]+\.(json|f32|u32|u16)$/.test(name)) throw new Error('展示资产文件名无效');
     await copyFile(path.join(structureSource, name), path.join(target, 'brain', name));
   }
-  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify({ schema: 'malecns_lab.desktop.assets.v1', assets: ['data/atlas.json', 'data/atlas-source.json', ...names.map(name => `brain/${name}`)] }, null, 2)}\n`);
-  process.stdout.write('已准备真实胞体、突触抽样、连接示意和历史电流片段。\n');
+  const activitySource = path.resolve(app, '../../data/brain_activity_edges_v1/activity-edges.json');
+  const activity = JSON.parse(await readFile(activitySource, 'utf8'));
+  if (activity.schema !== 'malecns_lab.activity_edges.v1' || activity.graph_sha256 !== structure.provenance.graph_sha256 || activity.centers_sha256 !== structure.files['centers.f32'].sha256) throw new Error('活动连接资产与三维结构身份不一致');
+  await copyFile(activitySource, path.join(target, 'brain/activity-edges.json'));
+  const coverageSource = path.resolve(app, '../../data/brain_neuron_coverage_v1');
+  const coverage = JSON.parse(await readFile(path.join(coverageSource, 'coverage.json'), 'utf8'));
+  if (coverage.schema !== 'malecns_lab.neuron_coverage.v1' || coverage.node_count !== structure.node_count || coverage.positioned_count !== structure.node_count || coverage.graph_sha256 !== structure.provenance.graph_sha256) throw new Error('全脑补充坐标与连接组身份不一致');
+  const coverageNames = ['coverage.json', 'coverage-points.f32', 'coverage-owners.u32'];
+  for (const name of coverageNames) await copyFile(path.join(coverageSource, name), path.join(target, 'brain', name));
+  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify({ schema: 'malecns_lab.desktop.assets.v1', assets: ['data/atlas.json', 'data/atlas-source.json', ...names.map(name => `brain/${name}`), 'brain/activity-edges.json', ...coverageNames.map(name => `brain/${name}`)] }, null, 2)}\n`);
+  process.stdout.write('已准备全脑真实坐标、突触抽样、连接示意和历史电流片段。\n');
 } catch (error) {
-  process.stderr.write(`无法准备图谱：${error.message}\n请恢复现有 atlas 与 data/brain_visualization_v1 导出；不会生成替代数据。\n`);
+  process.stderr.write(`无法准备图谱：${error.message}\n请恢复现有 atlas、data/brain_visualization_v1、data/brain_activity_edges_v1 与 data/brain_neuron_coverage_v1 导出；使用 scripts/export-activity-edges.py 和 scripts/export-neuron-coverage.py 从原始数据导出，不会生成替代坐标。\n`);
   process.exitCode = 1;
 }

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { readVideoArchive } from './video.mjs';
+import { NeuralStateReader } from './neural-state.mjs';
 import { readCaptureArchive, readCapturedFrame, readCapturedBatch, validateClockSample, CLOCK_SCHEMA, CLOCK_TIMEOUT_MS, CAPTURE_LIMITS } from './recording.mjs';
 import { JsonLineReader, MAX_ARCHIVE_BYTES, MAX_MANIFEST_BYTES, STATES, TERMINAL_STATES, readBoundedJson, recordIdAllowed } from './boundaries.mjs';
 
@@ -20,6 +21,7 @@ export class ExperimentController {
     this.output = null;
     this.state = { state: 'idle', mode: 'brain_control', brain_controlled: false, message: '未运行', simulator_ready: false, motion_started: false, stop_confirmed: null, resources_stopped: true };
     this.cached = null; this.lastRead = 0; this.reading = null; this.stderr = '';
+    this.neuralStateReader = new NeuralStateReader();
   }
   notify() { this.cached = null; this.onChange(this.state); }
   prepare() {
@@ -226,12 +228,17 @@ export class ExperimentController {
     if (this.cached && Date.now() - this.lastRead < 250) return this.cached;
     this.reading = (async () => {
       let manifest = null, batch = null, summary = null, readError = null;
+      let neuralState = null, neuralStateError = null;
       if (this.output) {
         try {
           manifest = await this.optionalJson(this.output, 'telemetry/manifest.json', MAX_MANIFEST_BYTES);
           batch = await this.optionalJson(this.output, 'telemetry/latest.json');
           summary = await this.optionalJson(this.output, 'telemetry/summary.json');
         } catch (error) { readError = error.message; }
+        if (manifest && !readError) {
+          try { neuralState = await this.neuralStateReader.read(this.output, manifest, batch); }
+          catch (error) { neuralStateError = error.message; }
+        }
       }
       let delayMs = null, clockSample = null;
       if (batch && Number.isSafeInteger(batch.host_monotonic_ns) && batch.host_monotonic_ns >= 0) {
@@ -241,7 +248,7 @@ export class ExperimentController {
           if (age >= 0n) delayMs = Number(age) / 1e6;
         } catch { /* Unknown clock means unknown age, never zero or a guessed offset. */ }
       }
-      this.cached = { status: this.state, manifest, batch, summary, read_error: readError ?? this.protocolError ?? null, transport_delay_ms: delayMs, transport_clock: clockSample, received_at_ms: Date.now() };
+      this.cached = { status: this.state, manifest, batch, summary, neural_state: neuralState, neural_state_error: neuralStateError, read_error: readError ?? this.protocolError ?? null, transport_delay_ms: delayMs, transport_clock: clockSample, received_at_ms: Date.now() };
       this.lastRead = Date.now();
       return this.cached;
     })();

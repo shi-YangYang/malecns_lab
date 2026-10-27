@@ -173,7 +173,7 @@ class SpikeTelemetry:
             _require(step_end == self._step_start + self._count, "Telemetry flush step differs")
             sums = self._device_counts.new_zeros(len(self.manifest["groups"]))
             sums.index_add_(0, self._device_groups, self._device_counts.index_select(0, self._device_members))
-            packed = torch.cat((sums, self._device_spikes[:self._count].flatten()))
+            packed = torch.cat((sums, self._device_spikes[:self._count].flatten(), *self._extra_device_values()))
             # One CPU transfer per batch; no .item(), .tolist() or CPU copy in capture.
             values = packed.detach().cpu().numpy().copy()
             self.produced_batches += 1
@@ -186,6 +186,7 @@ class SpikeTelemetry:
             except Full:
                 self.dropped_batches += 1
             self._device_counts.zero_()
+            self._clear_extra_values()
             self._count = 0
         except Exception as error:
             self._fail(error)
@@ -198,13 +199,27 @@ class SpikeTelemetry:
         seconds = steps * self.manifest["dt_ms"] / 1000
         record["group_rates_hz"] = [float(values[index]) / group["neuron_count"] / seconds
                                     for index, group in enumerate(self.manifest["groups"])]
-        selected = values[count:].reshape(steps, len(self._selected))
+        selected_end = count + steps * len(self._selected)
+        selected = values[count:selected_end].reshape(steps, len(self._selected))
         _require(np.isin(selected, (0., 1.)).all(), "Telemetry spike tensor is not binary")
         record["spike_events"] = [{"body_id": self.manifest["selected_neurons"][column]["body_id"],
                                     "step": record["step_start"] + int(offset)}
                                    for offset, column in zip(*np.nonzero(selected))]
         record["dropped_batches"] = self.dropped_batches
+        self._write_extra_values(record, values[selected_end:])
         return record
+
+    def _extra_device_values(self):
+        return ()
+
+    def _clear_extra_values(self):
+        pass
+
+    def _write_extra_values(self, record, values):
+        _require(len(values) == 0, "Unexpected additional telemetry values")
+
+    def _extra_storage_bytes(self):
+        return 0
 
     def _archive_batch(self, record, content):
         # Reserve room for the live snapshot and summary in the same budget.
@@ -255,7 +270,7 @@ class SpikeTelemetry:
                 "complete": self._closed and status == "completed" and self.error is None and self.dropped_batches == 0
                             and self._count == 0 and self.written_batches == self.produced_batches,
                 "partial_batch_steps": self._count, "archive_bytes": self.archive_bytes,
-                "total_bytes": self.archive_bytes + self._latest_bytes + self._summary_bytes,
+                "total_bytes": self.archive_bytes + self._latest_bytes + self._summary_bytes + self._extra_storage_bytes(),
                 "host_monotonic_ns": time.monotonic_ns()}
 
     def _write_summary(self, status):
@@ -263,7 +278,7 @@ class SpikeTelemetry:
         # Include the size of this summary itself; the decimal length stabilizes.
         for _ in range(4):
             content = _encoded(summary)
-            total = self.archive_bytes + self._latest_bytes + len(content)
+            total = self.archive_bytes + self._latest_bytes + len(content) + self._extra_storage_bytes()
             if summary["total_bytes"] == total:
                 break
             summary["total_bytes"] = total

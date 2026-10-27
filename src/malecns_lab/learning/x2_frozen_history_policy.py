@@ -282,7 +282,7 @@ def load_frozen_readouts(root, path):
 
 @contextmanager
 def capture_actual_steps(owner, name, telemetry):
-    """Observe the exact spikes returned by this instance; never recompute."""
+    """Observe this instance's actual post-reset states/spikes; never recompute."""
     if telemetry is None:
         yield
         return
@@ -290,7 +290,10 @@ def capture_actual_steps(owner, name, telemetry):
     had_own = name in vars(owner)
     def observed(*args, **kwargs):
         result = original(*args, **kwargs)
-        telemetry.capture(result[3], args[1].step)
+        if hasattr(telemetry, 'capture_state'):
+            telemetry.capture_state(result[3], args[1], result[0])
+        else:
+            telemetry.capture(result[3], args[1].step)
         if result[0].step % 50 == 0:
             telemetry.flush(result[0].step)
             require(getattr(telemetry, "error", None) is None, "Actual spike telemetry failed")
@@ -347,6 +350,7 @@ class HistoryOutput:
 
 class FrozenHistoryPolicy:
     frame_steps, precondition_steps = 500, 600
+    telemetry_neural_state = True
     telemetry_spike_source = ("actual same-instance PrefixEngine kernel._advance spikes; "
         "precondition from the same base._step; no cache/reconstructed spike stream")
 

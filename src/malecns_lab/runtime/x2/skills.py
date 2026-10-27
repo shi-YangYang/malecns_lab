@@ -166,8 +166,7 @@ class SkillRuntime(desktop.Runtime):
         except BaseException as error:
             children_stopped = False
             self.errors.append("probe_cleanup:" + repr(error))
-        self.resources_stopped = (children_stopped and not self.owns_vm and not self.owns_container
-                                  and not self.foreign_resources)
+        self.resources_stopped = children_stopped and self._gpu_resources_released()
         if self.resources_stopped:
             self.simulator_ready = False
         for stream in self.logs:

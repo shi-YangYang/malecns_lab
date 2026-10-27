@@ -430,7 +430,7 @@ class BehaviorRuntime(SkillRuntime):
         self.resource_stream.write('wall_seconds,brain_rss_bytes,system_available_bytes\n')
         self.logs.append(self.resource_stream)
         sources = source_inventory(self.root)
-        for name in (*TRANSPORT,'learning/x2_behavior_telemetry.py','learning/x2_telemetry.py',
+        for name in (*TRANSPORT,'learning/x2_behavior_telemetry.py','learning/x2_telemetry.py','learning/x2_neural_state.py',
                      'learning/x2_interaction_policy.py','learning/x2_interaction_paired_policy.py',
                      'learning/x2_sim_execution_policy.py','learning/x2_frozen_history_policy.py','senses/x2_relative_heading.py',
                      'runtime/__init__.py','runtime/x2/__init__.py',

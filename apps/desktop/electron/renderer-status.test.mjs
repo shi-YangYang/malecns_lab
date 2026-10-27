@@ -5,8 +5,121 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/live-status.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-const { LiveStatus, canEmergencyStop, canSubmitTask, startAction } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { ActivityDisplay, LiveStatus, canEmergencyStop, canSubmitTask, startAction } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const status = state => ({ state, resources_stopped: state === 'idle' });
+const dataSource = await readFile(new URL('../src/data.ts', import.meta.url), 'utf8');
+const dataModule = ts.transpileModule(dataSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
+const { groupActivityRate, validBatch } = await import(`data:text/javascript;base64,${Buffer.from(dataModule.outputText).toString('base64')}`);
+const brainSource = await readFile(new URL('../src/brain-data.ts', import.meta.url), 'utf8');
+const brainModule = ts.transpileModule(brainSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
+const { validateBrainGraphInfo } = await import(`data:text/javascript;base64,${Buffer.from(brainModule.outputText).toString('base64')}`);
+
+const active = (request = 'request-a', fields = {}) => ({ state: 'running', mode: 'brain_control', brain_controlled: true, run_id: 'run-a', active_request_id: request, request_id: request, phase: 'computing', ...fields });
+const batchFor = (request = 'request-a', fields = {}) => ({ run_id: 'run-a', request_id: request, phase: 'forward', group_rates_hz: [7, 11], ...fields });
+
+test('activity display freezes real values when action completion begins feedback processing', () => {
+  const display = new ActivityDisplay();
+  assert.equal(display.update(active()), true);
+  const history = [];
+  const receive = batch => { if (display.accepts(batch)) history.push(batch); };
+  receive(batchFor());
+  display.update(active('request-a', { phase: 'executing' }));
+  receive(batchFor('request-a', { group_rates_hz: [9, 13] }));
+  assert.equal(history.length, 2);
+  display.update(active('request-a', { closing: true }));
+  assert.equal(display.mode, 'closing');
+  receive(batchFor('request-a', { group_rates_hz: [12, 16] }));
+  // A later notification without closing must not reopen this request.
+  display.update(active());
+  assert.equal(display.mode, 'closing');
+  display.update(active(null, { phase: 'waiting_task', request_id: 'request-a' }));
+  assert.equal(display.mode, 'waiting');
+  receive(batchFor('request-a', { group_rates_hz: [0, 0] }));
+  assert.equal(history.length, 2);
+  assert.deepEqual(history.at(-1).group_rates_hz, [9, 13]);
+});
+
+test('activity display isolates the next request from latest completion feedback', () => {
+  const display = new ActivityDisplay();
+  display.update(active());
+  display.update(active('request-a', { closing: true }));
+  display.update(active(null, { phase: 'waiting_task' }));
+  display.beginRequest();
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(display.update(active('request-b', { phase: 'queued' })), true);
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(display.accepts(batchFor('request-b')), true);
+});
+
+test('activity display blocks interrupted telemetry while END awaits its new request id', () => {
+  const display = new ActivityDisplay();
+  display.update(active('request-a', { phase: 'executing' }));
+  display.beginRequest();
+  display.update(active('request-a', { phase: 'queued', request_pending: true, task: 'END_INTERACTION' }));
+  assert.equal(display.mode, 'waiting');
+  assert.equal(display.accepts(batchFor()), false);
+  display.update(active('request-end', { phase: 'queued', task: 'END_INTERACTION' }));
+  assert.equal(display.mode, 'active');
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(display.accepts(batchFor('request-end')), true);
+});
+
+test('activity display admits initialization only in its phase and rejects stale run and execution identities', () => {
+  const display = new ActivityDisplay();
+  display.update(active(null, { phase: 'initializing' }));
+  assert.equal(display.accepts(batchFor(null, { phase: 'precondition' })), true);
+  display.update(active(null, { phase: 'waiting_task' }));
+  assert.equal(display.accepts(batchFor(null, { phase: 'precondition' })), false);
+  display.update(active());
+  assert.equal(display.accepts(batchFor('request-a', { run_id: 'old-run' })), false);
+  const manifest = { schema: 'malecns_lab.x2_behavior_telemetry_manifest.v1', run_id: 'run-a', execution_id: 'execution-a', session_id: 'session-a', checkpoint_id: 'checkpoint-a', input_map_id: 'input-a', selected_neurons: [], groups: [{ id: 'input' }], dt_ms: .1 };
+  const batch = batchFor('request-a', { schema: 'malecns_lab.x2_behavior_telemetry_batch.v1', execution_id: 'old-execution', session_id: 'session-a', checkpoint_id: 'checkpoint-a', input_map_id: 'input-a', decision_sequence: 1, batch_sequence: 1, step_start: 0, step_end: 50, dt_ms: .1, group_rates_hz: [5], spike_events: [] });
+  assert.equal(display.accepts(batch), true);
+  assert.equal(validBatch(batch, manifest), false);
+  display.reset();
+  assert.equal(display.accepts(batchFor()), false);
+  assert.equal(display.requestId, null);
+  display.update(active('request-b', { run_id: 'run-b' }));
+  assert.equal(display.accepts(batchFor()), false);
+});
+
+test('activity display resumes the authoritative request after submission rejection and freezes on stop', () => {
+  const display = new ActivityDisplay();
+  display.update(active());
+  display.beginRequest();
+  display.update(active('request-a', { notice: 'request_rejected' }));
+  assert.equal(display.accepts(batchFor()), true);
+  display.update(active('request-a', { state: 'stopping' }));
+  assert.equal(display.accepts(batchFor()), false);
+});
+
+test('brain info uses full graph counts with matching atlas and display identity', () => {
+  const graph = { node_count: 166700, edge_count: 25582938, graph_sha256: 'a'.repeat(64) };
+  const source = { schema: 'malecns_lab.atlas.v1', graph };
+  const display = { node_count: 166700, edges: [[1, 2, 3]], provenance: { graph_sha256: graph.graph_sha256 } };
+  assert.deepEqual(validateBrainGraphInfo(source, 166700, display), graph);
+  assert.throws(() => validateBrainGraphInfo(source, 166699, display), /身份不匹配/);
+  assert.throws(() => validateBrainGraphInfo(source, 166700, { ...display, provenance: { graph_sha256: 'b'.repeat(64) } }), /身份不匹配/);
+  for (const edge_count of [0, -1, 1.5, '25582938']) assert.throws(() => validateBrainGraphInfo({ ...source, graph: { ...graph, edge_count } }, 166700, display), /身份不匹配/);
+});
+
+test('group overview shows recorded sensory activity even while the old default DN is silent', () => {
+  // First forward batch 13 from desktop-20261026-091042-38a5a08e:
+  // R16 L/R fired before ADVANCE STARTED, while all other recorded groups were silent.
+  const rates = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 53.41726618705036, 50.949227373068425, 0, 0, 0, 0, 0, 0, 0, 0];
+  assert.equal(groupActivityRate(rates, 0), 0);
+  assert.ok(Math.abs(groupActivityRate(rates, null) - 4.743931525459944) < 1e-12);
+  assert.equal(groupActivityRate(rates, 12), rates[12]);
+  assert.equal(groupActivityRate(Array(22).fill(0), null), 0);
+});
+
+test('group overview weights recorded groups equally and keeps missing data distinct from silence', () => {
+  // Even if groups overlap or differ in size, this is an arithmetic mean of group rates.
+  assert.equal(groupActivityRate([2, 8], null), 5);
+  assert.equal(groupActivityRate(null, null), undefined);
+  assert.equal(groupActivityRate([], null), undefined);
+  assert.equal(groupActivityRate([2, 8], -1), undefined);
+});
 
 test('one start prepares clean sessions without exposing an intermediate start button', () => {
   for (const state of ['idle', 'completed', 'cancelled', 'failed']) {
