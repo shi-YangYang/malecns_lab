@@ -67,7 +67,7 @@ Q 或 Escape 结束预览。也可使用 `--no-window` 保存而不显示画面�
 | 24–27 秒 | 从相近位置重复正面靠近 |
 | 27–30 秒 | 移出物体，保持静止 |
 
-这份安排只用于检查信号响应，不规定应左转、右转或上升。各阶段可记录在会话旁的实验笔记中；V2 不读取旧 `stimuli.csv` 区间表。需要独立片段时，按 [V2 分段协议](offline-research.md#model-v2-usage) 在分析前登记，并注意每段都重新预热 2 秒。
+这份安排只用于检查信号响应，不规定应左转、右转或上升。各阶段可记录在会话旁的实验笔记中；V2 不读取旧 `stimuli.csv` 区间表。需要独立片段时，按 [V2 分段协议](../research/offline.md#model-v2-usage) 在分析前登记，并注意每段都重新预热 2 秒。
 
 采集后可以断开 Tello，使用完整参考图反复重放：
 
@@ -77,9 +77,9 @@ python -m malecns_lab.diagnostics.replay_v2 \
   --stimulus-kind object_motion --out data/neural_v2/recording_01
 ```
 
-将 `SESSION` 换成实际会话目录，输出目录必须是新的。完整 [诊断与报告](offline-research.md#model-v2-usage) 不需要动作标签；若要运行冻结脑读出对照，按 [V2 标签与训练协议](offline-research.md#learning-v2) 独立标注。现有空白 `labels.csv` 只可经显式 `legacy_v1_intervals` 选项导入两轴标签；首选 V2 JSON 和支持掩码，不把未知轴写成已训练的零动作。不要将 shadow 的旧 RC、神经输出或实测速度自动当成期望动作。
+将 `SESSION` 换成实际会话目录，输出目录必须是新的。完整 [诊断与报告](../research/offline.md#model-v2-usage) 不需要动作标签；若要运行冻结脑读出对照，按 [V2 标签与训练协议](../research/offline.md#learning-v2) 独立标注。现有空白 `labels.csv` 只可经显式 `legacy_v1_intervals` 选项导入两轴标签；首选 V2 JSON 和支持掩码，不把未知轴写成已训练的零动作。不要将 shadow 的旧 RC、神经输出或实测速度自动当成期望动作。
 
-地面信号录像不能验证动作改变相机观察的闭环。三轴 SNN 目标跟随的[历史训练](../history.md#spec-008)不以这些静态录像替代仿真和实机闭环，也不因本手册存在而自动续训。
+地面信号录像不能验证动作改变相机观察的闭环。三轴 SNN 目标跟随的[历史训练](../../history.md#spec-008)不以这些静态录像替代仿真和实机闭环，也不因本手册存在而自动续训。
 
 ## 既有短时飞行工具
 

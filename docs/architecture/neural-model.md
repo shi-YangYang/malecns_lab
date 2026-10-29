@@ -1,13 +1,13 @@
 # 神经计算与策略接口
 
-本文说明可训练完整图的数值、输入与有状态读出契约。完整图资产见[数据模型](data-model.md)，训练与持久化见[训练手册](training.md)，实际阶段结果见 [Spec008 历史](../history.md#spec-008)。本文中的 API 示例不授权自动运行完整脑。
+本文说明可训练完整图的数值、输入与有状态读出契约。完整图资产见[数据模型](data-model.md)，训练与持久化见[训练手册](../research/training.md)，实际阶段结果见 [Spec008 历史](../../history.md#spec-008)。本文中的 API 示例不授权自动运行完整脑。
 
 <a id="trainable-snn"></a>
 ## 完整图可训练核心
 
 `brain.trainable.TrainableLIF` 的身份为 `cnsbridge.trainable_lif.v1`。生产 `from_reference` 必经完整参考图、注释与 provenance 校验，保留全部节点、边、自环和原始符号，不按活跃度裁剪。`for_numerical_test` 具有 `numerical_test_only` 身份，只供数值检查，不能成为缺图回退。
 
-独立训练环境为 `.venv-train`，依赖由项目 `train` extra 固定；不要改已有设备环境。CPU 核心允许 float32/float64，MPS 是单独身份的后端，见[GPU 训练](training.md#gpu-training)。数值 CPU 核心与已经删除的 CPU X2 仿真部署不是同一对象。
+独立训练环境为 `.venv-train`，依赖由项目 `train` extra 固定；不要改已有设备环境。CPU 核心允许 float32/float64，MPS 是单独身份的后端，见[GPU 训练](../research/training.md#gpu-training)。数值 CPU 核心与已经删除的 CPU X2 仿真部署不是同一对象。
 
 ```python
 import torch
@@ -142,4 +142,4 @@ state = result.state
 
 controller 不使用 observation 的误差/距离/有效性；外层 rollout 负责丢失目标保护，分别保存 raw、executed 与 intervention。`neural_time_ms` 含预处理，`control_time_s` 从场景 0 开始，未 reset 时均为 None。
 
-该类型检查不是研究角色的安全隔离器；研究图工厂产出的策略仍只能用于[离线研究](offline-research.md#research-policy)。状态和存档的真实身份必须匹配，不能因维数相同而交换 G/R 状态。API、数值检查、内部更新与合格设备控制是不同完成条件。
+该类型检查不是研究角色的安全隔离器；研究图工厂产出的策略仍只能用于[离线研究](../research/offline.md#research-policy)。状态和存档的真实身份必须匹配，不能因维数相同而交换 G/R 状态。API、数值检查、内部更新与合格设备控制是不同完成条件。

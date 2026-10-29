@@ -1,6 +1,29 @@
 # 架构与接口
 
-MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。V2 离线基线冻结连接组和神经元动力学，只训练输出读出；完整图内部增益与读出联合训练也已有实际运行，但训练执行完成不等于控制成功。当前产品入口为 [X2 桌面](../../apps/desktop/README.md)，研究结果统一见 [history.md](../../history.md)。
+MaleCNS Lab 将神经计算、行为读出、执行保护和设备控制分开。当前产品入口是 [X2 桌面](../../apps/desktop/README.md)，独立网页图谱与历史离线研究另有入口。以下描述当前源码职责；各版本的实际训练和动作结果统一见 [history.md](../../history.md)，不能将接口接通视为行为验收通过。
+
+## 当前 X2 桌面链路
+
+```text
+Electron 开始/停止与任务按钮
+  → runtime/x2/behavior：会话、候选、GPU 与进程管理
+  → learning/x2_behavior_session：请求、真实反馈、神经决策与收尾
+  → senses/x2_behavior：44 通道任务/身体/反馈工程编码
+  → learning/x2_frozen_history_policy：完整冻结脑与历史读出
+  → control/x2_* + experiments/x2_behavior_bridge：行为准入、官方技能及停稳
+  → AimDK / MC → MuJoCo X2 → 真实仿真状态反馈
+
+同一脑实例 → x2_behavior_telemetry / x2_neural_state
+  → 有界 JSON 与二进制旁文件 → Electron 身份/哈希校验
+  → src/neural-state.ts / brain.ts / workbench.ts → 全细胞状态与群组曲线
+```
+
+当前 B 候选读取 L1/L2 电流特征及历史，不能套用早期“1,314 DN / 2,628维输出”的设计描述。模型、编码、历史算法与参数身份由候选文件及来源快照约束；当前桌面配置在 `data/x2_behavior_desktop.json`，不随 Git 分发。其旧复合任务开发评分仍未达门槛，不把后续独立动作要求回写成旧成绩。
+
+桌面使用 continuous 会话与 automatic-start；开始后自动准备仿真并确认真实画面。主动作完成后执行层关闭同请求进一步技能准入，后台消费真实反馈并确认停稳；收尾可预选一项，准备完成后才发下一请求。“结束互动”入脑，顶部停止/关闭窗口是独立保护。官方 MC 承担平衡、步态与预设轨迹，执行层负责有界运动和目标/停稳判断。
+
+实时显示已扩到全部166,700个细胞的窗口平均V、ΔV、Hz；实际几何为674,411个原始来源点与21,952条抽样连接示意。节点亮度按ΔV，连接亮度按突触前Hz；零基线、柔光及平滑不是新神经测量。独立 `npm run brain` 仍是两个历史电流窗口的展示，没有机器人控制。
+
 
 ## 技术栈
 
@@ -17,7 +40,7 @@ MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。V2 离�
 
 本机私有 GPU 安装在 `data/x2_sim/gpu_probe/runtime-rebuild`。部署源码放 `deploy/x2`；新 Dockerfile 未重新构建验证，已有 GPU 安装的实测不能替代新部署验收。不得为本项目停止 Noria、重启 Docker 或切换默认 context。完整脑任务按当前授权与预算运行，至少保留 1 GiB 系统余量，不并行启动多个完整脑。
 
-## 信号诊断与控制链路
+## 独立诊断与历史设备链路
 
 ```text
 地面录像或标准刺激 → 工程视觉编码 → 完整 MaleCNS 参考图 → 神经活动与因果历史
@@ -30,7 +53,7 @@ MaleCNS Lab 将神经活动产生、动作学习和设备转换分开。V2 离�
                                               FlightCommand             WheelSpeeds
 ```
 
-`python -m malecns_lab.diagnostics.replay_v2` 记录输入、模拟神经活动、时间身份、覆盖和失败，不读取动作标签、不实例化旧读出、不连接硬件。`report_v2` 只读取已保存记录生成报告，不重复模拟脑。输入驱动 Hz 与实际放电 Hz 分开，缺失群组不作为静默群组统计。详见 [V2 完整脑诊断](../offline-research.md#model-v2-usage)。
+`python -m malecns_lab.diagnostics.replay_v2` 记录输入、模拟神经活动、时间身份、覆盖和失败，不读取动作标签、不实例化旧读出、不连接硬件。`report_v2` 只读取已保存记录生成报告，不重复模拟脑。输入驱动 Hz 与实际放电 Hz 分开，缺失群组不作为静默群组统计。详见 [V2 完整脑诊断](../research/offline.md#model-v2-usage)。
 
 `python -m malecns_lab.learning.train_v2` 根据独立期望动作和掩码拟合读出；基线神经活动缓存不能用于假装网络内部已经学习。适配器只转换数值，不发送硬件指令；这些学习产物尚未接入 Tello 实飞。V1 重复离线诊断和读出入口已移除，历史产物与来源标识仍保留。
 
@@ -56,9 +79,10 @@ deploy/x2/
   scripts/ keys/         GPU 容器脚本与公共签名材料
 tests/x2/                X2 子系统离线检查
 docs/
-  architecture/          工程结构、技术栈与接口
-  *.md                   按主题合并的使用与研究手册
-  tasks/（按需）         需要记录时每任务最多一份文档
+  architecture/          工程结构、数据契约与神经模型
+  guides/                独立图谱和历史 Tello 使用手册
+  research/              训练、离线实验与研究边界
+  tasks/（仅任务需要时创建） 每任务最多一份，阶段结果完成后精简归档
 configs/ examples/       配置与离线示例
 constitution/ .ai/prompts/  项目使命与精简交接
 history.md               已完成阶段与重要失败记录
@@ -77,7 +101,7 @@ data/ logs/              本地科研与运行资产，不入库
 | `tests/test_x2*.py` | `tests/x2/test_x2*.py` |
 | `deploy/x2/*.sh`（容器脚本）、`preset-compat.py` | `deploy/x2/scripts/` |
 
-旧阶段的实测命令和 hash 描述当时源码，已汇总到 [history.md](../../history.md)；从当前 checkout 操作时使用上表新入口。预设兼容工具本身的构建和动作验收仍未完成，移动位置不改变其资格。
+旧阶段的实测命令和 hash 描述当时源码，已汇总到 [history.md](../../history.md)；从当前 checkout 操作时使用上表新入口。预设兼容工具的构建、动作与取消验证分阶段记录在 history.md；目录迁移本身不改变其资格。
 
 | 模块 | 职责 |
 |---|---|
@@ -137,7 +161,7 @@ print(ground.adapt(motion).command)
 
 ## 冻结脑学习基线与来源
 
-`FeatureSchemaV2` 固定模型来源、特征顺序、表示和时间契约。`MaskedRidgeV2` 只拟合有监督的轴，返回 `supported_axes` 和 `prediction_valid`；无效结果和未训练轴不能当成有效动作。标准化只使用训练数据，验证集选参，测试集独立。完整用法见 [V2 学习工具](../offline-research.md#learning-v2)。
+`FeatureSchemaV2` 固定模型来源、特征顺序、表示和时间契约。`MaskedRidgeV2` 只拟合有监督的轴，返回 `supported_axes` 和 `prediction_valid`；无效结果和未训练轴不能当成有效动作。标准化只使用训练数据，验证集选参，测试集独立。完整用法见 [V2 学习工具](../research/offline.md#learning-v2)。
 
 图、参数、编码、特征顺序或时间身份变化后，必须重新生成相应活动；旧缓存不能冒充新网络的响应。模型与数据写入要求新路径，保留原图、录像、标签和运行记录。地面采集使用既有 `flydrones.ground_recording` 标识；V2 活动和读出有独立格式，不通过改名伪装兼容。
 
@@ -157,3 +181,6 @@ print(ground.adapt(motion).command)
 ```
 
 上述命令假定依赖和构建后端已安装。磁盘中的 `cnsbridge.*`、`flydrones.*` schema 和历史来源标识仍保留，不能机械替换存档字段。路径或源码变化会改变实验身份，格式可读不代表可以在新源码下精确续跑；复现旧实验需匹配的源码、环境与原始资产，不改写原 run 摘要绕过校验。Git、许可、模型、数据和日志独立保留。
+
+
+文档整理仍须遵守源码身份约束。`brain/trainable.py` 和 `senses/encoder.py` 的旧注释分别提到 `docs/TRAINABLE_SNN.md`、`docs/RESEARCH.md`，现在对应 `docs/architecture/neural-model.md`、`docs/research/boundaries.md`。前者的整文件哈希参与当前冻结 B 候选校验，因此保留源码原字节，不为更新注释而破坏既有模型准入，也不改写封存哈希。

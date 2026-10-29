@@ -27,7 +27,7 @@ LIF 参数参考 Shiu P. K. 等人的 *A Drosophila computational brain model re
 - [论文](https://www.nature.com/articles/s41586-024-07763-9)
 - [参考实现](https://github.com/philshiu/Drosophila_brain_model)
 
-神经群组、视觉编码与旧运动读出的参考见 [研究文档](docs/RESEARCH.md)。论文中的生物学发现与本项目的输入映射、读出、阈值和设备行为应分别说明。
+神经群组、视觉编码与旧运动读出的参考见 [研究文档](docs/research/boundaries.md)。论文中的生物学发现与本项目的输入映射、读出、阈值和设备行为应分别说明。
 
 ## 单独安装的依赖
 

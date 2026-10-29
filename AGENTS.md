@@ -14,7 +14,7 @@ multi_agent: AUTO
 
 - 基于完整 MaleCNS 神经模型控制智元 X2，沿官方 Sim + MC + AimDK 路线。旧 CPU 仿真部署已删除，只保留 GPU 部署。用户已重新授权多行为按钮排障、完整脑短训练及仿真点击验收，范围见当前交接；不把红目标前进/停止诊断当作主线。
 - 脑活动图谱与刺激响应保留；单轴稳向和目标跟随为历史研究，不作为接入 X2 的前置门槛。
-- 保留 Python src layout，以及 apps、deploy、tests、docs、configs、examples 的职责；constitution 存使命，.ai/prompts 存精简交接。旧 specs 已汇总至 history.md，不恢复多文档任务目录。
+- 保留 Python src layout，以及 apps、deploy、tests、docs、configs、examples 的职责；docs 按 guides、architecture、research 分类，constitution 存使命，.ai/prompts 存精简交接。旧 specs 和已结束阶段记录汇总至 history.md，不恢复多文档任务目录。
 - data/、logs/、模型、录像、运行环境和旧 run 的 sources 快照是科研资产；清理文档不授权删除这些资产。
 - 保留 LICENSE、THIRD_PARTY.md、原始来源及已有序列化契约。缺连接组时报错，不用 MiniFly 或合成网络回退。
 
@@ -56,7 +56,7 @@ multi_agent: AUTO
 
 ## 工程与安全
 
-遵循现有技术栈；不无故更换依赖、包管理器、锁文件或目录，不为拆分而建立空转发层。模块职责见[架构](docs/architecture/overview.md)，研究约束见[研究边界](docs/RESEARCH.md)。
+遵循现有技术栈；不无故更换依赖、包管理器、锁文件或目录，不为拆分而建立空转发层。模块职责见[架构](docs/architecture/overview.md)，研究约束见[研究边界](docs/research/boundaries.md)。
 
 - `learning → control`，control 不反向依赖 learning；brain/senses 负责神经计算与编码，runtime/x2 负责会话和 GPU 资源，experiments 保留设备实验及容器内协议。
 - `BodyVelocity` 使用 FLU `(vx, vy, vz, wx, wy, wz)`，平移 m/s、角速度 rad/s、正 wz 左转；旧 FlightCommand 横移/偏航正向右，转换属于适配器。目标值不能当作实测量。

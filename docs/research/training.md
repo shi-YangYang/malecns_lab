@@ -1,13 +1,13 @@
 # 训练数据、运行与恢复
 
-本手册收拢历史目标跟随训练工具的操作与存档契约；实际结果和未完成项统一见 [Spec008 历史](../history.md#spec-008)。它不是 X2 多行为按钮的验收说明，也不授权恢复已暂停的训练。
+本手册收拢历史目标跟随训练工具的操作与存档契约；实际结果和未完成项统一见 [Spec008 历史](../../history.md#spec-008)。它不是 X2 多行为按钮的验收说明，也不授权恢复已暂停的训练。
 
 所有命令从项目根目录执行，输出必须为新目录。旧 run、checkpoint 和 `sources` 快照按原来源保留：恢复要求匹配源码/运行时，不能用当前模块名改写旧身份或直接续接耗尽预算的 run。完整脑串行运行，保留 Noria/Docker；通常申请 6 GiB，按 `min(6 GiB, available−1 GiB)` 收紧，每段 600 秒、0.1 秒采样。具体登记优先，采样监督不是 OS 硬隔离。
 
 <a id="neural-training-data"></a>
 ## 仿真教师序列
 
-`learning.neural_data` 只运行[速度级标记环境](offline-research.md#follow-task)，不加载脑或设备。它固定收集按 ID 排序的四个 `train-sine-*` 完整场景，默认各 8 s/80 帧，不允许随机逐帧划分。
+`learning.neural_data` 只运行[速度级标记环境](offline.md#follow-task)，不加载脑或设备。它固定收集按 ID 排序的四个 `train-sine-*` 完整场景，默认各 8 s/80 帧，不允许随机逐帧划分。
 
 ```bash
 PYTHONPATH=src .venv-train/bin/python -m malecns_lab.learning.neural_data \

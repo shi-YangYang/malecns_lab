@@ -2,6 +2,8 @@
 
 浏览器 WebGL（Three.js）显示 MaleCNS 真实胞体位置与模拟神经群组活动。页面可查看已有刺激记录，或设置刺激运行完整脑。页面发起的实验使用现有固定 LIF 诊断模型。页面不启动训练和实体设备控制。前端依赖安装后从本地加载，不依赖 CDN 或外部大模型服务。
 
+本指南对应 `apps/atlas` 的独立刺激图谱；它与 `apps/desktop` 的全细胞在线脑控展示是不同入口、不同采集契约。
+
 ## 启动
 
 在项目根目录 `/Users/yang/project/malecns_lab` 执行：
@@ -66,6 +68,6 @@ npm run dev
 
 ## 后续接入
 
-本网页链路为 `刺激参数 → 完整固定模型计算 → 活动记录 → WebGL 回放`。[桌面应用](../apps/desktop/README.md)另行接入官方 X2 GPU 仿真与同次脑遥测；当前多行为按钮尚未验收。历史神经响应与单轴失败结果见 [history.md](../history.md)。
+本网页链路为 `刺激参数 → 完整固定模型计算 → 活动记录 → WebGL 回放`。[桌面应用](../../apps/desktop/README.md)另行接入官方 X2 GPU 仿真与同次脑遥测；已有有限次数的多行为仿真记录，尚未通过全部连续组合与长期验收。历史神经响应与单轴失败结果见 [history.md](../../history.md)。
 
-展示与交互历史见 [图谱阶段](../history.md#spec-010)、[完整脑响应阶段](../history.md#spec-011)。原始数据来源与许可见 [THIRD_PARTY](../THIRD_PARTY.md)。
+展示与交互历史见 [图谱阶段](../../history.md#spec-010)、[完整脑响应阶段](../../history.md#spec-011)。原始数据来源与许可见 [THIRD_PARTY](../../THIRD_PARTY.md)。

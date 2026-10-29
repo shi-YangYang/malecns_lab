@@ -13,4 +13,4 @@
 - 保留数据许可、原始身份和失败证据；缺连接组资产时报错，不提供合成网络回退。
 - 不因装载真实图或完成训练而声称生物还原、可靠控制、连接组优势或跨设备泛化；论文贡献需要独立实验。
 
-当前状态与未完成工作见[交接](../.ai/prompts/task-handoff.md)，阶段结果与路线变化见 [history.md](../history.md)。工程边界见[架构](../docs/architecture/overview.md)，科学约束见[研究边界](../docs/RESEARCH.md)。
+当前状态与未完成工作见[交接](../.ai/prompts/task-handoff.md)，阶段结果与路线变化见 [history.md](../history.md)。工程边界见[架构](../docs/architecture/overview.md)，科学约束见[研究边界](../docs/research/boundaries.md)。

@@ -1,13 +1,13 @@
 # 离线诊断与研究工具
 
-本手册保留 V2 冻结脑、可训练脑可观测性、拓扑对照和标记跟随评估的操作契约。它们是历史研究工具，不是 X2 主线前置门槛；完整脑实验仍按用户当前授权执行。阶段成绩统一见 [Spec007](../history.md#spec-007) 与 [Spec008](../history.md#spec-008)，不在手册重复验收流水。
+本手册保留 V2 冻结脑、可训练脑可观测性、拓扑对照和标记跟随评估的操作契约。它们是历史研究工具，不是 X2 主线前置门槛；完整脑实验仍按用户当前授权执行。阶段成绩统一见 [Spec007](../../history.md#spec-007) 与 [Spec008](../../history.md#spec-008)，不在手册重复验收流水。
 
 命令从项目根目录执行，源码未 editable 安装时加 `PYTHONPATH=src`。每次登记/报告使用新输出路径，不覆盖失败现场。旧 run 与 checkpoint 绑定原源码/运行时；保持其 `sources` 快照，不改哈希冒充兼容。完整图计算串行、受资源监督，不调整 Noria/Docker，不连接设备。
 
 <a id="model-v2-usage"></a>
 ## V2 完整脑重放
 
-资产构建和因果/失效语义见[数据模型](data-model.md)。`diagnostics.replay_v2` 不读动作标签或旧 MotorDecoder，只记录显式视觉输入与完整图活动。
+资产构建和因果/失效语义见[数据模型](../architecture/data-model.md)。`diagnostics.replay_v2` 不读动作标签或旧 MotorDecoder，只记录显式视觉输入与完整图活动。
 
 ```bash
 .venv/bin/python -m malecns_lab.diagnostics.replay_v2 \

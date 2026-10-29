@@ -1,6 +1,6 @@
 # 连接组数据与模型契约
 
-本文统一记录完整 MaleCNS 参考资产、数据身份和 V2 离线模型的约定。可训练 LIF 与全 DN 策略见[神经计算](TRAINABLE_SNN.md)，运行入口见[离线研究](offline-research.md)。审计过程与阶段结果见 [Spec006](../history.md#spec-006) 和 [Spec007](../history.md#spec-007)。
+本文统一记录完整 MaleCNS 参考资产、数据身份和 V2 离线模型的约定。可训练 LIF 与全 DN 策略见[神经计算](neural-model.md)，运行入口见[离线研究](../research/offline.md)。审计过程与阶段结果见 [Spec006](../../history.md#spec-006) 和 [Spec007](../../history.md#spec-007)。
 
 <a id="male-cns-audit"></a>
 ## 官方来源与审计边界
